@@ -44,6 +44,7 @@ func Register(s *ghttp.Server, d *module.Deps) {
 		v1.Group("/member", func(member *ghttp.RouterGroup) {
 			member.Middleware(d.MW.Authentication(), d.MW.Authorization())
 			module.RegisterMemberNotification(d, member)
+			module.RegisterPortal(d, member)
 			// [member-modules]
 		})
 

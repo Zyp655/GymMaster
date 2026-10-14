@@ -28,7 +28,7 @@ type (
 	// JobRepository: truy vấn phục vụ job định kỳ và API xem lịch sử chạy job.
 	JobRepository interface {
 		DBNow(ctx context.Context) (time.Time, error)
-		// ExpiredNotices: gói có sự kiện EXPIRED do hệ thống (actor NULL, không phải khôi phục) từ mốc since
+		// ExpiredNotices: gói có sự kiện EXPIRED (không phải khôi phục gói cũ) từ mốc since
 		// và hội viên chưa có gói khác còn hiệu lực/kế tiếp.
 		ExpiredNotices(ctx context.Context, since time.Time) ([]JobExpiredNotice, error)
 		// DeleteStaleRefreshTokens xóa refresh token hết hạn hoặc bị thu hồi trước mốc before.
@@ -62,7 +62,7 @@ JOIN subscriptions s ON s.id = e.subscription_id
 JOIN members m ON m.id = s.member_id AND m.deleted_at IS NULL
 JOIN membership_plans p ON p.id = s.plan_id
 JOIN branches b ON b.id = s.branch_id
-WHERE e.event_type = 'EXPIRED' AND e.actor_id IS NULL AND e.created_at >= ?
+WHERE e.event_type = 'EXPIRED' AND e.created_at >= ?
   AND e.data->>'restored' IS NULL
   AND s.status = 'EXPIRED'
   AND NOT EXISTS (SELECT 1 FROM subscriptions n WHERE n.member_id = s.member_id AND n.id <> s.id

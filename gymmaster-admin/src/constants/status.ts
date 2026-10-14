@@ -72,3 +72,33 @@ const toOptions = (map: Record<string, StatusMeta>) =>
 export const SUBSCRIPTION_STATUS_OPTIONS = toOptions(SUBSCRIPTION_STATUS_MAP);
 export const FREEZE_STATUS_OPTIONS = toOptions(FREEZE_STATUS_MAP);
 export const INVOICE_STATUS_OPTIONS = toOptions(INVOICE_STATUS_MAP);
+
+/* ------------------------------------------------ POS & kho (docs/api/pos-inventory.md) */
+
+/** Trạng thái sản phẩm. */
+export const PRODUCT_STATUS_MAP: Record<string, StatusMeta> = {
+  ACTIVE: { label: 'Đang kinh doanh', color: 'green' },
+  INACTIVE: { label: 'Ngừng kinh doanh', color: 'default' },
+};
+
+/** Loại biến động thẻ kho (`stock_transactions.type`). */
+export const STOCK_TX_TYPE_MAP: Record<string, StatusMeta> = {
+  IMPORT: { label: 'Nhập hàng', color: 'green' },
+  SALE: { label: 'Bán hàng', color: 'blue' },
+  SALE_RETURN: { label: 'Trả hàng/hủy đơn', color: 'purple' },
+  TRANSFER_IN: { label: 'Nhận điều chuyển', color: 'cyan' },
+  TRANSFER_OUT: { label: 'Xuất điều chuyển', color: 'orange' },
+  ADJUST: { label: 'Kiểm kê', color: 'gold' },
+};
+
+/** Loại phiếu kho (`voucher.kind`). */
+export const VOUCHER_KIND_MAP: Record<string, StatusMeta> = {
+  IMPORT: { label: 'Phiếu nhập', color: 'green' },
+  TRANSFER: { label: 'Phiếu điều chuyển', color: 'cyan' },
+  ADJUST: { label: 'Phiếu kiểm kê', color: 'gold' },
+  SALE: { label: 'Hóa đơn bán', color: 'blue' },
+  SALE_RETURN: { label: 'Phiếu trả hàng', color: 'purple' },
+};
+
+export const PRODUCT_STATUS_OPTIONS = toOptions(PRODUCT_STATUS_MAP);
+export const STOCK_TX_TYPE_OPTIONS = toOptions(STOCK_TX_TYPE_MAP);

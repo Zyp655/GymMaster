@@ -7,10 +7,14 @@ export function openInvoicePrint(invoiceId: number) {
   window.open(`${invoicePrintUrl(invoiceId)}?auto=1`, '_blank', 'noopener');
 }
 
-/** "Còn lại" của gói: số ngày (và số buổi với gói theo buổi). */
+/** "Còn lại" của gói: số ngày (và số buổi với gói theo buổi); gói đã kết thúc → "—". */
 export function remainingText(
-  s: Pick<Subscription, 'days_left' | 'remaining_sessions' | 'plan_type' | 'total_sessions'>,
+  s: Pick<
+    Subscription,
+    'status' | 'days_left' | 'remaining_sessions' | 'plan_type' | 'total_sessions'
+  >,
 ): string {
+  if (!isLiveSubscription(s)) return '—';
   const parts: string[] = [];
   if (s.days_left !== null && s.days_left !== undefined) parts.push(`${s.days_left} ngày`);
   if (s.plan_type === 'SESSION' && s.remaining_sessions !== null)
@@ -19,8 +23,9 @@ export function remainingText(
 }
 
 /** Gói còn hiệu lực (chưa kết thúc). */
-export const isLiveSubscription = (s: Pick<Subscription, 'status'>) =>
-  s.status === 'PENDING' || s.status === 'ACTIVE' || s.status === 'FROZEN';
+export function isLiveSubscription(s: Pick<Subscription, 'status'>) {
+  return s.status === 'PENDING' || s.status === 'ACTIVE' || s.status === 'FROZEN';
+}
 
 /**
  * Hạn mức bảo lưu còn lại = tối đa − (đã áp dụng + yêu cầu đang chờ/đã duyệt chưa áp).
@@ -40,3 +45,6 @@ export function freezeQuota(sub: SubscriptionDetail) {
     timesLeft: Math.max(0, sub.plan.max_freeze_times - usedTimes),
   };
 }
+
+/** Cột Descriptions: 1 cột trên điện thoại, 2 cột từ `sm` trở lên (antd mặc định 3 ở md+). */
+export const DESC_COLUMNS = { xs: 1, sm: 2, md: 2, lg: 2, xl: 2, xxl: 2 };

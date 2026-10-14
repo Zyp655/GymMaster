@@ -24,6 +24,7 @@ import type { PaymentFormValues } from './payment';
 import PlanCards from './PlanCards';
 import SaleResult from './SaleResult';
 import { useUpgradeSubscription } from './queries';
+import { DESC_COLUMNS } from './utils';
 
 export interface UpgradeModalProps {
   open: boolean;
@@ -138,7 +139,7 @@ export default function UpgradeModal({ open, sub, onClose }: UpgradeModalProps) 
                 <Descriptions
                   size="small"
                   bordered
-                  column={{ xs: 1, sm: 2 }}
+                  column={DESC_COLUMNS}
                   items={[
                     {
                       key: 'cur',

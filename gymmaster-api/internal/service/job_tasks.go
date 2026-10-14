@@ -61,6 +61,14 @@ const (
 
 func jobFmtDate(t time.Time) string { return t.Format("02/01/2006") }
 
+// jobPlanLabel: "Gói 3 tháng" giữ nguyên, "Premium" → "Gói Premium" (tránh lặp chữ "Gói").
+func jobPlanLabel(name string) string {
+	if strings.HasPrefix(strings.ToLower(name), "gói") {
+		return name
+	}
+	return "Gói " + name
+}
+
 // ExpireSubscriptions (00:05): gói hết hạn → EXPIRED (+ hủy PENDING quá hạn thanh toán),
 // rồi báo SUBSCRIPTION_EXPIRED cho hội viên có tài khoản cổng và chưa có gói mới.
 func (t *JobTasks) ExpireSubscriptions(ctx context.Context) (int, error) {
@@ -78,8 +86,8 @@ func (t *JobTasks) ExpireSubscriptions(ctx context.Context) (int, error) {
 		if nt.MemberUserID == nil {
 			continue
 		}
-		body := fmt.Sprintf("Gói %s của bạn đã hết hạn ngày %s. Liên hệ lễ tân %s để gia hạn.",
-			nt.PlanName, jobFmtDate(nt.EndDate), nt.BranchName)
+		body := fmt.Sprintf("%s của bạn đã hết hạn ngày %s. Liên hệ lễ tân %s để gia hạn.",
+			jobPlanLabel(nt.PlanName), jobFmtDate(nt.EndDate), nt.BranchName)
 		if err := t.notifier.Notify(ctx, []uint{*nt.MemberUserID}, NotifySubscriptionExpired,
 			"Gói tập đã hết hạn", body, jobMemberSubsLink); err != nil && notifyErr == nil {
 			notifyErr = err
@@ -115,8 +123,8 @@ func (t *JobTasks) RemindExpiring(ctx context.Context) (int, error) {
 			when = "hết hạn hôm nay"
 		}
 		if r.MemberUserID != nil {
-			body := fmt.Sprintf("Gói %s của bạn sẽ hết hạn vào %s (%s). Gia hạn sớm để không gián đoạn tập luyện.",
-				r.PlanName, jobFmtDate(r.EndDate), when)
+			body := fmt.Sprintf("%s của bạn sẽ hết hạn vào %s (%s). Gia hạn sớm để không gián đoạn tập luyện.",
+				jobPlanLabel(r.PlanName), jobFmtDate(r.EndDate), when)
 			keep(t.notifier.Notify(ctx, []uint{*r.MemberUserID}, NotifySubscriptionExpiring, "Gói tập sắp hết hạn", body, jobMemberSubsLink))
 		}
 		if email := strings.TrimSpace(r.MemberEmail); email != "" && t.mail != nil {
@@ -129,7 +137,7 @@ func (t *JobTasks) RemindExpiring(ctx context.Context) (int, error) {
 				continue
 			}
 			t.mail.SendAsync(mailer.Message{
-				To: []string{email}, Subject: fmt.Sprintf("[GymMaster] Gói %s sắp hết hạn (%s)", r.PlanName, when), HTML: html,
+				To: []string{email}, Subject: fmt.Sprintf("[GymMaster] %s sắp hết hạn (%s)", jobPlanLabel(r.PlanName), when), HTML: html,
 			})
 		}
 	}

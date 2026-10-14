@@ -127,7 +127,7 @@ func (r *Runner) NextBySpec(spec string) *time.Time {
 
 // Run chạy job ngay (đồng bộ) và trả bản ghi job_runs. Lỗi của job nằm trong run.Status/Message,
 // error trả về chỉ dành cho: không tìm thấy job, đang chạy, lỗi hạ tầng (ghi job_runs, khóa).
-func (r *Runner) Run(ctx context.Context, name string) (*entity.JobRun, error) {
+func (r *Runner) Run(_ context.Context, name string) (*entity.JobRun, error) {
 	job, ok := r.reg.Get(name)
 	if !ok {
 		return nil, ErrJobNotFound
@@ -138,8 +138,9 @@ func (r *Runner) Run(ctx context.Context, name string) (*entity.JobRun, error) {
 	}
 	defer m.Unlock()
 
-	// Tách khỏi vòng đời request (client ngắt kết nối không làm job dừng giữa chừng).
-	base := context.WithoutCancel(ctx)
+	// Job luôn chạy với tư cách "hệ thống": context mới, không mang thông tin đăng nhập của request
+	// (actor_id = NULL trong audit/subscription_events) và không bị hủy khi client ngắt kết nối.
+	base := context.Background()
 	release, locked, err := r.store.TryLock(base, name)
 	if err != nil {
 		return nil, err

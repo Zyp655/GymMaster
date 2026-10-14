@@ -290,7 +290,11 @@ func (s ReportScope) args(extra map[string]any) map[string]any {
 }
 
 func (r *reportRepository) raw(ctx context.Context, dest any, q string, args map[string]any) error {
-	return postgres.Conn(ctx, r.db).Raw(reportSQL(q), args).Scan(dest).Error
+	q = reportSQL(q)
+	if !strings.Contains(q, "@") { // không có tham số đặt tên (vd. không lọc chi nhánh) → không truyền map
+		return postgres.Conn(ctx, r.db).Raw(q).Scan(dest).Error
+	}
+	return postgres.Conn(ctx, r.db).Raw(q, args).Scan(dest).Error
 }
 
 func (r *reportRepository) BranchNames(ctx context.Context) (map[uint]string, error) {
@@ -368,7 +372,7 @@ SELECT rev.*,
 	(SELECT count(*) FROM members m WHERE m.deleted_at IS NULL AND m.created_at >= @month_start AND m.created_at < @tomorrow` + reportBranch("m.home_branch_id", b) + `) AS new_members_month,
 	(SELECT count(*) FROM members m WHERE m.deleted_at IS NULL AND m.created_at >= @prev_month_start AND m.created_at < @month_start` + reportBranch("m.home_branch_id", b) + `) AS new_members_prev_month,
 	(SELECT count(DISTINCT s.member_id) FROM subscriptions s JOIN members m ON m.id = s.member_id AND m.deleted_at IS NULL
-	  WHERE s.status = 'ACTIVE' AND s.end_date BETWEEN @today::date AND @today7::date` + reportBranch("s.branch_id", b) + `
+	  WHERE s.status = 'ACTIVE' AND s.end_date BETWEEN CAST(@today AS date) AND CAST(@today7 AS date)` + reportBranch("s.branch_id", b) + `
 	  AND NOT EXISTS (SELECT 1 FROM subscriptions n WHERE n.member_id = s.member_id AND n.id <> s.id
 	      AND n.status IN ('PENDING','ACTIVE','FROZEN') AND n.end_date > s.end_date)) AS expiring_7d,
 	(SELECT count(*) FROM checkins c WHERE c.result = 'ALLOWED' AND c.checked_in_at >= @today_start AND c.checked_in_at < @tomorrow` + reportBranch("c.branch_id", b) + `) AS checkins_today,
@@ -410,7 +414,7 @@ LIMIT @limit`
 func (r *reportRepository) NewMemberSeries(ctx context.Context, s ReportScope, unit string) ([]ReportCountRow, error) {
 	q := `
 SELECT to_char(g.b, 'YYYY-MM-DD') AS bucket, COALESCE(x.cnt, 0) AS count
-FROM generate_series(date_trunc(@unit, @from_date::timestamp), @to_date::timestamp, ('1 ' || @unit)::interval) AS g(b)
+FROM generate_series(date_trunc(@unit, CAST(@from_date AS timestamp)), CAST(@to_date AS timestamp), ('1 ' || @unit)::interval) AS g(b)
 LEFT JOIN (
 	SELECT date_trunc(@unit, m.created_at AT TIME ZONE {tz}) AS k, count(*) AS cnt
 	FROM members m
@@ -482,18 +486,18 @@ WITH ended AS (
 			WHERE n.member_id = s.member_id AND n.id <> s.id
 			  AND n.status IN ('ACTIVE','FROZEN','EXPIRED','TRANSFERRED')
 			  AND n.end_date > s.end_date
-			  AND n.created_at < ((s.end_date + @window + 1)::timestamp AT TIME ZONE {tz})
+			  AND n.created_at < ((s.end_date + CAST(@window AS int) + 1)::timestamp AT TIME ZONE {tz})
 		) AS renewed
 	FROM subscriptions s
 	JOIN members m ON m.id = s.member_id AND m.deleted_at IS NULL
 	WHERE s.status IN ('ACTIVE','FROZEN','EXPIRED')
-	  AND s.end_date BETWEEN @from_date::date AND @to_date::date
-	  AND s.end_date < @today::date` + reportBranch("s.branch_id", s.BranchIDs) + `
+	  AND s.end_date BETWEEN CAST(@from_date AS date) AND CAST(@to_date AS date)
+	  AND s.end_date < CAST(@today AS date)` + reportBranch("s.branch_id", s.BranchIDs) + `
 )
 SELECT month,
 	count(DISTINCT member_id) AS expired,
 	count(DISTINCT member_id) FILTER (WHERE renewed) AS renewed,
-	count(DISTINCT member_id) FILTER (WHERE NOT renewed AND end_date + @window >= @today::date) AS pending
+	count(DISTINCT member_id) FILTER (WHERE NOT renewed AND end_date + CAST(@window AS int) >= CAST(@today AS date)) AS pending
 FROM ended
 GROUP BY GROUPING SETS ((month), ())
 ORDER BY month NULLS LAST`
@@ -518,7 +522,7 @@ GROUP BY 1, 2`
 func (r *reportRepository) CheckinDaily(ctx context.Context, s ReportScope) ([]ReportCountRow, error) {
 	q := `
 SELECT to_char(g.d, 'YYYY-MM-DD') AS bucket, COALESCE(x.cnt, 0) AS count
-FROM generate_series(@from_date::date, @to_date::date, interval '1 day') AS g(d)
+FROM generate_series(CAST(@from_date AS date), CAST(@to_date AS date), interval '1 day') AS g(d)
 LEFT JOIN (
 	SELECT (c.checked_in_at AT TIME ZONE {tz})::date AS day, count(*) AS cnt
 	FROM checkins c

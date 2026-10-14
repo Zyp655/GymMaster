@@ -33,7 +33,7 @@ export interface MemberTabDef {
 const OverviewTab = lazy(() => import('./OverviewTab'));
 const MetricsTab = lazy(() => import('./MetricsTab'));
 const CheckinHistoryTab = lazy(() => import('./CheckinHistoryTab'));
-const MemberBookingsTab = lazy(() => import('@/routes/classes/MemberBookingsTab'));
+const MemberClassPtTab = lazy(() => import('@/routes/pt/MemberClassPtTab'));
 const MemberSubscriptionsTab = lazy(() => import('@/routes/subscriptions/MemberSubscriptionsTab'));
 const MemberInvoicesTab = lazy(() => import('@/routes/invoices/MemberInvoicesTab'));
 
@@ -64,7 +64,7 @@ const tabs: MemberTabDef[] = [
     label: 'Lớp & PT',
     perm: [PERM.CLASS_VIEW, PERM.BOOKING_MANAGE, PERM.PT_VIEW],
     order: 40,
-    render: (m) => <MemberBookingsTab memberId={m.id} />,
+    render: (m) => <MemberClassPtTab member={m} />,
   },
   {
     key: 'checkins',

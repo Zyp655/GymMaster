@@ -52,14 +52,14 @@ Email được gửi tự động từ hệ thống GymMaster, vui lòng không 
 var templates = map[string]string{
 	TplSubscriptionExpiring: `{{define "title"}}Gói tập sắp hết hạn{{end}}{{define "body"}}
 <p>Xin chào <strong>{{.MemberName}}</strong>,</p>
-<p>Gói tập <strong>{{.PlanName}}</strong>{{if .BranchName}} tại <strong>{{.BranchName}}</strong>{{end}} của bạn sẽ hết hạn vào ngày
+<p>Gói tập của bạn – <strong>{{.PlanName}}</strong>{{if .BranchName}} tại <strong>{{.BranchName}}</strong>{{end}} – sẽ hết hạn vào ngày
 <strong>{{.EndDate}}</strong>{{if gt .DaysLeft 0}} (còn {{.DaysLeft}} ngày){{else}} (hôm nay){{end}}.</p>
 <p>Hãy gia hạn sớm tại quầy lễ tân hoặc trên cổng hội viên để việc tập luyện không bị gián đoạn.</p>
 <p>Cảm ơn bạn đã đồng hành cùng GymMaster!</p>{{end}}`,
 
 	TplSubscriptionExpired: `{{define "title"}}Gói tập đã hết hạn{{end}}{{define "body"}}
 <p>Xin chào <strong>{{.MemberName}}</strong>,</p>
-<p>Gói tập <strong>{{.PlanName}}</strong>{{if .BranchName}} tại <strong>{{.BranchName}}</strong>{{end}} của bạn đã hết hạn ngày <strong>{{.EndDate}}</strong>.</p>
+<p>Gói tập của bạn – <strong>{{.PlanName}}</strong>{{if .BranchName}} tại <strong>{{.BranchName}}</strong>{{end}} – đã hết hạn ngày <strong>{{.EndDate}}</strong>.</p>
 <p>Liên hệ lễ tân để được tư vấn gói tập phù hợp và ưu đãi gia hạn.</p>{{end}}`,
 
 	TplGeneric: `{{define "title"}}{{.Title}}{{end}}{{define "body"}}

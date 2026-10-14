@@ -1,11 +1,14 @@
 package module
 
 import (
+	"context"
 	"sync"
+	"time"
 
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	ptctrl "gymmaster-api/internal/controller/pt"
+	"gymmaster-api/internal/cron"
 	"gymmaster-api/internal/repository"
 	"gymmaster-api/internal/service"
 )
@@ -33,5 +36,19 @@ func PTServiceOf(d *Deps) service.PTService {
 
 // RegisterPT: huấn luyện cá nhân – hợp đồng PT, buổi PT, lịch dạy HLV, hoa hồng (/v1/admin).
 func RegisterPT(d *Deps, admin *ghttp.RouterGroup) {
-	admin.Bind(ptctrl.NewV1(PTServiceOf(d)))
+	pt := PTServiceOf(d)
+	admin.Bind(ptctrl.NewV1(pt))
+
+	cron.Register(cron.Job{
+		Name:        "expire_pt_contracts",
+		Spec:        "15 0 * * *",
+		Description: "Chuyển hợp đồng PT quá hạn sang EXPIRED, hủy các buổi đã đặt sau hạn",
+		Run:         func(ctx context.Context) (int, error) { return pt.ExpireContracts(ctx, time.Now()) },
+	})
+	cron.Register(cron.Job{
+		Name:        "mark_pt_no_shows",
+		Spec:        "*/30 * * * *",
+		Description: "Đánh dấu buổi PT quá giờ mà chưa xác nhận để quản lý xử lý",
+		Run:         func(ctx context.Context) (int, error) { return pt.MarkPTNoShows(ctx, time.Now()) },
+	})
 }

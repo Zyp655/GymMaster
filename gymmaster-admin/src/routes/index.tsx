@@ -42,6 +42,9 @@ const SubscriptionFreezes = lazy(() => import('./subscription-freezes'));
 const Invoices = lazy(() => import('./invoices'));
 const InvoiceDetail = lazy(() => import('./invoices/detail'));
 const Payments = lazy(() => import('./payments'));
+const PtContracts = lazy(() => import('./pt/ContractsPage'));
+const PtSessions = lazy(() => import('./pt/SessionsPage'));
+const Commissions = lazy(() => import('./pt/CommissionsPage'));
 
 export const routes: AppRoute[] = [
   { path: 'dashboard', element: page(Dashboard) },
@@ -70,9 +73,9 @@ export const routes: AppRoute[] = [
     perm: [PERM.CLASS_VIEW, PERM.BOOKING_MANAGE],
   },
   { path: 'class-types', element: page(ClassTypes), perm: [PERM.CLASS_VIEW] },
-  { path: 'pt-contracts', element: soon('Hợp đồng PT'), perm: [PERM.PT_VIEW, PERM.PT_SELL] },
-  { path: 'pt-sessions', element: soon('Lịch PT'), perm: [PERM.PT_VIEW, PERM.PT_SCHEDULE] },
-  { path: 'commissions', element: soon('Hoa hồng HLV'), perm: [PERM.COMMISSION_VIEW] },
+  { path: 'pt-contracts', element: page(PtContracts), perm: [PERM.PT_VIEW, PERM.PT_SELL] },
+  { path: 'pt-sessions', element: page(PtSessions), perm: [PERM.PT_VIEW, PERM.PT_SCHEDULE] },
+  { path: 'commissions', element: page(Commissions), perm: [PERM.COMMISSION_VIEW] },
 
   // Tài chính
   { path: 'invoices', element: page(Invoices), perm: [PERM.INVOICE_VIEW] },

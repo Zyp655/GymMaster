@@ -2,6 +2,7 @@ import { Alert, Descriptions, Tag, Typography } from 'antd';
 import type { QuoteResult } from '@/api/subscription';
 import MoneyText from '@/components/Money/MoneyText';
 import { formatDate } from '@/utils/format';
+import { DESC_COLUMNS } from './utils';
 
 /** Bảng tóm tắt báo giá (bán gói / gia hạn): thời gian, giá, giảm, tổng. */
 export default function QuoteSummary({ quote }: { quote: QuoteResult }) {
@@ -18,12 +19,12 @@ export default function QuoteSummary({ quote }: { quote: QuoteResult }) {
       <Descriptions
         size="small"
         bordered
-        column={{ xs: 1, sm: 2 }}
+        column={DESC_COLUMNS}
         items={[
           {
             key: 'plan',
             label: 'Gói tập',
-            span: { xs: 1, sm: 2 },
+            span: 'filled' as const,
             children: (
               <>
                 <span className="code-text">{quote.plan.code}</span> {quote.plan.name}
@@ -37,7 +38,7 @@ export default function QuoteSummary({ quote }: { quote: QuoteResult }) {
                 {
                   key: 'sessions',
                   label: 'Số buổi',
-                  span: { xs: 1, sm: 2 },
+                  span: 'filled' as const,
                   children: `${quote.total_sessions} buổi`,
                 },
               ]
@@ -62,7 +63,7 @@ export default function QuoteSummary({ quote }: { quote: QuoteResult }) {
           {
             key: 'total',
             label: 'Tổng thanh toán',
-            span: { xs: 1, sm: 2 },
+            span: 'filled' as const,
             children: (
               <Typography.Text strong style={{ fontSize: 18, color: '#F97316' }}>
                 <MoneyText value={quote.total} />

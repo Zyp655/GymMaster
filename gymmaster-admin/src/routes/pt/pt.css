@@ -1,0 +1,21 @@
+/* PT – bổ sung cho lưới tuần dùng chung (routes/classes/classes.css). */
+
+.wc-event.pt-readonly {
+  border-style: dashed;
+  border-color: rgba(15, 23, 42, 0.25);
+  border-left-style: solid;
+  box-shadow: none;
+}
+
+.pt-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+.pt-legend-dot.is-dashed {
+  border: 1px dashed #6b7280;
+}

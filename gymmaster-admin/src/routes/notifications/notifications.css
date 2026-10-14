@@ -1,0 +1,90 @@
+/* Thông báo: chuông header + trang danh sách */
+
+.notif-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.notif-pop {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+}
+
+.notif-pop .notif-head {
+  padding: 4px 4px 8px;
+  border-bottom: 1px solid #eceff3;
+}
+
+.notif-pop .notif-foot {
+  border-top: 1px solid #eceff3;
+  padding-top: 6px;
+  text-align: center;
+}
+
+.notif-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.notif-row__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.notif-row__title {
+  font-weight: 600;
+  color: #111827;
+  line-height: 20px;
+}
+
+.notif-item--unread .notif-row__title::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #f97316;
+  vertical-align: middle;
+}
+
+.notif-row__body {
+  color: #4b5563;
+  font-size: 12.5px;
+  line-height: 18px;
+  white-space: pre-line;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.notif-row__body--full {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+
+.notif-row__time {
+  color: #9ca3af;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.notif-page-item {
+  cursor: pointer;
+  padding: 12px !important;
+  border-radius: 10px;
+}
+
+.notif-page-item:hover {
+  background: #f5f7fa;
+}
+
+.notif-page-item.notif-item--unread {
+  background: #fff7ed;
+}

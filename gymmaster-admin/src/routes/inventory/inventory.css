@@ -1,0 +1,13 @@
+/* Kho hàng – phiếu nhiều dòng, kiểm kê. */
+.voucher-line__amount {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-height: 32px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.adjust-row--diff > td {
+  background: #fffbe6 !important;
+}

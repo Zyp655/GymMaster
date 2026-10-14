@@ -45,7 +45,7 @@ import FreezeModal from './FreezeModal';
 import RenewModal from './RenewModal';
 import TransferModal from './TransferModal';
 import UpgradeModal from './UpgradeModal';
-import { openInvoicePrint, remainingText } from './utils';
+import { DESC_COLUMNS, openInvoicePrint, remainingText } from './utils';
 
 type ModalKey = 'renew' | 'upgrade' | 'freeze' | 'transfer' | 'cancel' | 'collect' | null;
 
@@ -126,8 +126,8 @@ function ActionButtons({
   const { can } = usePermission();
   const st = sub.status;
   const live = st === 'ACTIVE' || st === 'FROZEN';
-  return (
-    <Space wrap size={8}>
+  const buttons = (
+    <>
       {can(PERM.SUBSCRIPTION_SELL) && (live || st === 'EXPIRED') && (
         <Button
           color="orange"
@@ -163,8 +163,19 @@ function ActionButtons({
           Hủy gói
         </Button>
       )}
-    </Space>
+    </>
   );
+  // Không có nút nào (gói đã kết thúc / thiếu quyền) → không chiếm chỗ.
+  const hasAny =
+    (can(PERM.SUBSCRIPTION_SELL) && (live || st === 'EXPIRED')) ||
+    (can(PERM.INVOICE_COLLECT) && !!sub.invoice && canCollect(sub.invoice)) ||
+    (can(PERM.SUBSCRIPTION_CANCEL) && (live || st === 'PENDING')) ||
+    (st === 'ACTIVE' && can([PERM.SUBSCRIPTION_FREEZE, PERM.SUBSCRIPTION_TRANSFER]));
+  return hasAny ? (
+    <Space wrap size={8}>
+      {buttons}
+    </Space>
+  ) : null;
 }
 
 function DrawerBody({ sub, onOpen }: { sub: SubscriptionDetail; onOpen: (k: ModalKey) => void }) {
@@ -176,12 +187,12 @@ function DrawerBody({ sub, onOpen }: { sub: SubscriptionDetail; onOpen: (k: Moda
       <Descriptions
         size="small"
         bordered
-        column={{ xs: 1, sm: 2 }}
+        column={DESC_COLUMNS}
         items={[
           {
             key: 'member',
             label: 'Hội viên',
-            span: { xs: 1, sm: 2 },
+            span: 'filled' as const,
             children: (
               <Link to={`/app/members/${sub.member_id}`}>
                 {sub.member_name} · {sub.member_code}
@@ -191,7 +202,7 @@ function DrawerBody({ sub, onOpen }: { sub: SubscriptionDetail; onOpen: (k: Moda
           {
             key: 'plan',
             label: 'Gói',
-            span: { xs: 1, sm: 2 },
+            span: 'filled' as const,
             children: (
               <>
                 <span className="code-text">{sub.plan_code}</span> {sub.plan_name} ·{' '}
@@ -244,7 +255,7 @@ function DrawerBody({ sub, onOpen }: { sub: SubscriptionDetail; onOpen: (k: Moda
           <Descriptions
             size="small"
             bordered
-            column={{ xs: 1, sm: 2 }}
+            column={DESC_COLUMNS}
             items={[
               {
                 key: 'no',
