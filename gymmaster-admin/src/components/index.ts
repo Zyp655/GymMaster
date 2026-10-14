@@ -1,0 +1,21 @@
+/** Barrel component dùng chung – `import { PageTitle, ActionBar } from '@/components';` */
+export { default as ActionBar } from './ActionBar';
+export { default as BranchSelect } from './BranchSelect';
+export { default as ChangePasswordModal } from './ChangePasswordModal';
+export { default as ComingSoon } from './ComingSoon';
+export { default as ConfirmButton } from './ConfirmButton';
+export { default as DataTable } from './DataTable';
+export { default as DateText } from './DateText';
+export { default as ErrorBoundary } from './ErrorBoundary';
+export { default as FilterBar } from './FilterBar';
+export type { FilterDef, FilterOption } from './FilterBar';
+export { default as Forbidden, NotFound } from './Forbidden';
+export { default as ImageUpload } from './ImageUpload';
+export { default as LoadingScreen, RouteFallback } from './LoadingScreen';
+export { default as MobileList } from './MobileList';
+export type { MobileAction, MobileFetchArgs, MobileFilterDef } from './MobileList';
+export { MoneyInput, MoneyText } from './Money';
+export { default as PageTitle } from './PageTitle';
+export { default as PermissionGate } from './PermissionGate';
+export { default as StatCard, SectionHeader } from './StatCard';
+export { default as StatusTag } from './StatusTag';

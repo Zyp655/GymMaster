@@ -1,0 +1,123 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/*
+ * GymMaster design tokens – xem DESIGN_SYSTEM.md.
+ * Chỉ dùng các token dưới đây; không dùng giá trị tùy ý (text-[#..], p-[13px]...).
+ */
+@theme {
+  /* Font */
+  --font-sans: var(--font-be-vietnam), ui-sans-serif, system-ui, sans-serif;
+
+  /* Thang chữ ngữ nghĩa */
+  --text-display: 2.25rem;
+  --text-display--line-height: 2.75rem;
+  --text-h1: 1.75rem;
+  --text-h1--line-height: 2.25rem;
+  --text-h2: 1.375rem;
+  --text-h2--line-height: 1.875rem;
+  --text-h3: 1.125rem;
+  --text-h3--line-height: 1.625rem;
+  --text-h4: 1rem;
+  --text-h4--line-height: 1.5rem;
+  --text-body-lg: 1rem;
+  --text-body-lg--line-height: 1.5rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.375rem;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.125rem;
+
+  /* Brand – cam năng lượng */
+  --color-brand-25: #fff9f5;
+  --color-brand-50: #fff4ed;
+  --color-brand-100: #ffe6d5;
+  --color-brand-200: #feccaa;
+  --color-brand-300: #fdac74;
+  --color-brand-400: #fb8a3c;
+  --color-brand-500: #f97316;
+  --color-brand-600: #ea580c;
+  --color-brand-700: #c2410c;
+  --color-brand-800: #9a3412;
+  --color-brand-900: #7c2d12;
+
+  /* Ink – nền tối cho sidebar / panel thương hiệu */
+  --color-ink-700: #374151;
+  --color-ink-800: #1f2937;
+  --color-ink-900: #111827;
+  --color-ink-950: #0b1120;
+
+  /* Trạng thái */
+  --color-success: #16a34a;
+  --color-success-50: #f0fdf4;
+  --color-warning: #d97706;
+  --color-warning-50: #fffbeb;
+  --color-danger: #dc2626;
+  --color-danger-50: #fef2f2;
+  --color-info: #2563eb;
+  --color-info-50: #eff6ff;
+
+  /* Màu chữ: text-primary là ĐEN, không phải màu brand */
+  --color-primary: #111827;
+  --color-secondary: #4b5563;
+  --color-tertiary: #6b7280;
+  --color-disabled: #9ca3af;
+
+  /* Nền */
+  --color-canvas: #f9fafb;
+  --color-subtle: #f3f4f6;
+  --color-surface: #ffffff;
+
+  /* Viền */
+  --color-line: #e5e7eb;
+  --color-line-strong: #d1d5db;
+  --color-line-subtle: #f3f4f6;
+
+  /* Token cho primitives kiểu shadcn */
+  --color-background: #ffffff;
+  --color-foreground: #111827;
+  --color-muted: #f3f4f6;
+  --color-muted-foreground: #6b7280;
+  --color-accent: #f3f4f6;
+  --color-accent-foreground: #111827;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #111827;
+  --color-card: #ffffff;
+  --color-card-foreground: #111827;
+  --color-destructive: #dc2626;
+  --color-border: #e5e7eb;
+  --color-input: #d1d5db;
+  --color-ring: #fb8a3c;
+  --color-overlay: rgb(17 24 39 / 0.5);
+
+  /* Bo góc */
+  --radius-button: 0.625rem;
+
+  /* Breakpoints */
+  --breakpoint-sm: 40rem;
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
+  --breakpoint-xl: 80rem;
+  --breakpoint-2xl: 96rem;
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before {
+    border-color: var(--color-line);
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+}

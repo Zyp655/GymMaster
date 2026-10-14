@@ -1,0 +1,339 @@
+/* GymMaster Admin – CSS toàn cục (theo tinh thần strongbody_admin/src/assets/css/custom.css).
+   Ưu tiên theme token của antd (src/theme.ts); chỉ viết CSS cho bố cục và chi tiết nhỏ. */
+
+:root {
+  --gm-primary: #0a3150;
+  --gm-accent: #f97316;
+  --gm-bg: #f3f5f8;
+  --gm-border: #eceff3;
+  --gm-text-secondary: #6b7280;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--gm-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------------ layout */
+
+.app-sider {
+  position: sticky !important;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
+  border-right: 1px solid var(--gm-border);
+  scrollbar-width: thin;
+}
+
+.app-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--gm-border);
+  margin-bottom: 8px;
+}
+
+.app-menu.ant-menu-root {
+  border-inline-end: none !important;
+  padding-bottom: 16px;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--gm-border);
+  line-height: normal;
+}
+
+.mobile-branch-bar {
+  background: #fff;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--gm-border);
+}
+
+.mobile-branch-bar .branch-switcher {
+  width: 100% !important;
+}
+
+.app-content {
+  margin: 16px;
+  min-width: 0;
+}
+
+.site-layout-background {
+  background: #fff;
+  border-radius: 12px;
+  min-height: 480px;
+}
+
+.app-footer {
+  text-align: center;
+  color: var(--gm-text-secondary);
+  font-size: 13px;
+}
+
+@media (max-width: 575px) {
+  .app-content {
+    margin: 8px;
+  }
+}
+
+/* ------------------------------------------------------------------ header */
+
+.user-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 4px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.user-trigger:hover {
+  background: #f5f6f8;
+}
+
+.user-trigger__name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.user-avatar {
+  background: var(--gm-accent) !important;
+  font-weight: 600;
+}
+
+.user-menu-actions .ant-btn {
+  justify-content: flex-start;
+}
+
+.notif-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.notif-list {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.notif-item {
+  cursor: pointer;
+  padding: 8px !important;
+  border-radius: 8px;
+}
+
+.notif-item:hover {
+  background: #f5f7fa;
+}
+
+.notif-item--unread {
+  background: #fff7ed;
+}
+
+/* ------------------------------------------------------------- page parts */
+
+.page-card.ant-card {
+  background: transparent;
+  box-shadow: none;
+}
+
+.page-card > .ant-card-body {
+  padding: 20px;
+}
+
+@media (max-width: 575px) {
+  .page-card > .ant-card-body {
+    padding: 12px;
+  }
+}
+
+.page-head {
+  margin-bottom: 16px;
+}
+
+.page-title__breadcrumb {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.page-title__text.ant-typography {
+  margin: 0 !important;
+  font-weight: 700;
+}
+
+.page-title__subtitle {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.filter-bar {
+  margin-bottom: 16px;
+}
+
+/* Cột ngày tạo/cập nhật hai dòng (giữ từ mẫu). */
+.dates-title {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.dates-title-separator {
+  margin: 4px 0;
+}
+
+.dates-cell {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.dates-updated {
+  color: #666;
+  font-size: 12px;
+}
+
+.text-nowrap {
+  white-space: nowrap;
+}
+
+.code-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ---------------------------------------------------------- loading screen */
+
+.loading-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: var(--gm-bg);
+}
+
+.loading-screen__logo {
+  height: 44px;
+}
+
+.loading-screen__tip {
+  color: var(--gm-text-secondary);
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------------- login */
+
+.gm-login-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(ellipse 80% 50% at 10% 0%, rgba(249, 115, 22, 0.16), transparent 55%),
+    radial-gradient(ellipse 60% 45% at 90% 100%, rgba(10, 49, 80, 0.14), transparent 55%),
+    linear-gradient(165deg, #f8fafc 0%, #eef2f6 45%, #e4eaf1 100%);
+}
+
+.gm-login-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 28px;
+}
+
+.gm-login-brand {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gm-primary);
+}
+
+.gm-login-brand span {
+  color: var(--gm-accent);
+}
+
+.gm-login-shell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 20px 48px;
+}
+
+.gm-login-card {
+  width: 100%;
+  max-width: 420px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 20px;
+  padding: 36px 32px 28px;
+  box-shadow: 0 24px 60px rgba(10, 49, 80, 0.12);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.gm-login-logo {
+  height: 40px;
+  margin-bottom: 22px;
+}
+
+.gm-login-title {
+  font-size: 26px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 6px;
+}
+
+.gm-login-sub {
+  color: var(--gm-text-secondary);
+  margin: 0 0 24px;
+  font-size: 15px;
+}
+
+.gm-login-btn.ant-btn {
+  height: 48px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.gm-login-footer {
+  text-align: center;
+  color: var(--gm-text-secondary);
+  font-size: 12px;
+  padding-bottom: 20px;
+}
+
+@media (max-width: 480px) {
+  .gm-login-card {
+    padding: 28px 20px 22px;
+  }
+  .gm-login-topbar {
+    padding: 16px 20px;
+  }
+}

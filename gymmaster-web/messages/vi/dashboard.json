@@ -1,0 +1,19 @@
+{
+  "title": "Tổng quan",
+  "welcome": "Xin chào, {name}!",
+  "subtitle": "Đây là tình hình hoạt động của trung tâm hôm nay.",
+  "stats": {
+    "activeMembers": "Hội viên đang hoạt động",
+    "todayCheckins": "Lượt check-in hôm nay",
+    "monthRevenue": "Doanh thu tháng này",
+    "expiringSoon": "Gói sắp hết hạn (7 ngày)"
+  },
+  "placeholderNote": "Số liệu sẽ hiển thị khi các module Hội viên, Check-in và Tài chính hoàn thành.",
+  "quickLinks": {
+    "title": "Truy cập nhanh",
+    "branches": "Quản lý chi nhánh",
+    "branchesDescription": "Thêm, sửa thông tin và giờ hoạt động",
+    "roles": "Vai trò & quyền",
+    "rolesDescription": "Phân quyền cho nhân viên theo vai trò"
+  }
+}

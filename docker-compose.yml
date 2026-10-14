@@ -1,0 +1,72 @@
+# Môi trường chạy đầy đủ GymMaster.
+#   docker compose up -d postgres            # chỉ DB (khi chạy api/web bằng make/npm)
+#   docker compose up -d --build             # toàn bộ hệ thống
+name: gymmaster
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gymmaster
+      POSTGRES_PASSWORD: gymmaster
+      POSTGRES_DB: gymmaster
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gymmaster"]
+      interval: 5s
+      retries: 10
+
+  # Bắt email khi phát triển: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  # Chạy một lần: áp migration + seed rồi thoát.
+  migrate:
+    build: ./gymmaster-api
+    env_file: ./gymmaster-api/.env.example
+    environment:
+      DB_HOST: postgres
+    entrypoint: ["/bin/sh", "-c", "/app/gymmaster migrate up && /app/gymmaster seed"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: ./gymmaster-api
+    env_file: ./gymmaster-api/.env.example
+    environment:
+      DB_HOST: postgres
+      SMTP_HOST: mailpit
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3001
+    volumes:
+      - uploads:/app/resource/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ./gymmaster-web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/v1
+    environment:
+      API_URL_INTERNAL: http://api:8000/v1
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: change-me-change-me-change-me-change-me
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  uploads:

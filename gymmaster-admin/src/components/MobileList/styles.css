@@ -1,0 +1,316 @@
+/* MobileList – màn hình danh sách dạng thẻ cho điện thoại */
+
+.ml {
+  padding: 12px 12px 24px;
+  background: #fff;
+  min-height: 100%;
+}
+
+.ml__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ml__title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.ml__count {
+  font-size: 13px;
+  font-weight: 400;
+  color: #8c8c8c;
+  margin-left: 4px;
+}
+
+.ml__bar-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.ml__stats {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 0 -12px 12px;
+  padding: 0 12px 2px;
+  scrollbar-width: none;
+}
+
+.ml__stats::-webkit-scrollbar {
+  display: none;
+}
+
+.ml__stat {
+  flex: 0 0 auto;
+  min-width: 72px;
+  padding: 6px 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.ml__stat-value {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.ml__stat-label {
+  font-size: 11px;
+  color: #8c8c8c;
+  white-space: nowrap;
+}
+
+.ml__filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ml__filters-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ml__sort {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ml__loading {
+  padding: 48px 0;
+  text-align: center;
+}
+
+.ml__list {
+  border-top: 1px solid #f0f0f0;
+}
+
+.ml__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.ml__open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.ml__open:active {
+  opacity: 0.6;
+}
+
+.ml__open:active .ml__name {
+  text-decoration: underline;
+}
+
+.ml__thumb {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #f5f5f5;
+}
+
+.ml__thumb--round {
+  border-radius: 50%;
+}
+
+.ml__thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #e5e5e5;
+  font-size: 16px;
+  font-weight: 600;
+  color: #8c8c8c;
+}
+
+.ml__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Màu chính để người dùng biết bấm được. */
+.ml__name {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--gm-primary, #0a3150);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.ml__subtitle {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml__meta {
+  font-size: 12px;
+  color: #8c8c8c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml__tag {
+  margin-inline-end: 6px;
+  line-height: 18px;
+}
+
+.ml__side {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ml__more {
+  padding-top: 16px;
+}
+
+/* ---------------------------------------------------------- action sheet */
+
+.ml__sheet-head {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.ml__sheet-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.ml__sheet-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+
+.ml__sheet-grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.ml__sheet-grid span {
+  color: #8c8c8c;
+  flex: 0 0 auto;
+}
+
+.ml__sheet-grid b {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml__sheet-list {
+  padding: 4px 0 calc(8px + env(safe-area-inset-bottom));
+}
+
+.ml__sheet-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  color: rgba(0, 0, 0, 0.88);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ml__sheet-item:active {
+  background: #f5f5f5;
+}
+
+.ml__sheet-item:disabled {
+  opacity: 0.5;
+}
+
+.ml__sheet-item--danger {
+  color: #ff4d4f;
+}
+
+.ml__sheet-icon {
+  width: 18px;
+  font-size: 16px;
+  color: #8c8c8c;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.ml__sheet-item--danger .ml__sheet-icon {
+  color: #ff4d4f;
+}
+
+/* --------------------------------------------------------- filter drawer */
+
+.ml__filter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ml__filter-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ml__filter-form label > span {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.ml__filter-form .ant-select,
+.ml__filter-form .ant-picker {
+  width: 100%;
+}
+
+.ml__drawer-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

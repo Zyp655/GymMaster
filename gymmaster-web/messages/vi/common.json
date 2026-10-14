@@ -1,0 +1,171 @@
+{
+  "appName": "GymMaster",
+  "actions": {
+    "create": "Thêm mới",
+    "edit": "Sửa",
+    "delete": "Xóa",
+    "save": "Lưu",
+    "saveChanges": "Lưu thay đổi",
+    "saving": "Đang lưu...",
+    "cancel": "Hủy",
+    "confirm": "Xác nhận",
+    "close": "Đóng",
+    "retry": "Thử lại",
+    "search": "Tìm kiếm",
+    "back": "Quay lại",
+    "actions": "Thao tác",
+    "openMenu": "Mở menu thao tác",
+    "clearFilters": "Xóa bộ lọc"
+  },
+  "status": {
+    "ACTIVE": "Đang hoạt động",
+    "INACTIVE": "Ngừng hoạt động"
+  },
+  "table": {
+    "rowsPerPage": "Số dòng",
+    "pageInfo": "Trang {page}/{totalPage}",
+    "totalRows": "{total} bản ghi",
+    "firstPage": "Trang đầu",
+    "prevPage": "Trang trước",
+    "nextPage": "Trang sau",
+    "lastPage": "Trang cuối",
+    "sortAsc": "Sắp xếp tăng dần",
+    "sortDesc": "Sắp xếp giảm dần"
+  },
+  "states": {
+    "loading": "Đang tải...",
+    "emptyTitle": "Chưa có dữ liệu",
+    "emptyDescription": "Dữ liệu sẽ hiển thị tại đây khi được tạo.",
+    "noResultTitle": "Không tìm thấy kết quả",
+    "noResultDescription": "Thử thay đổi từ khóa hoặc bộ lọc.",
+    "errorTitle": "Không tải được dữ liệu",
+    "errorDescription": "Đã có lỗi xảy ra. Vui lòng thử lại."
+  },
+  "errors": {
+    "network": "Không kết nối được máy chủ. Kiểm tra mạng hoặc thử lại sau.",
+    "badRequest": "Dữ liệu gửi lên không hợp lệ.",
+    "unauthorized": "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
+    "forbidden": "Bạn không có quyền thực hiện thao tác này.",
+    "notFound": "Không tìm thấy dữ liệu.",
+    "conflict": "Dữ liệu bị trùng hoặc đang được sử dụng.",
+    "internal": "Hệ thống gặp sự cố. Vui lòng thử lại sau.",
+    "unknown": "Đã có lỗi xảy ra. Vui lòng thử lại."
+  },
+  "validation": {
+    "required": "Trường này là bắt buộc",
+    "email": "Email không hợp lệ",
+    "minLength": "Tối thiểu {min} ký tự",
+    "maxLength": "Tối đa {max} ký tự",
+    "phone": "Số điện thoại không hợp lệ",
+    "time": "Giờ không hợp lệ (định dạng HH:mm)"
+  },
+  "confirm": {
+    "deleteTitle": "Xác nhận xóa",
+    "deleteDescription": "Bạn có chắc muốn xóa {name}? Thao tác này không thể hoàn tác.",
+    "deleting": "Đang xóa..."
+  },
+  "notFound": {
+    "title": "Không tìm thấy trang",
+    "description": "Trang bạn tìm không tồn tại hoặc đã bị di chuyển.",
+    "backHome": "Về trang tổng quan"
+  },
+  "errorPage": {
+    "title": "Đã xảy ra lỗi",
+    "description": "Trang gặp sự cố khi hiển thị. Bạn có thể thử tải lại."
+  },
+  "forbiddenPage": {
+    "title": "Không có quyền truy cập",
+    "description": "Tài khoản của bạn chưa được cấp quyền xem trang này. Liên hệ quản trị viên nếu cần."
+  },
+  "landing": {
+    "metaTitle": "Trung tâm Fitness hiện đại",
+    "metaDescription": "Bảng giá gói tập, gói huấn luyện cá nhân và hệ thống chi nhánh GymMaster.",
+    "nav": {
+      "pricing": "Bảng giá",
+      "pt": "Huấn luyện cá nhân",
+      "branches": "Chi nhánh",
+      "login": "Đăng nhập",
+      "enter": "Vào hệ thống",
+      "menu": "Điều hướng"
+    },
+    "hero": {
+      "eyebrow": "Trung tâm Fitness thế hệ mới",
+      "title": "Tập luyện đúng cách, theo dõi tiến độ mỗi ngày",
+      "subtitle": "GymMaster số hóa toàn bộ hành trình của bạn: đăng ký gói tập, check-in bằng mã QR, đặt lớp nhóm, đặt lịch huấn luyện viên và xem biểu đồ tiến bộ ngay trên điện thoại.",
+      "ctaPricing": "Xem bảng giá",
+      "ctaLogin": "Đăng nhập hội viên",
+      "statBranches": "chi nhánh",
+      "statPlans": "gói tập",
+      "statPt": "gói PT",
+      "statHours": "Mở cửa từ {open} đến {close}"
+    },
+    "features": {
+      "title": "Mọi thứ bạn cần để tập luyện hiệu quả",
+      "qrTitle": "Check-in bằng mã QR",
+      "qrDesc": "Mã QR động trên điện thoại, vào cửa trong vài giây, không cần thẻ cứng.",
+      "classTitle": "Đặt lớp nhóm trực tuyến",
+      "classDesc": "Yoga, Zumba, Boxing… xem lịch theo tuần, giữ chỗ trước và nhận thông báo khi có chỗ trống.",
+      "ptTitle": "Huấn luyện viên cá nhân",
+      "ptDesc": "Đặt lịch với HLV phù hợp, nhận giáo án riêng và ghi chú sau từng buổi tập.",
+      "progressTitle": "Theo dõi tiến độ",
+      "progressDesc": "Cân nặng, tỷ lệ mỡ, khối cơ được ghi lại định kỳ và hiển thị bằng biểu đồ trực quan."
+    },
+    "pricing": {
+      "eyebrow": "Bảng giá",
+      "title": "Gói tập linh hoạt cho mọi nhu cầu",
+      "subtitle": "Chọn gói theo thời gian để tập không giới hạn, hoặc gói theo buổi nếu lịch của bạn bận rộn.",
+      "typeTIME": "Theo thời gian",
+      "typeSESSION": "Theo buổi",
+      "bestValue": "Tiết kiệm nhất",
+      "perMonth": "≈ {price}/tháng",
+      "perSession": "≈ {price}/buổi",
+      "unlimited": "Tập không giới hạn số buổi",
+      "sessions": "{count} lượt tập",
+      "validFor": "Sử dụng trong {duration}",
+      "freeze": "Bảo lưu tối đa {days} ngày",
+      "noFreeze": "Không áp dụng bảo lưu",
+      "classes": "Bao gồm lớp tập nhóm",
+      "noClasses": "Chưa gồm lớp tập nhóm",
+      "allBranches": "Tập tại tất cả chi nhánh",
+      "singleBranch": "Tập tại chi nhánh đăng ký",
+      "cta": "Đăng ký tại quầy",
+      "emptyTitle": "Chưa có gói tập đang mở bán",
+      "emptyDescription": "Vui lòng quay lại sau hoặc liên hệ chi nhánh gần nhất."
+    },
+    "pt": {
+      "eyebrow": "Huấn luyện cá nhân",
+      "title": "Đồng hành 1 kèm 1 cùng huấn luyện viên",
+      "subtitle": "Lộ trình riêng, chỉnh kỹ thuật từng động tác và theo dõi kết quả sau mỗi buổi.",
+      "sessions": "{count} buổi",
+      "minutes": "{minutes} phút mỗi buổi",
+      "validity": "Hoàn thành trong {duration}",
+      "perSession": "{price}/buổi",
+      "emptyTitle": "Chưa có gói PT đang mở bán",
+      "emptyDescription": "Vui lòng liên hệ quầy lễ tân để được tư vấn."
+    },
+    "duration": {
+      "days": "{count} ngày",
+      "months": "{count} tháng",
+      "years": "{count} năm"
+    },
+    "branches": {
+      "eyebrow": "Hệ thống chi nhánh",
+      "title": "Tập luyện gần nhà, gần nơi làm việc",
+      "hours": "{open} – {close} hằng ngày",
+      "call": "Gọi {phone}",
+      "noAddress": "Đang cập nhật địa chỉ",
+      "emptyTitle": "Chưa có chi nhánh hoạt động",
+      "emptyDescription": "Thông tin chi nhánh sẽ sớm được cập nhật."
+    },
+    "loadError": "Không tải được dữ liệu. Vui lòng tải lại trang sau ít phút.",
+    "cta": {
+      "title": "Sẵn sàng bắt đầu?",
+      "subtitle": "Đến chi nhánh gần nhất để được tư vấn miễn phí, hoặc đăng nhập để quản lý gói tập của bạn.",
+      "login": "Đăng nhập"
+    },
+    "footer": {
+      "tagline": "Hệ thống quản lý trung tâm Fitness",
+      "copyright": "© {year} GymMaster. Bảo lưu mọi quyền."
+    }
+  }
+}

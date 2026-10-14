@@ -1,0 +1,10 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/gymmaster ."
+  bin = "./tmp/gymmaster"
+  args_bin = ["http"]
+  include_ext = ["go", "sql"]
+  exclude_dir = ["tmp", "bin", "resource"]
+  delay = 500

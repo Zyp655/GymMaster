@@ -1,0 +1,70 @@
+/* Lưới ca làm theo tuần (routes/shifts). */
+
+.shift-table .ant-table-cell.shift-col--today {
+  background: #fff7ed;
+}
+
+.shift-day {
+  line-height: 1.2;
+}
+
+.shift-day__date {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--gm-text-secondary);
+}
+
+.shift-day--today,
+.shift-day--today .shift-day__date {
+  color: var(--gm-accent);
+}
+
+.shift-cell {
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.shift-cell--clickable {
+  cursor: pointer;
+}
+
+.shift-cell--clickable:hover {
+  background: rgba(10, 49, 80, 0.06);
+}
+
+.shift-cell__plus {
+  color: #c4c9d1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.shift-cell--clickable:hover .shift-cell__plus {
+  opacity: 1;
+}
+
+.shift-tag {
+  margin: 0 !important;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.shift-mobile-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.shift-mobile-day--today .ant-card-head {
+  color: var(--gm-accent);
+}

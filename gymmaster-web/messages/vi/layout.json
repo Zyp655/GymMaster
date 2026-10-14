@@ -1,0 +1,47 @@
+{
+  "nav": {
+    "groupOperation": "Vận hành",
+    "groupCatalog": "Danh mục",
+    "groupSystem": "Hệ thống",
+    "dashboard": "Tổng quan",
+    "members": "Hội viên",
+    "subscriptions": "Đăng ký gói tập",
+    "checkin": "Check-in",
+    "classes": "Lớp học",
+    "pt": "Huấn luyện cá nhân (PT)",
+    "finance": "Hóa đơn & thu chi",
+    "pos": "Bán hàng (POS)",
+    "inventory": "Kho hàng",
+    "reports": "Báo cáo",
+    "plans": "Gói tập & gói PT",
+    "promotions": "Khuyến mãi",
+    "products": "Sản phẩm",
+    "staff": "Nhân viên & HLV",
+    "shifts": "Ca làm việc",
+    "branches": "Chi nhánh",
+    "rooms": "Phòng tập",
+    "roles": "Vai trò & quyền",
+    "settings": "Cấu hình",
+    "audit": "Nhật ký thao tác",
+    "comingSoon": "Sắp có"
+  },
+  "sidebar": {
+    "collapse": "Thu gọn thanh bên",
+    "expand": "Mở rộng thanh bên",
+    "openMenu": "Mở menu điều hướng",
+    "menuTitle": "Điều hướng"
+  },
+  "user": {
+    "account": "Tài khoản",
+    "changePassword": "Đổi mật khẩu",
+    "logout": "Đăng xuất",
+    "allBranches": "Toàn hệ thống"
+  },
+  "roleNames": {
+    "OWNER": "Chủ trung tâm",
+    "MANAGER": "Quản lý",
+    "RECEPTIONIST": "Lễ tân",
+    "TRAINER": "Huấn luyện viên",
+    "MEMBER": "Hội viên"
+  }
+}
