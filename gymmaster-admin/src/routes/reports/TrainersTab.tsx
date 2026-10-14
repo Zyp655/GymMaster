@@ -46,6 +46,21 @@ export default function TrainersTab(f: ReportFilters) {
       render: (v: string) => (v ? <StatusTag status={v} map={TRAINER_LEVEL_META} /> : '—'),
     },
     {
+      title: 'Đánh giá TB',
+      key: 'rating',
+      align: 'right',
+      render: (_, r) =>
+        r.rating_count && r.rating_count > 0 ? (
+          <span>
+            <b>{Number(r.rating_avg ?? 0).toFixed(1)} ⭐</b> ({formatNumber(r.rating_count)} lượt)
+          </span>
+        ) : r.rating_avg ? (
+          <b>{Number(r.rating_avg).toFixed(1)} ⭐</b>
+        ) : (
+          '—'
+        ),
+    },
+    {
       title: 'PT hoàn thành',
       dataIndex: 'pt_completed',
       align: 'right',
@@ -158,33 +173,42 @@ export default function TrainersTab(f: ReportFilters) {
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={1}>—</Table.Summary.Cell>
                 <Table.Summary.Cell index={2} align="right">
-                  <b>{formatNumber(t.pt_completed)}</b>
+                  {t.rating_count && t.rating_count > 0 ? (
+                    <b>
+                      {Number(t.rating_avg ?? 0).toFixed(1)} ⭐ ({formatNumber(t.rating_count)} lượt)
+                    </b>
+                  ) : (
+                    '—'
+                  )}
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={3} align="right">
-                  <b>{formatNumber(t.pt_scheduled)}</b>
+                  <b>{formatNumber(t.pt_completed)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={4} align="right">
-                  <b>{formatNumber(t.pt_no_show)}</b>
+                  <b>{formatNumber(t.pt_scheduled)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={5} align="right">
-                  <b>{formatNumber(t.classes_taught)}</b>
+                  <b>{formatNumber(t.pt_no_show)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={6} align="right">
-                  <b>{formatNumber(t.class_attendees)}</b>
+                  <b>{formatNumber(t.classes_taught)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={7} align="right">
-                  <b>{formatNumber(t.active_pt_members)}</b>
+                  <b>{formatNumber(t.class_attendees)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={8} align="right">
-                  <b>{formatNumber(t.pt_contracts_sold)}</b>
+                  <b>{formatNumber(t.active_pt_members)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={9} align="right">
-                  <MoneyText value={t.pt_revenue} strong />
+                  <b>{formatNumber(t.pt_contracts_sold)}</b>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={10} align="right">
-                  <MoneyText value={t.commission} strong />
+                  <MoneyText value={t.pt_revenue} strong />
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={11} align="right">
+                  <MoneyText value={t.commission} strong />
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={12} align="right">
                   <MoneyText value={t.commission_paid} strong />
                 </Table.Summary.Cell>
               </Table.Summary.Row>

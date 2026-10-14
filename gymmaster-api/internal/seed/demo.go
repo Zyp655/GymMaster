@@ -67,12 +67,21 @@ type demoGen struct {
 }
 
 func seedDemo(ctx context.Context, tx *gorm.DB, cfg config.SeedCfg) error {
+	var showcaseCount int64
+	if err := tx.WithContext(ctx).Model(&entity.User{}).Where("lower(email) = ?", "hoivien@gymmaster.vn").Count(&showcaseCount).Error; err != nil {
+		return err
+	}
+	if showcaseCount > 0 {
+		return nil
+	}
 	var memberCount int64
-	if err := tx.Model(&entity.Member{}).Count(&memberCount).Error; err != nil {
+	if err := tx.WithContext(ctx).Model(&entity.Member{}).Count(&memberCount).Error; err != nil {
 		return err
 	}
 	if memberCount > 0 {
-		return nil
+		if err := resetPartialDemo(ctx, tx, cfg.AdminEmail); err != nil {
+			return err
+		}
 	}
 
 	loc := demoLoc()
@@ -129,6 +138,29 @@ func seedDemo(ctx context.Context, tx *gorm.DB, cfg config.SeedCfg) error {
 	g.Log().Infof(ctx, "seed: đã tạo dữ liệu demo (%d nhân sự, %d hội viên, %d gói đăng ký, %d hóa đơn, %d thanh toán, %d hoàn tiền, %d đặt lớp, %d lượt check-in)",
 		len(gen.staff), len(gen.members), len(gen.subs), len(gen.invoices), len(gen.payments), len(gen.refunds), len(gen.bookings), len(gen.checkins))
 	return nil
+}
+
+func resetPartialDemo(ctx context.Context, tx *gorm.DB, ownerEmail string) error {
+	q := `TRUNCATE TABLE
+		trial_passes, lead_activities, leads,
+		maintenance_logs, equipments, reviews,
+		workout_logs, workout_plan_items, workout_plan_days, workout_plans,
+		online_payment_txns, member_register_otps, password_resets, login_attempts,
+		job_runs, audit_logs, notifications,
+		stock_transactions, stock_levels, products, suppliers, product_categories,
+		trainer_commissions, pt_sessions, pt_contracts, pt_packages,
+		class_bookings, class_schedules, class_types,
+		checkins, subscription_events, subscription_freezes, subscriptions,
+		refunds, payments, invoice_items, invoices, promotions, membership_plans,
+		body_metrics, members, shifts, rooms, trainer_profiles, staff_profiles, refresh_tokens
+		RESTART IDENTITY CASCADE`
+	if err := tx.WithContext(ctx).Exec(q).Error; err != nil {
+		return err
+	}
+	if err := tx.WithContext(ctx).Exec("DELETE FROM user_roles WHERE user_id IN (SELECT id FROM users WHERE lower(email) <> lower(?))", ownerEmail).Error; err != nil {
+		return err
+	}
+	return tx.WithContext(ctx).Exec("DELETE FROM users WHERE lower(email) <> lower(?)", ownerEmail).Error
 }
 
 func (g *demoGen) loadBase(ctx context.Context, tx *gorm.DB, ownerEmail string) error {

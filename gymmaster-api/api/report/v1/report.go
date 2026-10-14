@@ -313,6 +313,8 @@ type TrainerPerformance struct {
 	PTRevenue       float64 `json:"pt_revenue"`
 	Commission      float64 `json:"commission"`
 	CommissionPaid  float64 `json:"commission_paid"`
+	RatingAvg       float64 `json:"rating_avg"`
+	RatingCount     int     `json:"rating_count"`
 }
 
 type TrainerPerformanceRes struct {

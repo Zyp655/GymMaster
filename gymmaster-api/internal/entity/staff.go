@@ -34,6 +34,8 @@ type TrainerProfile struct {
 	Bio             string         `gorm:"type:text;not null;default:''"`
 	Certifications  string         `gorm:"type:text;not null;default:''"`
 	YearsExperience int            `gorm:"not null;default:0"`
+	RatingAvg       float64        `gorm:"type:numeric(3,2);not null;default:0"`
+	RatingCount     int            `gorm:"not null;default:0"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

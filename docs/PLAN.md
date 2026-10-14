@@ -457,3 +457,391 @@ Bảng test case (ID, mô tả, input, expected, kết quả) sẽ được đư
 5. **Cài đặt**: môi trường, cấu trúc mã nguồn, các module tiêu biểu (kèm code trích dẫn), giải pháp cho các bài toán khó (trùng lịch, race condition đặt chỗ, QR chống gian lận, pro-rata).
 6. **Kiểm thử & đánh giá**: test case, kết quả, hiệu năng.
 7. **Kết luận & hướng phát triển**: mobile app, thiết bị cửa từ/vân tay, AI gợi ý giáo án, multi-tenant SaaS.
+
+---
+
+## 12. Giai đoạn 2 – Lộ trình phát triển tiếp (Sprint 12–17)
+
+> Mỗi sprint ≈ 1 tuần. Tuân thủ pattern hiện có: `api/<module>/v1` → `controller` → `service` → `repository`, wiring trong `internal/module/<m>.go`. Migration đánh số tiếp từ `000011`, permission mới khai báo trong `consts/permission.go` + seed. Mỗi sprint xong: tick README, viết `docs/api/<module>.md`.
+
+### Sprint 12 – Quên mật khẩu & chống brute-force
+**DB – `000011_password_reset`**
+- `password_resets` (id, user_id, token_hash, expires_at, used_at, ip, created_at) – token lưu SHA-256, TTL 30 phút, dùng 1 lần.
+- `login_attempts` (email, ip, attempted_at, success) – đếm đăng nhập sai.
+
+**API**
+- `POST /v1/auth/forgot-password`: luôn trả 200 (không lộ email tồn tại), gửi mail link `web/reset-password?token=...`.
+- `POST /v1/auth/reset-password`: đổi mật khẩu + thu hồi toàn bộ `refresh_tokens` của user.
+- Rate limit: sai 5 lần/15 phút theo email+IP → khóa tạm, mã `40105`. Cài bằng DB qua interface `Limiter`; có thể thay bằng Redis (`go-redis`) sau.
+- Dọn `password_resets` hết hạn gộp vào job `cleanup_tokens`.
+
+**FE**: web `/forgot-password`, `/reset-password`, link "Quên mật khẩu?" ở `/login`; admin tương tự cho nhân viên.
+
+**Test**: token hết hạn / đã dùng, vượt giới hạn đăng nhập sai, refresh token bị thu hồi sau reset.
+
+### Sprint 13 – Thanh toán online VNPay sandbox (ưu tiên cao)
+**DB – `000012_online_payment`**
+- Bổ sung `'VNPAY'` vào CHECK `payments.method` (và `refunds.method` nếu cần).
+- `online_payment_txns` (id, invoice_id, member_id, txn_ref UNIQUE, amount, status[`PENDING`|`SUCCESS`|`FAILED`|`EXPIRED`], provider_txn_no, bank_code, raw_ipn jsonb, created_at, paid_at).
+
+**Package** `internal/pkg/vnpay`: build URL (ký HMAC-SHA512), verify chữ ký. Config `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, `VNPAY_RETURN_URL` thêm vào `.env.example`.
+
+**API**
+- `POST /v1/member/invoices/{id}/vnpay` → tạo txn, trả `payment_url`.
+- `POST /v1/member/subscriptions/checkout`: hội viên tự chọn gói → tái dùng `SubscriptionService.Quote/Create` (invoice `UNPAID`, sub `PENDING`) → trả `payment_url`.
+- `GET /v1/public/payments/vnpay/ipn`: verify chữ ký + số tiền, idempotent theo `txn_ref`; trong 1 transaction: ghi `payments` → kích hoạt subscription → thông báo.
+- `GET /v1/public/payments/vnpay/return`: chỉ hiển thị kết quả, **không** cập nhật trạng thái.
+- Cron `expire_online_txns` (mỗi 15 phút): txn `PENDING` quá 15 phút → `EXPIRED`.
+
+**FE web**: nút "Thanh toán VNPay" ở `/me/invoices/[id]`; trang `/me/subscriptions/buy` (chọn gói, áp voucher qua `/promotions/check`, thanh toán); trang `/payment/result`.
+**FE admin**: hiển thị phương thức VNPAY, lọc giao dịch online.
+
+**Test**: IPN sai chữ ký, sai số tiền, IPN gọi trùng (idempotency), thanh toán sau khi txn hết hạn.
+
+### Sprint 14 – Giáo án & nhật ký tập
+**DB – `000013_workout`**
+- `exercises` (id, name, muscle_group, equipment, video_url, description) – thư viện bài tập, seed ~40 bài.
+- `workout_plans` (id, member_id, trainer_id, pt_contract_id NULL, name, goal, start_date, end_date, status).
+- `workout_plan_days` (id, plan_id, day_index, title).
+- `workout_plan_items` (id, day_id, exercise_id, sets, reps, weight, rest_sec, note, sort).
+- `workout_logs` (id, member_id, plan_item_id NULL, exercise_id, performed_at, sets, reps, weight) – hội viên tự ghi.
+
+**API**
+- Admin/HLV: CRUD `/admin/exercises`, `/admin/workout-plans`, `POST /admin/workout-plans/{id}/clone` (giáo án mẫu). Permission `workout.manage`; HLV chỉ thao tác trên học viên của mình.
+- Member: `GET /member/workout-plans`, `POST /member/workout-logs`, `GET /member/workout-logs?exercise_id=` (biểu đồ tiến bộ mức tạ).
+
+**FE**: admin – màn soạn giáo án theo ngày, chọn bài từ thư viện; web – `/me/workout` (giáo án hôm nay, ghi set) + biểu đồ mức tạ trong `/me/progress`.
+
+### Sprint 15 – Đánh giá HLV/lớp & Quản lý thiết bị
+**Đánh giá – `000014_reviews`**
+- `reviews` (id, member_id, target_type[`PT_SESSION`|`CLASS_SCHEDULE`], target_id, trainer_id, rating 1–5, comment, created_at), UNIQUE(member_id, target_type, target_id).
+- Chỉ đánh giá buổi đã `COMPLETED`/`ATTENDED`, trong vòng 7 ngày.
+- Thêm `trainer_profiles.rating_avg`, `rating_count`, cập nhật trong cùng transaction khi tạo review.
+- API: `POST /member/reviews`, `GET /admin/reviews`; báo cáo `trainer-performance` thêm cột rating.
+- Gửi thông báo "Đánh giá buổi tập" sau khi buổi hoàn thành.
+
+**Thiết bị – `000015_equipment`**
+- `equipments` (id, branch_id, room_id, code, name, category, purchase_date, price, warranty_until, status[`ACTIVE`|`BROKEN`|`MAINTENANCE`|`RETIRED`], maintenance_interval_days, next_maintenance_date, image_url).
+- `maintenance_logs` (id, equipment_id, type[`PERIODIC`|`REPAIR`], reported_by, description, cost, status[`OPEN`|`IN_PROGRESS`|`DONE`], started_at, finished_at).
+- API: CRUD `/admin/equipments`, `POST /admin/equipments/{id}/report-issue`, CRUD `/admin/maintenance-logs`.
+- Cron `remind_maintenance` (07:00): thiết bị đến hạn → `NotifyPermission("equipment.manage", branch)`.
+- Báo cáo chi phí bảo trì theo chi nhánh/tháng, thêm vào `/reports/export`.
+
+### Sprint 16 – CRM khách tiềm năng & chăm sóc hội viên
+**DB – `000016_crm`**
+- `leads` (id, branch_id, full_name, phone, email, source[`WEBSITE`|`WALK_IN`|`REFERRAL`|`FACEBOOK`], interest_plan_id, status[`NEW`|`CONTACTED`|`TRIAL`|`CONVERTED`|`LOST`], assigned_to, trial_date, member_id NULL, note).
+- `lead_activities` (id, lead_id, type[`CALL`|`SMS`|`VISIT`|`NOTE`], content, created_by, created_at).
+- `trial_passes` (id, lead_id, branch_id, valid_date, qr_token, used_at) – màn quét check-in chấp nhận thêm vé tập thử.
+
+**API**
+- `POST /v1/public/leads`: form "Đăng ký tập thử" trên landing (rate limit theo IP).
+- Admin: CRUD `/admin/leads`, `POST /admin/leads/{id}/activities`, `/trial-pass`, `/convert` (tạo member → mở màn bán gói).
+- Báo cáo `/reports/leads`: phễu chuyển đổi, tỷ lệ theo nguồn.
+- `GET /v1/public/class-schedules`: lịch lớp công khai cho landing.
+
+**Chăm sóc tự động (cron)**
+- `birthday_greetings` (08:00): email/thông báo chúc mừng, kèm voucher sinh nhật sinh tự động qua promotion service.
+- `churn_risk_scan` (06:00): hội viên có gói ACTIVE nhưng 14 ngày không check-in → danh sách `GET /admin/members/at-risk`.
+
+**FE**: landing – section + form tập thử, lịch lớp công khai; admin – Kanban lead theo trạng thái, tab "Hội viên cần chăm sóc".
+
+### Sprint 17 – Realtime, PWA & hoàn thiện
+- **SSE** `GET /v1/notifications/stream` (auth bằng access token): hub in-process `internal/pkg/realtime`, push sau `Notifier.Notify`. Admin nhận check-in mới, yêu cầu bảo lưu; hội viên nhận "lên từ waitlist", "thanh toán thành công". FE thay polling `unread-count` bằng `EventSource`, fallback polling khi lỗi.
+- **PWA** cho `gymmaster-web`: manifest, service worker, icon, mở QR offline từ cache; Web Push (tùy chọn).
+- **Hội viên tự tạo tài khoản**: `POST /v1/auth/register-member` (SĐT/email); trùng SĐT với `members` có sẵn → xác thực OTP email để liên kết.
+- **Hoàn thiện**: cập nhật Swagger, `docs/api/*`, ERD; seed demo cho module mới; CI chạy integration test; kịch bản demo end-to-end: *khách đăng ký tập thử → convert → mua gói VNPay → check-in → tập theo giáo án → đánh giá HLV*.
+
+### Tổng hợp
+| Sprint | Nội dung | Migration | Độ khó | Giá trị demo |
+|---|---|---|---|---|
+| 12 | Quên mật khẩu, rate limit | 000011 | Thấp | Trung bình |
+| 13 | VNPay sandbox, tự mua gói | 000012 | Cao | **Rất cao** |
+| 14 | Giáo án, nhật ký tập | 000013 | Trung bình | Cao |
+| 15 | Đánh giá HLV, thiết bị & bảo trì | 000014–15 | Trung bình | Cao |
+| 16 | CRM lead, tập thử, chăm sóc tự động | 000016 | Trung bình | Cao |
+| 17 | SSE realtime, PWA, tự đăng ký, hoàn thiện | — | Trung bình | Trung bình |
+
+Nếu thời gian gấp, bản rút gọn: Sprint 12 → 13 → 14 → phần đánh giá của 15 (đủ vòng hội viên tự phục vụ).
+
+---
+
+## 13. Giai đoạn 3 – Mở rộng vận hành, tài chính & tương tác (Sprint 18–23)
+
+> Tiếp nối Giai đoạn 2, cùng quy ước: migration đánh số tiếp từ `000017`, permission mới khai báo trong `consts/permission.go` + seed, cron đăng ký qua `cron.Register` trong `internal/module/<m>.go`.
+
+### A. Tự động hóa vận hành tại quầy
+
+#### Sprint 18 – Kiểm soát ra vào bằng thiết bị & Kiosk
+**DB – `000017_access_devices`**
+- `access_devices` (id, branch_id, code, name, type[`TURNSTILE`|`DOOR`|`KIOSK`], api_key_hash, last_seen_at, status[`ACTIVE`|`OFFLINE`|`DISABLED`]).
+- Thêm `checkins.device_id` NULL và giá trị `DEVICE` vào CHECK `checkins.method`.
+
+**API**
+- Admin: CRUD `/admin/access-devices`, `POST /admin/access-devices/{id}/rotate-key` (chỉ hiện key 1 lần). Permission `device.manage`.
+- Thiết bị: nhóm `/v1/device/*`, xác thực bằng header `X-Device-Key` (middleware riêng, so sánh hash):
+  - `POST /v1/device/checkin` – nhận QR token → tái dùng rule engine `CheckinService` → trả `{allow, member_name, message}` để mở cửa.
+  - `POST /v1/device/heartbeat` – cập nhật `last_seen_at`.
+- Cron `device_heartbeat_check` (mỗi 5 phút): thiết bị quá 10 phút không heartbeat → `OFFLINE` + `NotifyPermission("device.manage", branch)`.
+
+**FE**
+- Admin: màn quản lý thiết bị (trạng thái online/offline, lần cuối hoạt động).
+- Web: trang `/kiosk` toàn màn hình cho tablet đặt tại cửa – quét QR bằng camera (`html5-qrcode` đã có), hiển thị kết quả lớn (xanh/đỏ + tên hội viên), tự reset sau 3 giây. Kiosk đăng nhập bằng device key, không dùng tài khoản người.
+
+**Test**: key sai/bị vô hiệu, rule check-in qua thiết bị giống check-in tại quầy, heartbeat timeout.
+
+#### Sprint 19 – Tủ đồ & dịch vụ theo lượt
+**DB – `000018_lockers`**
+- `lockers` (id, branch_id, code, zone, size, status[`AVAILABLE`|`OCCUPIED`|`RENTED`|`BROKEN`]).
+- `locker_rentals` (id, locker_id, member_id, type[`DAILY`|`MONTHLY`], start_at, end_at, invoice_id NULL, status[`ACTIVE`|`ENDED`|`EXPIRED`]).
+
+**Nghiệp vụ**
+- Tủ theo lượt: gán khi check-in (tự động hoặc lễ tân chọn), tự giải phóng khi checkout hoặc cuối ngày.
+- Tủ thuê tháng: bán như một dòng `invoice_items` (`item_type = 'LOCKER'`), cron `expire_locker_rentals` (00:20) hết hạn → giải phóng + thông báo hội viên trước 3 ngày.
+- Khăn/nước theo lượt bán qua POS hiện có (sản phẩm loại dịch vụ, không trừ tồn kho).
+
+**API**: CRUD `/admin/lockers`, `GET /admin/lockers/board?branch_id=` (sơ đồ tủ), `POST /admin/lockers/{id}/assign`, `/release`, `POST /admin/locker-rentals`. Portal: `GET /member/locker`.
+
+**FE**: admin – sơ đồ tủ dạng lưới theo khu, màu theo trạng thái; tích hợp chọn tủ vào màn check-in. Web – hiển thị số tủ đang dùng ở `/me`.
+
+### B. Tài chính & nhân sự nâng cao
+
+#### Sprint 20 – Chấm công & bảng lương
+**DB – `000019_payroll`**
+- `staff_attendances` (id, staff_id, branch_id, shift_id NULL, check_in_at, check_out_at, late_minutes, early_minutes, method[`QR`|`MANUAL`], note).
+- `payrolls` (id, branch_id, period `YYYY-MM`, status[`DRAFT`|`LOCKED`|`PAID`], locked_by, locked_at). UNIQUE(branch_id, period).
+- `payroll_items` (id, payroll_id, staff_id, base_salary, work_days, ot_hours, pt_commission, sales_commission, bonus, penalty, total, note).
+
+**Nghiệp vụ**
+- Nhân viên chấm công bằng QR cá nhân tại quầy/kiosk; đối chiếu `shifts` để tính đi muộn/về sớm (ngưỡng cấu hình trong `settings`).
+- Tạo bảng lương tháng: lương cơ bản theo ngày công + hoa hồng PT (`trainer_commissions` của kỳ) + hoa hồng bán gói (theo `subscriptions.sold_by` × tỷ lệ cấu hình) + thưởng/phạt nhập tay.
+- `LOCKED` thì không sửa được; `PAID` đánh dấu luôn các `trainer_commissions` liên quan đã trả.
+
+**API**: `POST /admin/attendances/scan`, `GET /admin/attendances`, `POST /admin/payrolls/generate`, `GET/PUT /admin/payrolls/{id}`, `POST /admin/payrolls/{id}/lock`, `/pay`, `GET /admin/payrolls/{id}/export` (Excel). Nhân viên xem phiếu lương của mình: `GET /v1/staff/me/payslips`.
+
+**Test**: tính công với ca qua đêm, bảng lương đã khóa không sửa được, không trả trùng hoa hồng.
+
+#### Sprint 21 – Chi phí, P&L, đối soát ca & trả góp
+**DB – `000020_finance_ext`**
+- `expense_categories` (id, name, type[`FIXED`|`VARIABLE`]); `expenses` (id, branch_id, category_id, amount, spent_at, description, attachment_url, created_by, approved_by, status).
+- `cash_sessions` (id, branch_id, staff_id, opened_at, closed_at, opening_cash, expected_cash, counted_cash, difference, note, status[`OPEN`|`CLOSED`]).
+- `installment_plans` (id, invoice_id, total, installments) + `installment_schedules` (id, plan_id, seq, due_date, amount, paid_amount, status[`PENDING`|`PAID`|`OVERDUE`]).
+
+**Nghiệp vụ**
+- **Chi phí**: nhập chi phí theo chi nhánh, manager duyệt; chi phí bảo trì thiết bị (Sprint 15) tự đẩy sang `expenses`.
+- **Báo cáo lãi/lỗ (P&L)**: doanh thu (gói, PT, POS, tủ đồ) – giá vốn POS – chi phí – lương, theo chi nhánh/tháng; xuất Excel.
+- **Đối soát ca**: lễ tân mở ca (tiền đầu ca) → đóng ca nhập tiền đếm thực tế → hệ thống so với tổng `payments` CASH trong ca, ghi chênh lệch.
+- **Trả góp/công nợ**: gói dài hạn cho chia N kỳ; subscription `ACTIVE` khi đã trả kỳ 1; cron `remind_installments` (08:00) nhắc trước 3 ngày, quá hạn 7 ngày → `OVERDUE` và chặn check-in (thêm rule vào rule engine, `deny_reason = INSTALLMENT_OVERDUE`).
+- **Hóa đơn điện tử**: định nghĩa interface `EInvoiceProvider` + bản mock; tích hợp nhà cung cấp thật (VNPT/Viettel sandbox) để sau.
+
+**API**: CRUD `/admin/expenses`, `/admin/expense-categories`; `POST /admin/cash-sessions/open`, `/{id}/close`, `GET /admin/cash-sessions`; `GET /admin/reports/profit-loss`; `POST /admin/invoices/{id}/installments`, `GET /admin/installments?status=OVERDUE`. Portal: hiển thị lịch trả góp trong `/me/invoices/[id]`.
+
+**Test**: chênh lệch đối soát ca, P&L khớp với tổng báo cáo doanh thu hiện có, chặn check-in khi quá hạn trả góp.
+
+### C. Tăng tương tác hội viên
+
+#### Sprint 22 – Điểm thưởng, huy hiệu, thử thách, giới thiệu bạn bè
+**DB – `000021_loyalty`**
+- `loyalty_ledgers` (id, member_id, points (+/–), reason[`CHECKIN`|`RENEW`|`REFERRAL`|`REVIEW`|`REDEEM`|`ADJUST`], ref_type, ref_id, created_at); số dư lưu ở `members.loyalty_points` (cập nhật trong cùng transaction).
+- `loyalty_rewards` (id, name, cost_points, reward_type[`VOUCHER`|`PRODUCT`], ref_id, stock, status).
+- `badges` (id, code, name, icon, rule jsonb) + `member_badges` (member_id, badge_id, earned_at).
+- `challenges` (id, branch_id NULL, name, metric[`CHECKINS`|`CLASSES`|`PT_SESSIONS`], target, start_date, end_date, reward_points) + `challenge_participants` (challenge_id, member_id, progress, completed_at).
+- Thêm `members.referral_code` UNIQUE, `members.referred_by` NULL.
+
+**Nghiệp vụ**
+- Cộng điểm qua hook sau check-in hợp lệ (tối đa 1 lần/ngày), gia hạn gói, đánh giá HLV, giới thiệu thành công (khi người được giới thiệu thanh toán gói đầu tiên).
+- Đổi điểm lấy voucher (sinh `promotions` mã riêng 1 lần dùng) hoặc sản phẩm (nhận tại quầy qua POS).
+- Cron `evaluate_badges_challenges` (01:00): xét huy hiệu (chuỗi 30 ngày, 100 buổi…) và cập nhật tiến độ thử thách; bảng xếp hạng theo chi nhánh.
+- Cấu hình tỷ lệ điểm trong `settings`.
+
+**API**: admin – CRUD `/admin/loyalty-rewards`, `/admin/badges`, `/admin/challenges`, `POST /admin/members/{id}/points/adjust`. Portal – `GET /member/loyalty` (số dư, lịch sử), `POST /member/loyalty/redeem`, `GET /member/badges`, `GET/POST /member/challenges/{id}/join`, `GET /member/leaderboard`, `GET /member/referral`.
+
+**FE**: web – trang `/me/rewards` (điểm, đổi quà, mã giới thiệu có nút chia sẻ), `/me/challenges` (tiến độ, bảng xếp hạng), huy hiệu trên `/me`. Landing nhận `?ref=CODE` → lưu vào form tập thử (Sprint 16).
+
+**Test**: không cộng điểm check-in 2 lần/ngày, đổi quà khi thiếu điểm/hết quà, điểm giới thiệu chỉ cộng 1 lần.
+
+#### Sprint 23 – Dinh dưỡng, bảng tin & khảo sát NPS
+**DB – `000022_engagement`**
+- `foods` (id, name, unit, calories, protein, carbs, fat) – seed món ăn Việt phổ biến.
+- `meal_plans` (id, member_id, trainer_id, name, target_calories, start_date, end_date) + `meal_plan_items` (id, plan_id, day_index, meal[`BREAKFAST`|`LUNCH`|`DINNER`|`SNACK`], food_id, qty).
+- `food_logs` (id, member_id, food_id, qty, meal, eaten_at).
+- `announcements` (id, branch_id NULL, title, body, image_url, publish_at, expire_at, pinned, created_by).
+- `surveys` (id, title, type[`NPS`|`CUSTOM`], start_at, end_at, status) + `survey_responses` (id, survey_id, member_id, score, answers jsonb, created_at).
+
+**Nghiệp vụ**
+- Gợi ý calo mục tiêu từ `body_metrics` (BMR Mifflin–St Jeor × hệ số vận động, điều chỉnh theo mục tiêu giảm/tăng cân); HLV giao thực đơn, hội viên ghi bữa ăn và xem tổng calo/macro theo ngày.
+- Bảng tin theo chi nhánh (lịch nghỉ lễ, sự kiện), ghim tin quan trọng, gửi thông báo khi đăng.
+- Khảo sát NPS định kỳ: cron `send_nps_survey` gửi cho hội viên đủ 30 ngày tập; báo cáo NPS theo chi nhánh, điểm < 7 tạo việc chăm sóc cho lễ tân (danh sách at-risk Sprint 16).
+
+**API**: admin – CRUD `/admin/foods`, `/admin/meal-plans`, `/admin/announcements`, `/admin/surveys`, `GET /admin/reports/nps`. Portal – `GET /member/meal-plans`, `POST/GET /member/food-logs`, `GET /member/announcements`, `POST /member/surveys/{id}/responses`.
+
+**FE**: web – `/me/nutrition` (thực đơn, ghi bữa ăn, vòng calo/macro), bảng tin trên `/me`, popup khảo sát NPS; admin – soạn thực đơn, quản lý bảng tin, dashboard NPS.
+
+### Tổng hợp Giai đoạn 3
+| Nhóm | Sprint | Nội dung | Migration | Độ khó |
+|---|---|---|---|---|
+| A | 18 | Thiết bị ra vào, kiosk tự check-in | 000017 | Trung bình |
+| A | 19 | Tủ đồ, dịch vụ theo lượt | 000018 | Thấp–Trung bình |
+| B | 20 | Chấm công, bảng lương | 000019 | Trung bình |
+| B | 21 | Chi phí, P&L, đối soát ca, trả góp | 000020 | Cao |
+| C | 22 | Điểm thưởng, huy hiệu, thử thách, giới thiệu | 000021 | Trung bình |
+| C | 23 | Dinh dưỡng, bảng tin, NPS | 000022 | Trung bình |
+
+Thứ tự ưu tiên gợi ý: **18 (kiosk) → 20 (lương) → 22 (điểm thưởng) → 21 → 19 → 23**.
+
+---
+
+## 14. Giai đoạn 4 – Hoàn thiện nghiệp vụ, bảo mật & chất lượng (Sprint 24–28) + Backlog
+
+> Cùng quy ước các giai đoạn trước; migration đánh số tiếp từ `000023`. Phạm vi **không** gồm mobile app, tích hợp bên ngoài, AI, SaaS multi-tenant.
+> Ký hiệu ưu tiên: ⭐⭐⭐ nên làm · ⭐⭐ hay · ⭐ thêm nếu còn thời gian. Các sprint 24–28 lấy từ các mục ⭐⭐⭐.
+
+### Sprint 24 – Hợp đồng điện tử, vé ngày & gói off-peak
+**DB – `000023_contracts_passes`**
+- `contract_templates` (id, code, name, body_html, version, status) – mẫu hợp đồng/cam kết miễn trừ, có biến `{{member_name}}`, `{{plan_name}}`…
+- `member_contracts` (id, member_id, template_id, template_version, subscription_id NULL, signed_at, signature_url, pdf_url, ip, user_agent).
+- `day_passes` (id, branch_id, buyer_name, phone, member_id NULL, sponsor_member_id NULL, type[`DAY`|`GUEST`], valid_date, qr_token, invoice_id NULL, used_at).
+- Thêm `membership_plans.access_hours` jsonb (vd `[{"dow":[1,2,3,4,5],"from":"09:00","to":"16:00"}]`) và `membership_plans.guest_passes_per_month`.
+
+**Nghiệp vụ**
+- Hội viên ký hợp đồng trên portal (canvas chữ ký) → render PDF lưu vào upload; cấu hình `settings` bắt buộc ký trước lần check-in đầu (rule engine: `deny_reason = CONTRACT_UNSIGNED`).
+- Vé ngày bán tại quầy/POS, QR dùng 1 lần trong ngày; hội viên gói có `guest_passes_per_month` tự tạo vé khách trên portal (giới hạn theo tháng).
+- Gói off-peak: rule engine check-in kiểm tra `access_hours` (`deny_reason = OUTSIDE_ACCESS_HOURS`).
+
+**API**: CRUD `/admin/contract-templates`, `GET /admin/members/{id}/contracts`; `POST /admin/day-passes`, `GET /admin/day-passes`; portal – `GET /member/contracts/pending`, `POST /member/contracts/{id}/sign`, `POST /member/guest-passes`, `GET /member/guest-passes`. Màn quét check-in nhận thêm QR vé ngày.
+
+**FE**: admin – soạn mẫu hợp đồng, bán vé ngày, cấu hình khung giờ trong form gói tập; web – trang ký hợp đồng, `/me/guest-passes`.
+
+**Test**: check-in ngoài khung giờ, vé ngày dùng lại/sai ngày, vượt số vé khách tháng, chưa ký hợp đồng.
+
+### Sprint 25 – Lịch rảnh HLV, đơn nghỉ & HLV thay thế, lịch ngày lễ
+**DB – `000024_availability_holidays`**
+- `trainer_availabilities` (id, trainer_id, branch_id, dow, start_time, end_time, effective_from, effective_to).
+- `staff_leave_requests` (id, staff_id, from_at, to_at, reason, status[`PENDING`|`APPROVED`|`REJECTED`], approved_by).
+- `class_schedules.substitute_trainer_id` NULL; `pt_sessions` thêm `original_trainer_id` NULL.
+- `branch_holidays` (id, branch_id NULL, date, name, closed bool, open_time NULL, close_time NULL).
+
+**Nghiệp vụ**
+- `trainer-availability` (portal + admin) chỉ trả khung giờ nằm trong `trainer_availabilities`, trừ buổi đã đặt và thời gian nghỉ phép đã duyệt.
+- Duyệt đơn nghỉ → liệt kê lớp/buổi PT bị ảnh hưởng → quản lý gán HLV thay (kiểm tra trùng lịch bằng EXCLUDE sẵn có) hoặc hủy; tự thông báo hội viên liên quan.
+- Ngày lễ: chặn tạo/đặt lớp, buổi PT và check-in ngoài giờ mở đặc biệt; khi thêm ngày nghỉ, cảnh báo các lịch đã tồn tại. Tùy chọn cộng bù ngày cho gói `TIME` khi đóng cửa cả ngày.
+
+**API**: `GET/PUT /admin/trainers/{id}/availability`, CRUD `/admin/leave-requests` + `/approve`, `/reject`, `GET /admin/leave-requests/{id}/impacts`, `POST /admin/class-schedules/{id}/substitute`, `POST /admin/pt-sessions/{id}/reassign`; CRUD `/admin/branch-holidays`; public – `GET /v1/public/branches/{id}/holidays`.
+
+**FE**: admin – lịch rảnh dạng lưới tuần, màn duyệt nghỉ kèm danh sách ảnh hưởng, lịch ngày lễ; web – hiển thị ngày nghỉ trên lịch lớp và landing.
+
+**Test**: đặt PT ngoài lịch rảnh, HLV thay bị trùng lịch, check-in ngày nghỉ, cộng bù ngày gói.
+
+### Sprint 26 – Mật độ phòng realtime, KPI doanh số, cohort retention
+**DB – `000025_kpi`**
+- `sales_targets` (id, branch_id, staff_id NULL, period `YYYY-MM`, metric[`REVENUE`|`NEW_MEMBERS`|`RENEWALS`|`PT_SALES`], target_value).
+- Thêm `branches.capacity` (sức chứa an toàn).
+
+**Nghiệp vụ & API**
+- Mật độ: `GET /v1/public/branches/occupancy` và `/member/occupancy` → số người đang tập (từ `checkins/present`) / `capacity` → mức `QUIET|NORMAL|BUSY|FULL`; kèm biểu đồ "giờ thường đông" lấy từ heatmap. Cache 60 giây.
+- KPI: CRUD `/admin/sales-targets`, `GET /admin/reports/kpi?period=` → thực tế vs mục tiêu theo nhân viên/chi nhánh (tính từ invoices, subscriptions, pt_contracts).
+- Cohort: `GET /admin/reports/cohort?from=&to=&branch_id=` → ma trận % hội viên còn gói ACTIVE theo tháng gia nhập × tháng thứ N; xuất Excel.
+
+**FE**: web – chỉ báo mật độ trên `/me` và landing; admin – dashboard KPI (thanh tiến độ), heatmap cohort.
+
+**Test**: cohort với hội viên bảo lưu/chuyển nhượng, KPI cá nhân khớp tổng chi nhánh.
+
+### Sprint 27 – 2FA, quản lý phiên, tuân thủ Nghị định 13/2023
+**DB – `000026_security_privacy`**
+- `user_mfa` (user_id PK, totp_secret_enc, enabled_at, recovery_codes_hash text[]).
+- `refresh_tokens` thêm `device_name`, `last_used_at`.
+- `consents` (id, member_id, type[`TERMS`|`MARKETING`|`PHOTO`], granted bool, granted_at, ip).
+- `data_requests` (id, member_id, type[`EXPORT`|`DELETE`], status[`PENDING`|`PROCESSING`|`DONE`|`REJECTED`], file_url, handled_by, created_at, done_at).
+
+**Nghiệp vụ & API**
+- 2FA TOTP: `POST /auth/mfa/setup` (trả QR otpauth), `/auth/mfa/enable`, `/auth/mfa/disable`; login trả `mfa_required` + token tạm → `POST /auth/mfa/verify`. Bắt buộc với OWNER/MANAGER (cấu hình trong `settings`); có mã khôi phục dùng 1 lần.
+- Phiên đăng nhập: `GET /auth/sessions`, `DELETE /auth/sessions/{id}`, `POST /auth/sessions/revoke-others`.
+- Quyền riêng tư: hội viên `GET/PUT /member/consents`, `POST /member/data-requests` (xuất JSON/ZIP dữ liệu của mình; yêu cầu xóa → admin duyệt → ẩn danh hóa thay vì xóa cứng để giữ toàn vẹn hóa đơn). Admin: `GET /admin/data-requests`, `/process`.
+- Mã hóa `members.id_card` (AES-GCM, khóa từ env) + che SĐT/CCCD trong response nếu thiếu quyền `member.view_sensitive`; mọi lần xem dữ liệu nhạy cảm ghi audit log.
+
+**FE**: admin + web – trang bảo mật tài khoản (bật 2FA, danh sách phiên); web – quản lý đồng ý, yêu cầu xuất/xóa dữ liệu; admin – hàng đợi yêu cầu dữ liệu.
+
+**Test**: login thiếu/sai mã TOTP, mã khôi phục dùng lại, thu hồi phiên, ẩn danh hóa không phá hóa đơn, che dữ liệu theo quyền.
+
+### Sprint 28 – Kiểm thử E2E, tải & API trong CI
+- **Playwright** (`e2e/` ở thư mục gốc): 5 luồng chính – đăng nhập → bán gói → check-in → đặt lớp → xem báo cáo; thêm luồng hội viên tự mua gói (Sprint 13). Chạy trên docker compose + seed.
+- **k6** (`perf/`): check-in 100 req/s, danh sách 10k hội viên, đặt lớp đồng thời; ghi p95/p99 vào chương Kiểm thử.
+- **Postman/Newman**: collection kịch bản API end-to-end, chạy trong GitHub Actions.
+- **Vitest** cho `gymmaster-web` và `gymmaster-admin`: schema form, helper định dạng, component quan trọng.
+- CI: job e2e chạy khi merge vào nhánh chính, upload report/screenshot làm artifact.
+
+### Tổng hợp Giai đoạn 4
+| Sprint | Nội dung | Migration | Độ khó |
+|---|---|---|---|
+| 24 | Hợp đồng điện tử, vé ngày/khách, gói off-peak | 000023 | Trung bình |
+| 25 | Lịch rảnh HLV, đơn nghỉ & HLV thay, ngày lễ | 000024 | Trung bình–Cao |
+| 26 | Mật độ realtime, KPI doanh số, cohort retention | 000025 | Trung bình |
+| 27 | 2FA, quản lý phiên, Nghị định 13/2023 | 000026 | Cao |
+| 28 | Playwright, k6, Newman, Vitest trong CI | — | Trung bình |
+
+### Backlog (bốc dần vào sprint khi còn thời gian)
+
+**Hội viên & CRM**
+| Tính năng | Mô tả | Ưu tiên |
+|---|---|---|
+| Hồ sơ sức khỏe (PAR-Q) | Câu hỏi tiền sử bệnh/chấn thương; cảnh báo cho HLV khi nhận học viên | ⭐⭐ |
+| Ảnh tiến độ before/after | Upload ảnh theo mốc, so sánh cạnh nhau trong `/me/progress` | ⭐⭐ |
+| Tag & phân khúc hội viên | Gắn tag, bộ lọc động lưu lại | ⭐⭐ |
+| Chiến dịch email theo phân khúc | Soạn template, gửi theo phân khúc, thống kê mở/click | ⭐⭐ |
+| Gói gia đình / nhóm | Một người trả, nhiều thành viên dùng chung, giới hạn số người | ⭐⭐ |
+| Hội viên doanh nghiệp (B2B) | Hợp đồng với công ty, danh sách nhân viên, hóa đơn gộp theo tháng | ⭐ |
+| Gộp hội viên trùng | Phát hiện trùng theo SĐT/CCCD, gộp lịch sử | ⭐ |
+
+**Gói tập & giá bán**
+| Tính năng | Mô tả | Ưu tiên |
+|---|---|---|
+| Ví trả trước | Nạp tiền, trừ khi mua POS/vé lẻ/gia hạn, lịch sử giao dịch ví | ⭐⭐ |
+| Thẻ quà tặng | Mua tặng, mã kích hoạt, có hạn dùng | ⭐⭐ |
+| Gói combo | Gói tập + N buổi PT + tủ đồ, bán 1 lần, tách dòng hóa đơn | ⭐⭐ |
+| Tự động gia hạn | Bật auto-renew, cron tạo hóa đơn trước hạn 3 ngày | ⭐ |
+| Giá theo thời điểm | Giá mùa/flash sale gắn trực tiếp vào gói | ⭐ |
+
+**Lớp nhóm & PT**
+| Tính năng | Mô tả | Ưu tiên |
+|---|---|---|
+| PT nhóm nhỏ (2–4 người) | Hợp đồng chia sẻ, buổi trừ cho nhiều hội viên, chia hoa hồng | ⭐⭐ |
+| Chọn vị trí trong lớp | Sơ đồ phòng (xe spinning, thảm yoga), đặt đúng chỗ | ⭐⭐ |
+| Lớp tính phí lẻ (drop-in) | Không có gói lớp vẫn đặt, trả theo buổi | ⭐⭐ |
+| Đánh giá thể lực định kỳ | Bộ bài test, chấm điểm, so sánh theo kỳ | ⭐⭐ |
+| Danh sách chờ PT | Khung giờ kín thì xếp hàng, có người hủy tự báo | ⭐ |
+
+**Vận hành cơ sở**
+| Tính năng | Mô tả | Ưu tiên |
+|---|---|---|
+| Checklist công việc ca | Checklist mở/đóng cửa, vệ sinh theo khu; quản lý xem tiến độ | ⭐⭐ |
+| Báo cáo sự cố / chấn thương | Ghi sự cố, người xử lý, ảnh đính kèm | ⭐⭐ |
+| Đặt chỗ tiện ích | Sauna, bể bơi, sân… theo khung giờ, giới hạn sức chứa | ⭐⭐ |
+| Đồ thất lạc | Ghi nhận, hội viên tra cứu và nhận lại | ⭐ |
+
+**POS & kho**
+| Tính năng | Mô tả | Ưu tiên |
+|---|---|---|
+| Đơn đặt hàng NCC (PO) | Tạo PO từ cảnh báo tồn thấp → nhận hàng → tự tạo phiếu nhập | ⭐⭐ |
+| Lô & hạn sử dụng | Nhập theo lô, xuất FEFO, cron cảnh báo sắp hết hạn | ⭐⭐ |
+| Kiểm kê định kỳ | Phiên kiểm kê, nhập số đếm, tự tạo phiếu điều chỉnh | ⭐⭐ |
+| Quầy bar có công thức | Trừ kho nguyên liệu theo công thức (BOM) | ⭐ |
+| Đặt hàng trước trên portal | Đặt sản phẩm, nhận tại quầy khi check-in | ⭐ |
+
+**Nhân sự**
+| Tính năng | Mô tả | Ưu tiên |
+|---|---|---|
+| Quỹ phép năm | Theo dõi số ngày phép, trừ vào bảng lương | ⭐⭐ |
+| Chứng chỉ HLV | Lưu chứng chỉ có hạn, cron nhắc sắp hết hạn | ⭐ |
+
+**Báo cáo & phân tích**
+| Tính năng | Mô tả | Ưu tiên |
+|---|---|---|
+| LTV & hiệu quả nguồn khách | Giá trị vòng đời, doanh thu theo nguồn lead | ⭐⭐ |
+| So sánh chi nhánh | Xếp hạng theo doanh thu, retention, lấp đầy lớp | ⭐⭐ |
+| Báo cáo gửi email theo lịch | Báo cáo tuần/tháng (PDF/Excel) gửi chủ phòng tập | ⭐⭐ |
+| Lưu bộ lọc / báo cáo yêu thích | Lưu cấu hình bộ lọc, ghim lên dashboard | ⭐ |
+
+**Hệ thống**
+| Tính năng | Mô tả | Ưu tiên |
+|---|---|---|
+| Tối ưu dữ liệu lớn | Phân vùng `checkins`/`audit_logs` theo tháng, materialized view cho báo cáo | ⭐⭐ |
+| Đa ngôn ngữ | Thêm `messages/en` cho web (đã có `next-intl`), i18n cho admin | ⭐ |

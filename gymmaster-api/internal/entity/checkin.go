@@ -6,6 +6,7 @@ import "time"
 const (
 	CheckinMethodQR     = "QR"
 	CheckinMethodManual = "MANUAL"
+	CheckinMethodDevice = "DEVICE"
 
 	CheckinAllowed = "ALLOWED"
 	CheckinDenied  = "DENIED"
@@ -19,6 +20,13 @@ const (
 	CheckinDenyQRExpired            = "QR_EXPIRED"
 	CheckinDenyQRInvalid            = "QR_INVALID"
 	CheckinDenyBranchClosed         = "BRANCH_CLOSED"
+	CheckinDenyTrialPassUsed        = "TRIAL_PASS_USED"
+	CheckinDenyTrialPassExpired     = "TRIAL_PASS_EXPIRED"
+	CheckinDenyDayPassUsed          = "DAY_PASS_USED"
+	CheckinDenyDayPassExpired       = "DAY_PASS_EXPIRED"
+	CheckinDenyInstallmentOverdue   = "INSTALLMENT_OVERDUE"
+	CheckinDenyContractUnsigned     = "CONTRACT_UNSIGNED"
+	CheckinDenyOutsideAccessHours   = "OUTSIDE_ACCESS_HOURS"
 )
 
 // Checkin là một lần quét/ra vào. Mọi lần quét đều được ghi, kể cả bị từ chối.
@@ -27,6 +35,8 @@ type Checkin struct {
 	MemberID       uint `gorm:"not null"`
 	BranchID       uint `gorm:"not null"`
 	SubscriptionID *uint
+	DeviceID       *uint
+	DayPassID      *uint
 	CheckedInAt    time.Time `gorm:"not null"`
 	CheckedOutAt   *time.Time
 	Method         string `gorm:"type:varchar(10);not null"`
@@ -55,4 +65,6 @@ type CheckinSubscriptionView struct {
 	PlanName          string
 	PlanType          string // TIME | SESSION
 	AccessScope       string // SINGLE_BRANCH | ALL_BRANCHES
+	AccessHours       string // JSONB khung giờ off-peak (nếu có)
 }
+

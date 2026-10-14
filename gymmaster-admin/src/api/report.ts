@@ -77,7 +77,7 @@ export interface ReportOverview {
 // ------------------------------------------------------------------ revenue
 
 export type RevenueType = 'MEMBERSHIP' | 'PT' | 'PRODUCT' | 'FEE' | 'OTHER';
-export type RevenueMethod = 'CASH' | 'TRANSFER' | 'CARD';
+export type RevenueMethod = 'CASH' | 'TRANSFER' | 'CARD' | 'VNPAY';
 
 export interface RevenuePoint {
   period: string;
@@ -208,6 +208,8 @@ export interface TrainerPerformanceRow {
   trainer_id: number;
   trainer_name: string;
   level: string;
+  rating_avg?: number;
+  rating_count?: number;
   pt_completed: number;
   pt_scheduled: number;
   pt_no_show: number;

@@ -15,6 +15,12 @@ export type NotificationType =
   | 'PT_NO_SHOW'
   | 'COMMISSION_PAID'
   | 'LOW_STOCK'
+  | 'PAYMENT_SUCCESS'
+  | 'REVIEW_PROMPT'
+  | 'MAINTENANCE_DUE'
+  | 'BIRTHDAY'
+  | 'LEAD_NEW'
+  | 'CHECKIN'
   | 'SYSTEM';
 
 export interface Notification {
@@ -67,6 +73,12 @@ export const NOTIFICATION_TYPE_LABEL: Record<string, string> = {
   PT_NO_SHOW: 'Vắng buổi PT',
   COMMISSION_PAID: 'Chi hoa hồng',
   LOW_STOCK: 'Tồn kho thấp',
+  PAYMENT_SUCCESS: 'Thanh toán thành công',
+  REVIEW_PROMPT: 'Đánh giá buổi tập',
+  MAINTENANCE_DUE: 'Đến hạn bảo trì',
+  BIRTHDAY: 'Sinh nhật hội viên',
+  LEAD_NEW: 'Khách tiềm năng mới',
+  CHECKIN: 'Check-in mới',
   SYSTEM: 'Hệ thống',
 };
 

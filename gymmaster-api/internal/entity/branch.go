@@ -9,7 +9,9 @@ type Branch struct {
 	Email     string `gorm:"type:varchar(150);not null;default:''"`
 	OpenTime  string `gorm:"type:varchar(5);not null"`
 	CloseTime string `gorm:"type:varchar(5);not null"`
+	Capacity  int    `gorm:"not null;default:120"`
 	Status    string `gorm:"type:varchar(20);not null;default:'ACTIVE'"`
 }
 
 func (Branch) TableName() string { return "branches" }
+

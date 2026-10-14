@@ -386,7 +386,7 @@ func (s *invoiceService) lock(ctx context.Context, id uint) (*entity.Invoice, er
 }
 
 func invoiceValidMethod(m string) error {
-	if !slices.Contains(invoicePayMethods, m) {
+	if m != entity.PaymentVNPay && !slices.Contains(invoicePayMethods, m) {
 		return rescode.New(rescode.BadRequest, "Phương thức thanh toán không hợp lệ")
 	}
 	return nil

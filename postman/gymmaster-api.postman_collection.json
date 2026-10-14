@@ -1,0 +1,222 @@
+{
+  "info": {
+    "name": "GymMaster API End-to-End Collection (Sprints 1–28)",
+    "_postman_id": "gymmaster-e2e-collection-2026",
+    "description": "Bộ kịch bản kiểm thử tự động API End-to-End cho hệ thống GymMaster chạy với Postman / Newman trong CI.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000/v1" },
+    { "key": "adminToken", "value": "" },
+    { "key": "memberToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Public & Health",
+      "item": [
+        {
+          "name": "GET /public/health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 & code 0', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.code).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/public/health"
+          }
+        },
+        {
+          "name": "GET /public/branches",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/public/branches"
+          }
+        },
+        {
+          "name": "GET /public/plans",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/public/plans"
+          }
+        },
+        {
+          "name": "GET /public/class-schedules",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/public/class-schedules"
+          }
+        },
+        {
+          "name": "GET /public/branches/occupancy",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/public/branches/occupancy"
+          }
+        },
+        {
+          "name": "GET /public/holidays",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/public/holidays"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Auth & Security",
+      "item": [
+        {
+          "name": "POST /auth/login (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Admin login success', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const json = pm.response.json();",
+                  "  if (json.data && json.data.access_token) {",
+                  "    pm.collectionVariables.set('adminToken', json.data.access_token);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"admin@gymmaster.vn\",\"password\":\"Admin@123\"}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "POST /auth/forgot-password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\":\"hoivien01@gymmaster.vn\",\"portal\":\"WEB\"}"
+            },
+            "url": "{{baseUrl}}/auth/forgot-password"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Admin Operations, Finance, Loyalty & Analytics",
+      "item": [
+        {
+          "name": "GET /admin/members",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/members"
+          }
+        },
+        {
+          "name": "GET /admin/exercises",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/exercises"
+          }
+        },
+        {
+          "name": "GET /admin/equipments",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/equipments"
+          }
+        },
+        {
+          "name": "GET /admin/leads",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/leads"
+          }
+        },
+        {
+          "name": "GET /admin/access-devices",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/access-devices"
+          }
+        },
+        {
+          "name": "GET /admin/lockers/board",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/lockers/board"
+          }
+        },
+        {
+          "name": "GET /admin/payrolls",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/payrolls"
+          }
+        },
+        {
+          "name": "GET /admin/reports/profit-loss",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/reports/profit-loss"
+          }
+        },
+        {
+          "name": "GET /admin/loyalty-rewards",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/loyalty-rewards"
+          }
+        },
+        {
+          "name": "GET /admin/reports/nps",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/reports/nps"
+          }
+        },
+        {
+          "name": "GET /admin/reports/kpi",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/reports/kpi"
+          }
+        },
+        {
+          "name": "GET /admin/reports/cohort",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{baseUrl}}/admin/reports/cohort"
+          }
+        }
+      ]
+    }
+  ]
+}

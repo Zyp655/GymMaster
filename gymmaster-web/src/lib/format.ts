@@ -6,8 +6,16 @@ const currencyFormatter = new Intl.NumberFormat('vi-VN', {
   maximumFractionDigits: 0,
 });
 
+const numberFormatter = new Intl.NumberFormat('vi-VN', {
+  maximumFractionDigits: 1,
+});
+
 export function formatCurrency(value: number | null | undefined): string {
   return currencyFormatter.format(value ?? 0);
+}
+
+export function formatNumber(value: number | null | undefined): string {
+  return numberFormatter.format(value ?? 0);
 }
 
 export function formatDate(

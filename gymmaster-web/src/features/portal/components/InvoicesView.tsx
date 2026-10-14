@@ -2,12 +2,17 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { DocumentTextIcon, EyeIcon } from '@heroicons/react/24/outline';
+import {
+  CalendarDaysIcon,
+  CreditCardIcon,
+  DocumentTextIcon,
+  EyeIcon,
+} from '@heroicons/react/24/outline';
 import { EmptyState } from '@/components/common/EmptyState';
 import { LoadError } from '@/components/common/LoadError';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -25,21 +30,44 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { formatCurrency, formatDateTime } from '@/lib/format';
+import { useToastApiError } from '@/hooks/use-api-error';
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/format';
 import { looseT } from '@/lib/utils';
-import { useInvoiceDetailQuery, useInvoicesQuery } from '../queries';
+import {
+  useCreateInvoiceVNPayMutation,
+  useInvoiceDetailQuery,
+  useInvoicesQuery,
+  useMemberInstallmentsQuery,
+} from '../queries';
 import { PaginationControls } from './PaginationControls';
 import { PortalPageHeader } from './PortalPageHeader';
-import { InvoiceStatusBadge } from './PortalStatusBadge';
+import { InstallmentStatusBadge, InvoiceStatusBadge } from './PortalStatusBadge';
 
 const PAGE_LIMIT = 10;
 
 export function InvoicesView() {
   const t = useTranslations('portal.invoices');
+  const toastError = useToastApiError();
   const [page, setPage] = useState(1);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
+  const [payingInvoiceId, setPayingInvoiceId] = useState<number | null>(null);
 
   const query = useInvoicesQuery(page, PAGE_LIMIT);
+  const vnpayMutation = useCreateInvoiceVNPayMutation();
+
+  const handlePayVnpay = async (invoiceId: number) => {
+    setPayingInvoiceId(invoiceId);
+    try {
+      const res = await vnpayMutation.mutateAsync(invoiceId);
+      if (res.payment_url) {
+        window.location.assign(res.payment_url);
+      }
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setPayingInvoiceId(null);
+    }
+  };
 
   return (
     <div className="grid gap-6">
@@ -77,43 +105,62 @@ export function InvoicesView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {query.data.items.map(invoice => (
-                  <TableRow key={invoice.id}>
-                    <TableCell className="font-semibold text-primary">
-                      {invoice.invoice_no}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-secondary">
-                      {formatDateTime(invoice.issued_at)}
-                    </TableCell>
-                    <TableCell>{invoice.branch_name}</TableCell>
-                    <TableCell className="font-semibold">
-                      {formatCurrency(invoice.total)}
-                    </TableCell>
-                    <TableCell className="text-secondary">
-                      {formatCurrency(invoice.paid_amount)}
-                    </TableCell>
-                    <TableCell
-                      className={
-                        invoice.due > 0 ? 'font-semibold text-danger' : 'text-secondary'
-                      }
-                    >
-                      {formatCurrency(invoice.due)}
-                    </TableCell>
-                    <TableCell>
-                      <InvoiceStatusBadge status={invoice.status} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setSelectedInvoiceId(invoice.id)}
+                {query.data.items.map(invoice => {
+                  const canPay =
+                    invoice.status === 'UNPAID' || invoice.status === 'PARTIAL';
+                  const isPaying =
+                    vnpayMutation.isPending && payingInvoiceId === invoice.id;
+
+                  return (
+                    <TableRow key={invoice.id}>
+                      <TableCell className="font-semibold text-primary">
+                        {invoice.invoice_no}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-secondary">
+                        {formatDateTime(invoice.issued_at)}
+                      </TableCell>
+                      <TableCell>{invoice.branch_name}</TableCell>
+                      <TableCell className="font-semibold">
+                        {formatCurrency(invoice.total)}
+                      </TableCell>
+                      <TableCell className="text-secondary">
+                        {formatCurrency(invoice.paid_amount)}
+                      </TableCell>
+                      <TableCell
+                        className={
+                          invoice.due > 0 ? 'font-semibold text-danger' : 'text-secondary'
+                        }
                       >
-                        <EyeIcon />
-                        {t('viewDetail')}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                        {formatCurrency(invoice.due)}
+                      </TableCell>
+                      <TableCell>
+                        <InvoiceStatusBadge status={invoice.status} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {canPay ? (
+                            <Button
+                              size="sm"
+                              disabled={isPaying}
+                              onClick={() => void handlePayVnpay(invoice.id)}
+                            >
+                              <CreditCardIcon />
+                              {isPaying ? t('payingVnpay') : t('payVnpay')}
+                            </Button>
+                          ) : null}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedInvoiceId(invoice.id)}
+                          >
+                            <EyeIcon />
+                            {t('viewDetail')}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
 
@@ -127,28 +174,127 @@ export function InvoicesView() {
         )}
       </Card>
 
+      <InstallmentPlansCard />
+
       <InvoiceDetailDialog
         invoiceId={selectedInvoiceId}
+        onPayVnpay={handlePayVnpay}
+        isPayingVnpay={vnpayMutation.isPending && payingInvoiceId === selectedInvoiceId}
         onOpenChange={open => !open && setSelectedInvoiceId(null)}
       />
     </div>
   );
 }
 
+/** Kế hoạch trả góp của hội viên (Sprint 21). */
+function InstallmentPlansCard() {
+  const t = useTranslations('portal.invoices');
+  const query = useMemberInstallmentsQuery();
+  const plans = query.data ?? [];
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-2">
+        <div>
+          <CardTitle>{t('installmentsTitle')}</CardTitle>
+          <p className="text-caption text-secondary">{t('installmentsSubtitle')}</p>
+        </div>
+        <CalendarDaysIcon className="size-5 text-brand-600" />
+      </CardHeader>
+
+      {query.isLoading ? (
+        <div className="grid gap-3">
+          <Skeleton className="h-28 rounded-xl" />
+        </div>
+      ) : plans.length === 0 ? (
+        <EmptyState
+          icon={CalendarDaysIcon}
+          title={t('emptyInstallmentsTitle')}
+          description={t('emptyInstallmentsDesc')}
+          className="py-6"
+        />
+      ) : (
+        <div className="grid gap-4">
+          {plans.map(plan => {
+            const schedules = plan.schedules ?? plan.items ?? [];
+            const planCount = plan.count ?? plan.installments ?? schedules.length;
+            const planTotal = plan.total_amount ?? plan.total ?? 0;
+            return (
+              <div
+                key={plan.id}
+                className="grid gap-3 rounded-xl border border-line bg-canvas p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-body font-semibold text-primary">
+                    {t('installmentPlanHeader', {
+                      invoiceNo: plan.invoice_no || plan.invoice_id,
+                      count: planCount,
+                    })}
+                  </p>
+                  <Badge variant="brand">{formatCurrency(planTotal)}</Badge>
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('colSeq')}</TableHead>
+                      <TableHead>{t('colDueDate')}</TableHead>
+                      <TableHead className="text-right">{t('colInstallmentAmount')}</TableHead>
+                      <TableHead className="text-right">{t('colInstallmentPaid')}</TableHead>
+                      <TableHead className="text-right">{t('colInstallmentStatus')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {schedules.map(sched => (
+                      <TableRow key={sched.id}>
+                        <TableCell className="font-medium text-primary">
+                          {t('seqValue', { seq: sched.seq })}
+                        </TableCell>
+                        <TableCell className="text-secondary">
+                          {formatDate(sched.due_date)}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold text-primary">
+                          {formatCurrency(sched.amount)}
+                        </TableCell>
+                        <TableCell className="text-right text-secondary">
+                          {formatCurrency(sched.paid_amount)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <InstallmentStatusBadge status={sched.status} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function InvoiceDetailDialog({
   invoiceId,
+  onPayVnpay,
+  isPayingVnpay,
   onOpenChange,
 }: {
   invoiceId: number | null;
+  onPayVnpay: (invoiceId: number) => Promise<void>;
+  isPayingVnpay: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations('portal.invoices.detail');
+  const tiMain = useTranslations('portal.invoices');
   const tc = useTranslations('common');
   const ti = looseT(useTranslations('portal.invoices.detail.itemTypes'));
   const tm = looseT(useTranslations('portal.invoices.detail.paymentMethods'));
 
   const detailQuery = useInvoiceDetailQuery(invoiceId);
   const detail = detailQuery.data;
+  const canPay = detail?.status === 'UNPAID' || detail?.status === 'PARTIAL';
 
   const translateItemType = (type: string) => {
     try {
@@ -340,6 +486,15 @@ function InvoiceDetailDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {tc('actions.close')}
           </Button>
+          {detail && canPay ? (
+            <Button
+              disabled={isPayingVnpay}
+              onClick={() => void onPayVnpay(detail.id)}
+            >
+              <CreditCardIcon />
+              {isPayingVnpay ? tiMain('payingVnpay') : tiMain('payVnpay')}
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

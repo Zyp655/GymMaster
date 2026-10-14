@@ -50,3 +50,48 @@ type ChangePasswordReq struct {
 	NewPassword string `json:"new_password" v:"required|length:8,72|different:OldPassword#Vui lòng nhập mật khẩu mới|Mật khẩu mới từ 8 đến 72 ký tự|Mật khẩu mới phải khác mật khẩu hiện tại"`
 }
 type ChangePasswordRes struct{}
+
+type ForgotPasswordReq struct {
+	g.Meta `path:"/auth/forgot-password" method:"post" tags:"Xác thực" summary:"Yêu cầu đặt lại mật khẩu"`
+	Email  string `json:"email"  v:"required|email#Vui lòng nhập email|Email không hợp lệ"`
+	Portal string `json:"portal" dc:"WEB hoặc ADMIN"`
+}
+
+type ForgotPasswordRes struct {
+	Message string `json:"message"`
+}
+
+type ResetPasswordReq struct {
+	g.Meta      `path:"/auth/reset-password" method:"post" tags:"Xác thực" summary:"Đặt lại mật khẩu bằng token"`
+	Token       string `json:"token"        v:"required#Thiếu token đặt lại mật khẩu"`
+	NewPassword string `json:"new_password" v:"required|length:8,72#Vui lòng nhập mật khẩu mới|Mật khẩu mới từ 8 đến 72 ký tự"`
+}
+
+type ResetPasswordRes struct {
+	Message string `json:"message"`
+}
+
+type RegisterMemberReq struct {
+	g.Meta   `path:"/auth/register-member" method:"post" tags:"Xác thực" summary:"Hội viên tự đăng ký tài khoản"`
+	FullName string `json:"full_name" v:"required|length:2,150#Vui lòng nhập họ tên|Họ tên từ 2 đến 150 ký tự"`
+	Phone    string `json:"phone"     v:"required|length:9,20#Vui lòng nhập số điện thoại|Số điện thoại không hợp lệ"`
+	Email    string `json:"email"     v:"required|email#Vui lòng nhập email|Email không hợp lệ"`
+	Password string `json:"password"  v:"required|length:8,72#Vui lòng nhập mật khẩu|Mật khẩu từ 8 đến 72 ký tự"`
+	BranchID uint   `json:"branch_id"`
+}
+
+type RegisterMemberRes struct {
+	RequiresOTP bool      `json:"requires_otp"`
+	Message     string    `json:"message"`
+	Token       *TokenRes `json:"token,omitempty"`
+}
+
+type VerifyMemberOTPReq struct {
+	g.Meta `path:"/auth/verify-member-otp" method:"post" tags:"Xác thực" summary:"Xác thực OTP liên kết hồ sơ hội viên"`
+	Phone  string `json:"phone" v:"required#Vui lòng nhập số điện thoại"`
+	Email  string `json:"email" v:"required|email#Vui lòng nhập email|Email không hợp lệ"`
+	OTP    string `json:"otp"   v:"required|length:6,6#Vui lòng nhập mã OTP|Mã OTP phải gồm 6 chữ số"`
+}
+
+type VerifyMemberOTPRes = TokenRes
+

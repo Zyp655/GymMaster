@@ -4,9 +4,14 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import type {
   BookingStatus,
+  ContractStatus,
+  DataRequestStatus,
   FreezeStatus,
+  InstallmentScheduleStatus,
   InvoiceStatus,
+  LockerRentalType,
   Member,
+  OccupancyStatus,
   PTContractStatus,
   PTSessionStatus,
   SubscriptionStatus,
@@ -68,6 +73,36 @@ const invoiceVariant: Record<InvoiceStatus, BadgeVariant> = {
   VOID: 'neutral',
 };
 
+const occupancyVariant: Record<OccupancyStatus, BadgeVariant> = {
+  QUIET: 'success',
+  NORMAL: 'info',
+  BUSY: 'warning',
+  FULL: 'danger',
+};
+
+const lockerTypeVariant: Record<LockerRentalType, BadgeVariant> = {
+  DAILY: 'info',
+  MONTHLY: 'brand',
+};
+
+const installmentVariant: Record<InstallmentScheduleStatus, BadgeVariant> = {
+  PENDING: 'warning',
+  PAID: 'success',
+  OVERDUE: 'danger',
+};
+
+const contractVariant: Record<ContractStatus, BadgeVariant> = {
+  PENDING: 'warning',
+  SIGNED: 'success',
+};
+
+const dataRequestVariant: Record<DataRequestStatus, BadgeVariant> = {
+  PENDING: 'warning',
+  PROCESSING: 'info',
+  DONE: 'success',
+  REJECTED: 'danger',
+};
+
 export function MemberStatusBadge({ status }: { status: Member['status'] }) {
   const t = useTranslations('portal.status.member');
   return <Badge variant={memberVariant[status]}>{t(status)}</Badge>;
@@ -101,4 +136,29 @@ export function PTSessionStatusBadge({ status }: { status: PTSessionStatus }) {
 export function InvoiceStatusBadge({ status }: { status: InvoiceStatus }) {
   const t = useTranslations('portal.status.invoice');
   return <Badge variant={invoiceVariant[status]}>{t(status)}</Badge>;
+}
+
+export function OccupancyStatusBadge({ status }: { status: OccupancyStatus }) {
+  const t = useTranslations('portal.status.occupancy');
+  return <Badge variant={occupancyVariant[status] ?? 'neutral'}>{t(status)}</Badge>;
+}
+
+export function LockerTypeBadge({ type }: { type: LockerRentalType }) {
+  const t = useTranslations('portal.status.lockerType');
+  return <Badge variant={lockerTypeVariant[type] ?? 'neutral'}>{t(type)}</Badge>;
+}
+
+export function InstallmentStatusBadge({ status }: { status: InstallmentScheduleStatus }) {
+  const t = useTranslations('portal.status.installment');
+  return <Badge variant={installmentVariant[status] ?? 'neutral'}>{t(status)}</Badge>;
+}
+
+export function ContractStatusBadge({ status }: { status: ContractStatus }) {
+  const t = useTranslations('portal.status.contract');
+  return <Badge variant={contractVariant[status] ?? 'neutral'}>{t(status)}</Badge>;
+}
+
+export function DataRequestStatusBadge({ status }: { status: DataRequestStatus }) {
+  const t = useTranslations('portal.status.dataRequest');
+  return <Badge variant={dataRequestVariant[status] ?? 'neutral'}>{t(status)}</Badge>;
 }

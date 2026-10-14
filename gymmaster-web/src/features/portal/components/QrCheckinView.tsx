@@ -24,6 +24,19 @@ import type { Profile, QRToken } from '../types';
 
 /** Làm mới mã khi còn ≤ REFRESH_BEFORE giây. */
 const REFRESH_BEFORE = 5;
+const QR_CACHE_KEY = 'gymmaster:last_qr_token';
+
+function readCachedQr(): QRToken | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(QR_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as QRToken;
+    return parsed?.token ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 export function QrCheckinView() {
   const t = useTranslations('portal.qr');
@@ -31,8 +44,23 @@ export function QrCheckinView() {
   const profileQuery = useProfileQuery();
   const { refetch } = qrQuery;
   const refresh = useCallback(() => void refetch(), [refetch]);
+  const [cachedQr, setCachedQr] = useState<QRToken | null>(() => readCachedQr());
+
+  useEffect(() => {
+    if (qrQuery.data) {
+      setCachedQr(qrQuery.data);
+      try {
+        window.localStorage.setItem(QR_CACHE_KEY, JSON.stringify(qrQuery.data));
+      } catch {
+        // Ignore storage quota errors
+      }
+    }
+  }, [qrQuery.data]);
 
   useScreenWakeLock();
+
+  const activeQr = qrQuery.data ?? cachedQr;
+  const isUsingCached = !qrQuery.data && Boolean(cachedQr) && qrQuery.isError;
 
   return (
     <div className="mx-auto grid w-full max-w-md gap-4">
@@ -41,18 +69,25 @@ export function QrCheckinView() {
         <p className="text-body text-secondary">{t('subtitle')}</p>
       </div>
 
-      {qrQuery.isLoading ? (
+      {isUsingCached ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-line bg-warning-50 p-3.5 text-warning">
+          <ExclamationTriangleIcon className="mt-0.5 size-5 shrink-0" />
+          <p className="text-caption font-medium">{t('offlineCachedNotice')}</p>
+        </div>
+      ) : null}
+
+      {qrQuery.isLoading && !activeQr ? (
         <Card className="items-center p-6">
           <Skeleton className="size-64 rounded-2xl" />
           <Skeleton className="h-5 w-48" />
           <Skeleton className="h-2 w-full" />
         </Card>
-      ) : qrQuery.isError || !qrQuery.data ? (
+      ) : !activeQr ? (
         <Card>
           <LoadError error={qrQuery.error} onRetry={refresh} />
         </Card>
       ) : (
-        <QrTokenCard data={qrQuery.data} isFetching={qrQuery.isFetching} onRefresh={refresh} />
+        <QrTokenCard data={activeQr} isFetching={qrQuery.isFetching} onRefresh={refresh} />
       )}
 
       <div className="flex items-start gap-3 rounded-2xl bg-info-50 p-4 text-info">

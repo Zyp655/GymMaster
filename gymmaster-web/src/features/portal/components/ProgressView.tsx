@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   CartesianGrid,
   Legend,
@@ -11,11 +12,18 @@ import {
   YAxis,
 } from 'recharts';
 import { useTranslations } from 'next-intl';
-import { ChartBarIcon } from '@heroicons/react/24/outline';
+import { ChartBarIcon, FireIcon } from '@heroicons/react/24/outline';
 import { EmptyState } from '@/components/common/EmptyState';
 import { LoadError } from '@/components/common/LoadError';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -26,7 +34,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatDate } from '@/lib/format';
-import { useBodyMetricsQuery } from '../queries';
+import { extractWorkoutProgress } from '../api';
+import { useBodyMetricsQuery, useExercisesQuery, useWorkoutLogsQuery } from '../queries';
 import { PortalPageHeader } from './PortalPageHeader';
 
 export function ProgressView() {
@@ -76,6 +85,7 @@ export function ProgressView() {
             description={t('emptyDesc')}
           />
         </Card>
+        <WorkoutProgressSection />
       </div>
     );
   }
@@ -214,6 +224,8 @@ export function ProgressView() {
         </Card>
       </div>
 
+      <WorkoutProgressSection />
+
       <Card>
         <CardHeader>
           <CardTitle>{t('historyTitle')}</CardTitle>
@@ -254,3 +266,97 @@ export function ProgressView() {
     </div>
   );
 }
+
+function WorkoutProgressSection() {
+  const t = useTranslations('portal.progress');
+  const exercisesQuery = useExercisesQuery();
+  const [selectedExerciseId, setSelectedExerciseId] = useState<number | undefined>(undefined);
+
+  const effectiveExerciseId = selectedExerciseId ?? exercisesQuery.data?.[0]?.id;
+  const logsQuery = useWorkoutLogsQuery(effectiveExerciseId, Boolean(effectiveExerciseId));
+  const progressData = extractWorkoutProgress(logsQuery.data).map(point => ({
+    date: formatDate(point.date, 'DD/MM'),
+    max_weight: point.max_weight,
+    total_volume: point.total_volume,
+  }));
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="grid gap-1">
+            <CardTitle>{t('workoutProgressTitle')}</CardTitle>
+            <CardDescription>{t('workoutProgressDesc')}</CardDescription>
+          </div>
+          {exercisesQuery.data && exercisesQuery.data.length > 0 ? (
+            <div className="w-full sm:w-64">
+              <Select
+                value={effectiveExerciseId ? String(effectiveExerciseId) : undefined}
+                onValueChange={v => setSelectedExerciseId(Number(v))}
+              >
+                <SelectTrigger aria-label={t('workoutExerciseLabel')}>
+                  <SelectValue placeholder={t('workoutExercisePlaceholder')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {exercisesQuery.data.map(ex => (
+                    <SelectItem key={ex.id} value={String(ex.id)}>
+                      {ex.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+        </div>
+      </CardHeader>
+
+      {logsQuery.isLoading || exercisesQuery.isLoading ? (
+        <Skeleton className="h-72 w-full rounded-xl" />
+      ) : progressData.length === 0 ? (
+        <EmptyState
+          icon={FireIcon}
+          title={t('workoutEmptyTitle')}
+          description={t('workoutEmptyDesc')}
+          className="py-8"
+        />
+      ) : (
+        <div className="h-72 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={progressData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-line)" />
+              <XAxis dataKey="date" stroke="var(--color-tertiary)" fontSize={12} />
+              <YAxis yAxisId="left" stroke="var(--color-tertiary)" fontSize={12} />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                stroke="var(--color-tertiary)"
+                fontSize={12}
+              />
+              <Tooltip />
+              <Legend />
+              <Line
+                yAxisId="left"
+                type="monotone"
+                dataKey="max_weight"
+                name={t('workoutMaxWeight')}
+                stroke="var(--color-brand-500)"
+                strokeWidth={2.5}
+                dot={{ r: 4 }}
+              />
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="total_volume"
+                name={t('workoutTotalVolume')}
+                stroke="var(--color-info)"
+                strokeWidth={2.5}
+                dot={{ r: 4 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Card>
+  );
+}
+

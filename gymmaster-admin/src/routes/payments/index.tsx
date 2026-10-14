@@ -1,12 +1,13 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Card, Col, DatePicker, Row, Space, Typography } from 'antd';
+import { Card, Col, DatePicker, Row, Segmented, Space, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   BankOutlined,
   CreditCardOutlined,
   DollarOutlined,
+  GlobalOutlined,
   WalletOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -14,6 +15,8 @@ import type { Dayjs } from 'dayjs';
 import { Link } from 'react-router-dom';
 import invoiceApi, { PAYMENT_METHOD_LABEL, PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
 import type {
+  OnlinePaymentListParams,
+  OnlinePaymentTxn,
   PaymentItem,
   PaymentListParams,
   PaymentListResult,
@@ -28,7 +31,13 @@ import type { MobileFetchArgs } from '@/components/MobileList';
 import MoneyText from '@/components/Money/MoneyText';
 import PageTitle from '@/components/PageTitle';
 import StatCard from '@/components/StatCard';
+import StatusTag from '@/components/StatusTag';
 import { PERM } from '@/constants/permissions';
+import {
+  ONLINE_TXN_STATUS_MAP,
+  ONLINE_TXN_STATUS_OPTIONS,
+  PAYMENT_METHOD_MAP,
+} from '@/constants/status';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { usePermission } from '@/hooks/usePermission';
@@ -37,13 +46,14 @@ import { useUrlParams } from '@/hooks/useUrlParams';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
 import { DATE_FORMAT, formatDateTime, formatMoney, formatNumber, toApiDate } from '@/utils/format';
 
-const TITLE = 'Sổ thu tiền';
-const SUBTITLE = 'Các lần thu tiền theo hóa đơn – tổng hợp theo phương thức';
+const TITLE = 'Sổ thu tiền & Giao dịch VNPay';
+const SUBTITLE = 'Các lần thu tiền theo hóa đơn và giao dịch thanh toán VNPay trực tuyến';
 
 const METHOD_ICON: Record<PaymentMethod, ReactNode> = {
   CASH: <WalletOutlined />,
   TRANSFER: <BankOutlined />,
   CARD: <CreditCardOutlined />,
+  VNPAY: <GlobalOutlined />,
 };
 
 function useStaffOptions() {
@@ -59,9 +69,10 @@ function useStaffOptions() {
 
 function SummaryCards({ data, loading }: { data?: PaymentListResult; loading?: boolean }) {
   const s = data?.summary;
+  const methods: PaymentMethod[] = ['CASH', 'TRANSFER', 'CARD', 'VNPAY'];
   return (
     <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-      <Col xs={12} md={6}>
+      <Col xs={12} md={6} lg={4}>
         <StatCard
           label="Tổng đã thu"
           value={s?.total_amount ?? 0}
@@ -71,10 +82,10 @@ function SummaryCards({ data, loading }: { data?: PaymentListResult; loading?: b
           loading={loading}
         />
       </Col>
-      {(['CASH', 'TRANSFER', 'CARD'] as PaymentMethod[]).map((m) => {
+      {methods.map((m) => {
         const row = s?.by_method.find((x) => x.method === m);
         return (
-          <Col xs={12} md={6} key={m}>
+          <Col xs={12} md={6} lg={5} key={m}>
             <StatCard
               label={PAYMENT_METHOD_LABEL[m]}
               value={row?.amount ?? 0}
@@ -91,12 +102,131 @@ function SummaryCards({ data, loading }: { data?: PaymentListResult; loading?: b
   );
 }
 
+function OnlinePaymentsSection() {
+  const { branchId } = useWorkingBranch();
+  const { branches } = useBranchOptions();
+
+  const table = useTableQuery<OnlinePaymentTxn, OnlinePaymentListParams>({
+    queryKey: [invoiceApi.key, 'online-payments'],
+    queryFn: (p) => invoiceApi.onlinePayments(p),
+    filterKeys: ['branch_id', 'status'],
+    numberKeys: ['branch_id'],
+    defaults: { order_by: 'id', order_dir: 'DESC' },
+    extraParams: branchId ? { branch_id: branchId } : {},
+  });
+
+  const columns = useMemo<ColumnsType<OnlinePaymentTxn>>(
+    () => [
+      {
+        title: 'Thời gian tạo',
+        dataIndex: 'created_at',
+        className: 'text-nowrap',
+        render: (v: string) => formatDateTime(v),
+      },
+      {
+        title: 'Mã tham chiếu',
+        dataIndex: 'txn_ref',
+        render: (v: string) => <span className="code-text">{v}</span>,
+      },
+      {
+        title: 'Hóa đơn',
+        dataIndex: 'invoice_no',
+        render: (v: string | undefined, r) => (
+          <Link to={`/app/invoices/${r.invoice_id}`} className="code-text">
+            {v || `#${r.invoice_id}`}
+          </Link>
+        ),
+      },
+      {
+        title: 'Hội viên',
+        key: 'member',
+        render: (_, r) =>
+          r.member_id ? (
+            <Space direction="vertical" size={0}>
+              <Link to={`/app/members/${r.member_id}`}>
+                {r.member_name || `HV #${r.member_id}`}
+              </Link>
+              {r.member_code && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {r.member_code}
+                </Typography.Text>
+              )}
+            </Space>
+          ) : (
+            '—'
+          ),
+      },
+      {
+        title: 'Số tiền',
+        dataIndex: 'amount',
+        align: 'right',
+        render: (v: number) => <MoneyText value={v} strong />,
+      },
+      {
+        title: 'Cổng / Ngân hàng',
+        key: 'bank',
+        render: (_, r) => (
+          <Space size={6}>
+            <Tag color="geekblue">VNPay</Tag>
+            {r.bank_code ? <Tag>{r.bank_code}</Tag> : null}
+          </Space>
+        ),
+      },
+      {
+        title: 'Mã GD VNPay',
+        dataIndex: 'provider_txn_no',
+        render: (v: string) => (v ? <span className="code-text">{v}</span> : '—'),
+      },
+      {
+        title: 'Trạng thái',
+        dataIndex: 'status',
+        render: (v: string) => <StatusTag status={v} map={ONLINE_TXN_STATUS_MAP} />,
+      },
+      {
+        title: 'Thanh toán lúc',
+        dataIndex: 'paid_at',
+        className: 'text-nowrap',
+        render: (v: string | null) => (v ? formatDateTime(v) : '—'),
+      },
+    ],
+    [],
+  );
+
+  return (
+    <>
+      <FilterBar
+        searchPlaceholder="Mã tham chiếu (txn_ref), số HĐ, mã GD VNPay..."
+        colTextSearch={6}
+        filters={[
+          {
+            name: 'branch_id',
+            placeholder: 'Chi nhánh',
+            options: branches.map((b) => ({ label: b.name, value: b.id })),
+          },
+          {
+            name: 'status',
+            placeholder: 'Trạng thái GD',
+            options: ONLINE_TXN_STATUS_OPTIONS,
+            col: 4,
+          },
+        ]}
+      />
+      <DataTable<OnlinePaymentTxn>
+        table={table}
+        columns={columns}
+        emptyText="Chưa có giao dịch VNPay trực tuyến nào"
+      />
+    </>
+  );
+}
+
 function PaymentsDesktop() {
   const url = useUrlParams();
   const { branchId } = useWorkingBranch();
   const { branches } = useBranchOptions();
   const staffOptions = useStaffOptions();
   const urlBranch = url.get('branch_id');
+  const [tab, setTab] = useState<'ledger' | 'online'>('ledger');
 
   const table = useTableQuery<PaymentItem, PaymentListParams>({
     queryKey: [invoiceApi.key, 'payments'],
@@ -154,7 +284,7 @@ function PaymentsDesktop() {
         title: 'Phương thức',
         dataIndex: 'method',
         sorter: true,
-        render: (v: PaymentMethod) => PAYMENT_METHOD_LABEL[v] ?? v,
+        render: (v: PaymentMethod) => <StatusTag status={v} map={PAYMENT_METHOD_MAP} />,
       },
       { title: 'Mã GD', dataIndex: 'reference', render: (v: string) => v || '—' },
       { title: 'Người thu', dataIndex: 'received_by_name', render: (v: string) => v || '—' },
@@ -170,50 +300,76 @@ function PaymentsDesktop() {
           <PageTitle title={TITLE} subtitle={SUBTITLE} />
         </Col>
         <Col>
-          <ActionBar onRefresh={() => table.refetch()} refreshing={table.isFetching} />
+          <Space wrap>
+            <Segmented
+              value={tab}
+              onChange={(v) => setTab(v as 'ledger' | 'online')}
+              options={[
+                { label: 'Sổ thu tiền', value: 'ledger' },
+                { label: 'Giao dịch VNPay trực tuyến', value: 'online' },
+              ]}
+            />
+            <ActionBar onRefresh={() => table.refetch()} refreshing={table.isFetching} />
+          </Space>
         </Col>
       </Row>
-      <SummaryCards
-        data={table.query.data as PaymentListResult | undefined}
-        loading={table.isLoading}
-      />
-      <FilterBar
-        searchPlaceholder="Số HĐ, hội viên, mã GD"
-        colTextSearch={5}
-        filters={[
-          {
-            name: 'branch_id',
-            placeholder: 'Chi nhánh',
-            options: branches.map((b) => ({ label: b.name, value: b.id })),
-          },
-          { name: 'method', placeholder: 'Phương thức', options: PAYMENT_METHOD_OPTIONS, col: 3 },
-          ...(staffOptions.length
-            ? [{ name: 'received_by', placeholder: 'Người thu', options: staffOptions }]
-            : []),
-        ]}
-      >
-        <Col xs={24} sm={12} md={6}>
-          <DatePicker.RangePicker
-            style={{ width: '100%' }}
-            format={DATE_FORMAT}
-            placeholder={['Thu từ ngày', 'Đến ngày']}
-            value={from || to ? [from ? dayjs(from) : null, to ? dayjs(to) : null] : null}
-            allowEmpty={[true, true]}
-            presets={[
-              { label: 'Hôm nay', value: [dayjs(), dayjs()] },
-              { label: '7 ngày qua', value: [dayjs().subtract(6, 'day'), dayjs()] },
-              { label: 'Tháng này', value: [dayjs().startOf('month'), dayjs()] },
-            ]}
-            onChange={(v) =>
-              url.set(
-                { from: toApiDate(v?.[0]) ?? undefined, to: toApiDate(v?.[1]) ?? undefined },
-                { resetPage: true },
-              )
-            }
+
+      {tab === 'online' ? (
+        <OnlinePaymentsSection />
+      ) : (
+        <>
+          <SummaryCards
+            data={table.query.data as PaymentListResult | undefined}
+            loading={table.isLoading}
           />
-        </Col>
-      </FilterBar>
-      <DataTable<PaymentItem> table={table} columns={columns} emptyText="Chưa có lần thu nào" />
+          <FilterBar
+            searchPlaceholder="Số HĐ, hội viên, mã GD"
+            colTextSearch={5}
+            filters={[
+              {
+                name: 'branch_id',
+                placeholder: 'Chi nhánh',
+                options: branches.map((b) => ({ label: b.name, value: b.id })),
+              },
+              {
+                name: 'method',
+                placeholder: 'Phương thức',
+                options: PAYMENT_METHOD_OPTIONS,
+                col: 3,
+              },
+              ...(staffOptions.length
+                ? [{ name: 'received_by', placeholder: 'Người thu', options: staffOptions }]
+                : []),
+            ]}
+          >
+            <Col xs={24} sm={12} md={6}>
+              <DatePicker.RangePicker
+                style={{ width: '100%' }}
+                format={DATE_FORMAT}
+                placeholder={['Thu từ ngày', 'Đến ngày']}
+                value={from || to ? [from ? dayjs(from) : null, to ? dayjs(to) : null] : null}
+                allowEmpty={[true, true]}
+                presets={[
+                  { label: 'Hôm nay', value: [dayjs(), dayjs()] },
+                  { label: '7 ngày qua', value: [dayjs().subtract(6, 'day'), dayjs()] },
+                  { label: 'Tháng này', value: [dayjs().startOf('month'), dayjs()] },
+                ]}
+                onChange={(v) =>
+                  url.set(
+                    { from: toApiDate(v?.[0]) ?? undefined, to: toApiDate(v?.[1]) ?? undefined },
+                    { resetPage: true },
+                  )
+                }
+              />
+            </Col>
+          </FilterBar>
+          <DataTable<PaymentItem>
+            table={table}
+            columns={columns}
+            emptyText="Chưa có lần thu nào"
+          />
+        </>
+      )}
     </Card>
   );
 }
@@ -272,6 +428,12 @@ function PaymentsMobile() {
         title: (r) => `${formatMoney(r.amount)} · ${PAYMENT_METHOD_LABEL[r.method]}`,
         subtitle: (r) => `${r.invoice_no} · ${r.member_name || 'Khách lẻ'}`,
         meta: (r) => [formatDateTime(r.paid_at), r.branch_name, r.received_by_name],
+        tags: (r) => [
+          {
+            label: PAYMENT_METHOD_MAP[r.method]?.label ?? r.method,
+            color: PAYMENT_METHOD_MAP[r.method]?.color,
+          },
+        ],
       }}
       details={(r) => [
         ['Mã GD', r.reference || '—'],

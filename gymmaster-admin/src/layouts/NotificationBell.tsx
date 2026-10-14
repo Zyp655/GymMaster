@@ -1,20 +1,83 @@
-import { useState } from 'react';
-import { Badge, Button, Empty, List, Popover, Result, Spin, Tooltip, Typography } from 'antd';
+import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { App, Badge, Button, Empty, List, Popover, Result, Spin, Tooltip, Typography } from 'antd';
 import { BellOutlined, CheckOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
-import { toAppLink } from '@/api/notification';
+import notificationApi, { toAppLink } from '@/api/notification';
+import { appConfig } from '@/config';
 import { useNotifications } from '@/hooks/useNotifications';
-import { formatDateTime } from '@/utils/format';
 import { NotificationIcon } from '@/routes/notifications/meta';
+import { useAppSelector } from '@/store';
+import { formatDateTime } from '@/utils/format';
+import { tokenStore } from '@/utils/token';
 
-/** Chuông thông báo (dữ liệu từ `useNotifications`): 10 thông báo mới nhất + badge chưa đọc. */
+/** Chuông thông báo (dữ liệu từ `useNotifications` + kết nối SSE `/v1/notifications/stream`): 10 thông báo mới nhất + badge chưa đọc. */
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
-  const { items, unread, isLoading, isError, refetch, markRead, markAllRead } = useNotifications(
-    { listEnabled: open },
-  );
+  const { items, unread, isLoading, isError, refetch, markRead, markAllRead } = useNotifications({
+    listEnabled: open,
+  });
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { notification } = App.useApp();
+  const loggedIn = useAppSelector((s) => !!s.auth.user);
+
+  useEffect(() => {
+    if (!loggedIn || typeof EventSource === 'undefined') return;
+    const accessToken = tokenStore.getAccessToken();
+    if (!accessToken) return;
+
+    const base = appConfig.apiUrl.replace(/\/+$/, '');
+    const streamPath = base.endsWith('/v1')
+      ? `${base}/notifications/stream`
+      : `${base}/v1/notifications/stream`;
+    const url = `${streamPath}?token=${encodeURIComponent(accessToken)}`;
+
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(url);
+    } catch {
+      return;
+    }
+
+    const handleIncoming = (event: MessageEvent) => {
+      void qc.invalidateQueries({ queryKey: [notificationApi.key] });
+      if (!event.data) return;
+      try {
+        const payload = JSON.parse(String(event.data)) as {
+          title?: string;
+          body?: string;
+          link?: string;
+        };
+        if (payload?.title) {
+          notification.info({
+            message: payload.title,
+            description: payload.body,
+            placement: 'bottomRight',
+            duration: 5,
+            onClick: () => {
+              const target = toAppLink(payload.link);
+              if (target) navigate(target);
+            },
+          });
+        }
+      } catch {
+        // Sự kiện ping hoặc dữ liệu không phải JSON
+      }
+    };
+
+    es.addEventListener('notification', handleIncoming as EventListener);
+    es.onmessage = handleIncoming;
+    es.onerror = () => {
+      // Lỗi kết nối SSE -> đóng để tự động fallback về polling của useNotifications
+      es?.close();
+    };
+
+    return () => {
+      es?.close();
+    };
+  }, [loggedIn, qc, notification, navigate]);
 
   const go = (path: string) => {
     setOpen(false);
@@ -25,7 +88,10 @@ export function NotificationBell() {
     <div className="notif-pop">
       <div className="notif-head">
         <Typography.Text strong style={{ fontSize: 15 }}>
-          Thông báo {unread > 0 ? <Typography.Text type="secondary">({unread} chưa đọc)</Typography.Text> : null}
+          Thông báo{' '}
+          {unread > 0 ? (
+            <Typography.Text type="secondary">({unread} chưa đọc)</Typography.Text>
+          ) : null}
         </Typography.Text>
         {unread > 0 && (
           <Button type="link" size="small" icon={<CheckOutlined />} onClick={markAllRead}>

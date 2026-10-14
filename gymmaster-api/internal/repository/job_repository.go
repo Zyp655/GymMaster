@@ -72,9 +72,20 @@ ORDER BY s.id`, since).Scan(&rows).Error
 }
 
 func (r *jobRepository) DeleteStaleRefreshTokens(ctx context.Context, before time.Time) (int64, error) {
-	res := postgres.Conn(ctx, r.db).Exec(
+	conn := postgres.Conn(ctx, r.db)
+	res := conn.Exec(
 		"DELETE FROM refresh_tokens WHERE expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)", before, before)
-	return res.RowsAffected, res.Error
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	total := res.RowsAffected
+	if r2 := conn.Exec("DELETE FROM password_resets WHERE expires_at < ? OR (used_at IS NOT NULL AND used_at < ?)", before, before); r2.Error == nil {
+		total += r2.RowsAffected
+	}
+	if r3 := conn.Exec("DELETE FROM login_attempts WHERE attempted_at < ?", before); r3.Error == nil {
+		total += r3.RowsAffected
+	}
+	return total, nil
 }
 
 func (r *jobRepository) ListRuns(ctx context.Context, job, status string, q dto.Query) ([]entity.JobRun, int64, error) {

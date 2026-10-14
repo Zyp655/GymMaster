@@ -1,6 +1,10 @@
 package entity
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/datatypes"
+)
 
 // Loại gói tập / trạng thái / phạm vi (migration 000004).
 const (
@@ -24,20 +28,22 @@ const (
 //   - SESSION : được SessionCount lượt check-in, hết hạn sau DurationDays ngày.
 type MembershipPlan struct {
 	BaseEntity
-	Code            string  `gorm:"type:varchar(30);not null"`
-	Name            string  `gorm:"type:varchar(150);not null"`
-	Description     string  `gorm:"type:text;not null;default:''"`
-	Type            string  `gorm:"type:varchar(10);not null"`
-	DurationDays    int     `gorm:"not null"`
-	SessionCount    *int    // chỉ có với SESSION
-	Price           float64 `gorm:"type:numeric(14,2);not null"`
-	AccessScope     string  `gorm:"type:varchar(20);not null;default:'SINGLE_BRANCH'"`
-	MaxFreezeDays   int     `gorm:"not null;default:0"`
-	MaxFreezeTimes  int     `gorm:"not null;default:0"`
-	IncludesClasses bool    `gorm:"not null;default:false"`
-	TransferFee     float64 `gorm:"type:numeric(14,2);not null;default:0"`
-	Status          string  `gorm:"type:varchar(20);not null;default:'ACTIVE'"`
-	SortOrder       int     `gorm:"not null;default:0"`
+	Code                string         `gorm:"type:varchar(30);not null"`
+	Name                string         `gorm:"type:varchar(150);not null"`
+	Description         string         `gorm:"type:text;not null;default:''"`
+	Type                string         `gorm:"type:varchar(10);not null"`
+	DurationDays        int            `gorm:"not null"`
+	SessionCount        *int           // chỉ có với SESSION
+	Price               float64        `gorm:"type:numeric(14,2);not null"`
+	AccessScope         string         `gorm:"type:varchar(20);not null;default:'SINGLE_BRANCH'"`
+	MaxFreezeDays       int            `gorm:"not null;default:0"`
+	MaxFreezeTimes      int            `gorm:"not null;default:0"`
+	IncludesClasses     bool           `gorm:"not null;default:false"`
+	TransferFee         float64        `gorm:"type:numeric(14,2);not null;default:0"`
+	AccessHours         datatypes.JSON `gorm:"type:jsonb;not null;default:'[]'"`
+	GuestPassesPerMonth int            `gorm:"not null;default:0"`
+	Status              string         `gorm:"type:varchar(20);not null;default:'ACTIVE'"`
+	SortOrder           int            `gorm:"not null;default:0"`
 }
 
 func (MembershipPlan) TableName() string { return "membership_plans" }

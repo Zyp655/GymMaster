@@ -67,3 +67,21 @@ cd gymmaster-web && cp .env.example .env.local && npm install && npm run dev
 - [x] **Sprint 09** – Cổng hội viên
 - [x] **Sprint 10** – Báo cáo, thông báo, nhật ký thao tác, job định kỳ
 - [x] **Sprint 11** – POS bán hàng + tồn kho
+- [x] **Sprint 12** – Quên mật khẩu & chống brute-force đăng nhập
+- [x] **Sprint 13** – Thanh toán online VNPay sandbox & hội viên tự mua gói tập
+- [x] **Sprint 14** – Thư viện bài tập, giáo án tập luyện & nhật ký mức tạ
+- [x] **Sprint 15** – Đánh giá HLV/lớp học & quản lý thiết bị – bảo trì
+- [x] **Sprint 16** – CRM khách tiềm năng (Lead), vé tập thử & chăm sóc hội viên tự động
+- [x] **Sprint 17** – Thông báo thời gian thực (SSE), PWA, hội viên tự đăng ký & hoàn thiện demo
+- [x] **Sprint 18** – Kiểm soát ra vào bằng thiết bị (Turnstile/Door) & Kiosk tự check-in (`/kiosk`)
+- [x] **Sprint 19** – Sơ đồ tủ đồ (Lockers) & dịch vụ thuê tủ theo lượt / theo tháng
+- [x] **Sprint 20** – Chấm công nhân viên, tính bảng lương tháng, khóa & chi trả lương
+- [x] **Sprint 21** – Chi phí vận hành, báo cáo lãi/lỗ (P&L), đối soát ca thu ngân, trả góp & hóa đơn điện tử
+- [x] **Sprint 22** – Điểm thưởng Loyalty, đổi quà/voucher, huy hiệu, thử thách & giới thiệu bạn bè
+- [x] **Sprint 23** – Dinh dưỡng & thực đơn (BMR/TDEE), bảng tin chi nhánh & khảo sát NPS
+- [x] **Sprint 24** – Hợp đồng điện tử, vé ngày / vé khách mời QR & gói tập khung giờ off-peak
+- [x] **Sprint 25** – Lịch rảnh HLV, duyệt đơn nghỉ phép, gán HLV dạy thay & lịch nghỉ lễ phòng tập
+- [x] **Sprint 26** – Mật độ phòng tập realtime, chỉ tiêu doanh số KPI & báo cáo Cohort Retention
+- [x] **Sprint 27** – Xác thực 2 lớp (2FA TOTP), quản lý phiên đăng nhập & tuân thủ Nghị định 13/2023
+- [x] **Sprint 28** – Bộ kiểm thử E2E Playwright (`e2e/`), kiểm thử tải k6 (`perf/`), Postman/Newman (`postman/`) & CI
+

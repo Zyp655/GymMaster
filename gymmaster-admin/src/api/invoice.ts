@@ -6,7 +6,8 @@ import type { ListParams, Page } from './types';
 export type InvoiceStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'VOID' | 'REFUNDED';
 export type InvoiceSource = 'COUNTER' | 'POS' | 'PORTAL';
 export type InvoiceItemType = 'MEMBERSHIP' | 'PT' | 'PRODUCT' | 'FEE' | 'OTHER';
-export type PaymentMethod = 'CASH' | 'TRANSFER' | 'CARD';
+export type PaymentMethod = 'CASH' | 'TRANSFER' | 'CARD' | 'VNPAY';
+export type OnlineTxnStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'EXPIRED';
 
 export interface InvoiceMemberRef {
   id: number;
@@ -120,6 +121,7 @@ export interface InvoiceListParams extends ListParams {
   member_id?: number;
   status?: InvoiceStatus;
   source?: InvoiceSource;
+  method?: PaymentMethod;
   /** Ngày lập từ (YYYY-MM-DD). */
   from?: string;
   to?: string;
@@ -154,6 +156,33 @@ export interface PaymentListParams extends ListParams {
   received_by?: number;
 }
 
+export interface OnlinePaymentTxn {
+  id: number;
+  invoice_id: number;
+  invoice_no?: string;
+  member_id: number;
+  member_code?: string;
+  member_name?: string;
+  branch_id?: number;
+  branch_name?: string;
+  txn_ref: string;
+  amount: number;
+  status: OnlineTxnStatus;
+  provider_txn_no: string;
+  bank_code: string;
+  created_at: string;
+  paid_at: string | null;
+}
+
+export interface OnlinePaymentListParams extends ListParams {
+  branch_id?: number;
+  member_id?: number;
+  invoice_id?: number;
+  status?: OnlineTxnStatus;
+  from?: string;
+  to?: string;
+}
+
 class InvoiceApi {
   /** Khóa gốc – sổ thu dùng `[key, 'payments', ...]` để thu/hoàn tiền xong tự làm mới. */
   readonly key = 'invoices';
@@ -185,6 +214,10 @@ class InvoiceApi {
   payments(params: PaymentListParams = {}) {
     return http.get<PaymentListResult>('/admin/payments', { params });
   }
+
+  onlinePayments(params: OnlinePaymentListParams = {}) {
+    return http.get<Page<OnlinePaymentTxn>>('/admin/online-payments', { params });
+  }
 }
 
 export const invoiceApi = new InvoiceApi();
@@ -194,10 +227,14 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   CASH: 'Tiền mặt',
   TRANSFER: 'Chuyển khoản',
   CARD: 'Thẻ',
+  VNPAY: 'VNPay Online',
 };
 export const PAYMENT_METHOD_OPTIONS = (Object.keys(PAYMENT_METHOD_LABEL) as PaymentMethod[]).map(
   (value) => ({ value, label: PAYMENT_METHOD_LABEL[value] }),
 );
+export const COUNTER_PAYMENT_METHOD_OPTIONS = (
+  ['CASH', 'TRANSFER', 'CARD'] as PaymentMethod[]
+).map((value) => ({ value, label: PAYMENT_METHOD_LABEL[value] }));
 
 export const INVOICE_SOURCE_LABEL: Record<InvoiceSource, string> = {
   COUNTER: 'Quầy',

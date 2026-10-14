@@ -137,6 +137,8 @@ type (
 		PTRevenue       float64 `gorm:"column:pt_revenue"`
 		Commission      float64 `gorm:"column:commission"`
 		CommissionPaid  float64 `gorm:"column:commission_paid"`
+		RatingAvg       float64 `gorm:"column:rating_avg"`
+		RatingCount     int     `gorm:"column:rating_count"`
 	}
 
 	ReportProductRow struct {
@@ -623,7 +625,8 @@ SELECT u.id AS trainer_id, u.full_name AS trainer_name, COALESCE(tpr.level, '') 
 	COALESCE(cls.classes_taught, 0) AS classes_taught, COALESCE(cls.class_attendees, 0) AS class_attendees,
 	COALESCE(ctr.active_pt_members, 0) AS active_pt_members, COALESCE(ctr.pt_contracts_sold, 0) AS pt_contracts_sold,
 	COALESCE(ctr.pt_revenue, 0) AS pt_revenue,
-	COALESCE(com.commission, 0) AS commission, COALESCE(com.commission_paid, 0) AS commission_paid
+	COALESCE(com.commission, 0) AS commission, COALESCE(com.commission_paid, 0) AS commission_paid,
+	COALESCE(tpr.rating_avg, 0) AS rating_avg, COALESCE(tpr.rating_count, 0) AS rating_count
 FROM ids
 JOIN users u ON u.id = ids.id AND u.deleted_at IS NULL
 LEFT JOIN trainer_profiles tpr ON tpr.user_id = u.id

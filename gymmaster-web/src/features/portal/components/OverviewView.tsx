@@ -1,17 +1,23 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import dayjs from 'dayjs';
 import { useTranslations } from 'next-intl';
+import { toast } from 'sonner';
 import {
   CalendarDaysIcon,
   ChartBarIcon,
+  ChatBubbleBottomCenterTextIcon,
   ChevronRightIcon,
   ClockIcon,
   CreditCardIcon,
   ExclamationTriangleIcon,
+  KeyIcon,
+  MegaphoneIcon,
   QrCodeIcon,
   ScaleIcon,
+  UserGroupIcon,
 } from '@heroicons/react/24/outline';
 import { EmptyState } from '@/components/common/EmptyState';
 import { LoadError } from '@/components/common/LoadError';
@@ -20,12 +26,29 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { useToastApiError } from '@/hooks/use-api-error';
 import { formatDate, formatDateTime } from '@/lib/format';
-import { useBookingsQuery, useProfileQuery, usePTSessionsQuery } from '../queries';
+import { cn } from '@/lib/utils';
+import {
+  useBookingsQuery,
+  useBranchOccupancyQuery,
+  useMemberAnnouncementsQuery,
+  useMemberLockerQuery,
+  useMemberSurveysQuery,
+  useProfileQuery,
+  usePTSessionsQuery,
+  useSubmitSurveyResponseMutation,
+} from '../queries';
 import type { Subscription } from '../types';
-import { SubscriptionStatusBadge } from './PortalStatusBadge';
+import {
+  LockerTypeBadge,
+  OccupancyStatusBadge,
+  SubscriptionStatusBadge,
+} from './PortalStatusBadge';
 
 const UPCOMING_DAYS = 14;
+const NPS_SCORES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
 export function OverviewView() {
   const t = useTranslations('portal.overview');
@@ -53,6 +76,7 @@ export function OverviewView() {
 
   const { member, branch, current_subscription: sub, has_valid_subscription } = query.data;
   const metric = member.latest_metric;
+  const activeBranchId = branch?.id ?? member.home_branch_id;
 
   return (
     <div className="grid gap-4 lg:gap-6">
@@ -114,6 +138,10 @@ export function OverviewView() {
         </Card>
 
         <UpcomingCard />
+
+        <BranchOccupancyCard branchId={activeBranchId} branchName={branch?.name} />
+
+        <ActiveLockerCard />
 
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-2">
@@ -187,8 +215,269 @@ export function OverviewView() {
             />
           )}
         </Card>
+
+        <AnnouncementsCard />
+
+        <QuickSurveyCard />
       </div>
     </div>
+  );
+}
+
+/** Thẻ mật độ phòng tập hiện tại (QUIET / NORMAL / BUSY / FULL). */
+function BranchOccupancyCard({
+  branchId,
+  branchName,
+}: {
+  branchId: number | null | undefined;
+  branchName?: string;
+}) {
+  const t = useTranslations('portal.overview');
+  const query = useBranchOccupancyQuery();
+  const list = query.data ?? [];
+  const occ = (branchId ? list.find(b => b.branch_id === branchId) : undefined) ?? list[0];
+
+  const present = occ ? (occ.present ?? occ.current_count ?? occ.active_count ?? 0) : 0;
+  const capacity = occ ? Math.max(occ.capacity || 100, 1) : 100;
+  const percent = occ
+    ? Math.min(
+        Math.max(
+          Math.round(
+            occ.percent ?? occ.occupancy_pct ?? occ.percentage ?? (present / capacity) * 100,
+          ),
+          0,
+        ),
+        100,
+      )
+    : 0;
+  const status = (occ?.status ?? occ?.level ?? 'NORMAL') as 'QUIET' | 'NORMAL' | 'BUSY' | 'FULL';
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-2">
+        <CardTitle>{t('occupancyTitle')}</CardTitle>
+        {occ ? <OccupancyStatusBadge status={status} /> : null}
+      </CardHeader>
+      {query.isLoading ? (
+        <Skeleton className="h-24 rounded-xl" />
+      ) : occ ? (
+        <div className="grid gap-3 rounded-xl bg-canvas p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-body font-medium text-primary">
+              <UserGroupIcon className="size-5 text-brand-600" />
+              <span>{occ.branch_name || branchName || '—'}</span>
+            </div>
+            <span className="text-caption font-semibold text-primary">{percent}%</span>
+          </div>
+          <Progress value={percent} />
+          <p className="text-caption text-secondary">
+            {t('occupancyPeople', {
+              present,
+              capacity,
+              percent,
+            })}
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-xl bg-canvas p-4 text-secondary">
+          <UserGroupIcon className="size-6 shrink-0 text-tertiary" />
+          <p className="text-body">{t('occupancyEmpty')}</p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** Thẻ tủ đồ đang sử dụng (theo lượt hoặc thuê tháng). */
+function ActiveLockerCard() {
+  const t = useTranslations('portal.overview');
+  const query = useMemberLockerQuery();
+  const locker = query.data?.[0];
+  const lockerType = ((locker?.type ?? locker?.rental_type ?? 'DAILY') as 'DAILY' | 'MONTHLY');
+  const lockerCode = locker?.code || locker?.locker_code || '—';
+  const lockerZone = locker?.zone || '—';
+  const lockerEnd = locker?.end_date || locker?.end_at || locker?.assigned_until;
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-2">
+        <CardTitle>{t('lockerTitle')}</CardTitle>
+        {locker ? <LockerTypeBadge type={lockerType} /> : null}
+      </CardHeader>
+      {query.isLoading ? (
+        <Skeleton className="h-24 rounded-xl" />
+      ) : locker ? (
+        <div className="flex items-center gap-4 rounded-xl bg-canvas p-4">
+          <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+            <KeyIcon className="size-6" />
+          </span>
+          <div className="grid min-w-0 flex-1 gap-0.5">
+            <p className="text-h4 font-semibold text-primary">
+              {t('lockerCode', { code: lockerCode })}
+            </p>
+            <p className="text-caption text-secondary">
+              {t('lockerZone', { zone: lockerZone })}
+              {locker.branch_name ? ` · ${locker.branch_name}` : ''}
+            </p>
+            {lockerEnd ? (
+              <p className="text-caption text-secondary">
+                {t('lockerUntil', {
+                  time: locker.end_date ? formatDate(lockerEnd) : formatDateTime(lockerEnd),
+                })}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <EmptyState
+          icon={KeyIcon}
+          title={t('noLockerTitle')}
+          description={t('noLockerDesc')}
+          className="py-4"
+        />
+      )}
+    </Card>
+  );
+}
+
+/** Bảng tin phòng tập (ghim & mới nhất). */
+function AnnouncementsCard() {
+  const t = useTranslations('portal.overview');
+  const query = useMemberAnnouncementsQuery();
+  const items = (query.data ?? []).slice(0, 4);
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-2">
+        <CardTitle>{t('announcementsTitle')}</CardTitle>
+        <MegaphoneIcon className="size-5 text-brand-600" />
+      </CardHeader>
+      {query.isLoading ? (
+        <div className="grid gap-2">
+          <Skeleton className="h-16 rounded-xl" />
+          <Skeleton className="h-16 rounded-xl" />
+        </div>
+      ) : items.length === 0 ? (
+        <div className="flex items-center gap-3 rounded-xl bg-canvas p-4 text-secondary">
+          <MegaphoneIcon className="size-6 shrink-0 text-tertiary" />
+          <p className="text-body">{t('noAnnouncements')}</p>
+        </div>
+      ) : (
+        <ul className="grid gap-2.5">
+          {items.map(item => {
+            const isPinned = Boolean(item.is_pinned ?? item.pinned);
+            const pubAt = item.published_at || item.publish_at;
+            return (
+              <li key={item.id} className="grid gap-1 rounded-xl bg-canvas p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-body font-semibold text-primary">{item.title}</p>
+                  <div className="flex items-center gap-1.5">
+                    {isPinned ? <Badge variant="brand">{t('pinnedBadge')}</Badge> : null}
+                    {pubAt ? (
+                      <span className="text-caption text-tertiary">{formatDate(pubAt)}</span>
+                    ) : null}
+                  </div>
+                </div>
+                <p className="line-clamp-3 text-caption text-secondary">
+                  {item.content || item.body}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/** Khảo sát nhanh NPS (0-10) + nhận xét. */
+function QuickSurveyCard() {
+  const t = useTranslations('portal.overview');
+  const toastError = useToastApiError();
+  const surveysQuery = useMemberSurveysQuery();
+  const submitMutation = useSubmitSurveyResponseMutation();
+
+  const activeSurvey = (surveysQuery.data ?? []).find(s => !s.responded) ?? surveysQuery.data?.[0];
+  const [selectedScore, setSelectedScore] = useState<number | null>(null);
+  const [comment, setComment] = useState('');
+  const [submittedLocal, setSubmittedLocal] = useState(false);
+
+  const isCompleted = Boolean(activeSurvey?.responded || submittedLocal);
+
+  async function handleSubmit() {
+    if (selectedScore === null) return;
+    const surveyId = activeSurvey?.id ?? 1;
+    try {
+      await submitMutation.mutateAsync({
+        id: surveyId,
+        payload: {
+          score: selectedScore,
+          comment: comment.trim() || undefined,
+        },
+      });
+      setSubmittedLocal(true);
+      toast.success(t('surveySuccess'));
+    } catch (error) {
+      toastError(error);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-2">
+        <CardTitle>{activeSurvey?.title || t('surveyTitle')}</CardTitle>
+        <ChatBubbleBottomCenterTextIcon className="size-5 text-brand-600" />
+      </CardHeader>
+      {isCompleted ? (
+        <div className="rounded-xl bg-success-50 p-4 text-body font-medium text-success">
+          {t('surveySuccess')}
+        </div>
+      ) : (
+        <div className="grid gap-3 rounded-xl bg-canvas p-4">
+          <p className="text-caption text-secondary">
+            {activeSurvey?.description || t('surveySubtitle')}
+          </p>
+          <div className="grid grid-cols-11 gap-1">
+            {NPS_SCORES.map(score => {
+              const selected = selectedScore === score;
+              return (
+                <button
+                  key={score}
+                  type="button"
+                  onClick={() => setSelectedScore(score)}
+                  className={cn(
+                    'flex h-9 items-center justify-center rounded-lg border text-caption font-semibold transition-colors',
+                    selected
+                      ? 'border-brand-600 bg-brand-500 text-white'
+                      : 'border-line bg-surface text-primary hover:border-brand-500/60',
+                  )}
+                >
+                  {score}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex justify-between text-caption text-tertiary">
+            <span>{t('surveyLowLabel')}</span>
+            <span>{t('surveyHighLabel')}</span>
+          </div>
+          <Textarea
+            value={comment}
+            onChange={e => setComment(e.target.value)}
+            placeholder={t('surveyCommentPlaceholder')}
+            rows={2}
+          />
+          <Button
+            type="button"
+            size="sm"
+            disabled={selectedScore === null || submitMutation.isPending}
+            onClick={() => void handleSubmit()}
+          >
+            {submitMutation.isPending ? t('surveySubmitting') : t('surveySubmit')}
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }
 

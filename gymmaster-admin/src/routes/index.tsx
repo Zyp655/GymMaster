@@ -51,6 +51,21 @@ const Suppliers = lazy(() => import('./suppliers'));
 const Reports = lazy(() => import('./reports'));
 const AuditLogs = lazy(() => import('./audit-logs'));
 const Jobs = lazy(() => import('./jobs'));
+const Exercises = lazy(() => import('./exercises'));
+const WorkoutPlans = lazy(() => import('./workout-plans'));
+const Reviews = lazy(() => import('./reviews'));
+const Equipments = lazy(() => import('./equipments'));
+const Leads = lazy(() => import('./leads'));
+const AccessDevices = lazy(() => import('./access-devices'));
+const Lockers = lazy(() => import('./lockers'));
+const Payrolls = lazy(() => import('./payrolls'));
+const Finance = lazy(() => import('./finance'));
+const Loyalty = lazy(() => import('./loyalty'));
+const Engagement = lazy(() => import('./engagement'));
+const ContractsPasses = lazy(() => import('./contracts-passes'));
+const TrainerSchedules = lazy(() => import('./trainer-schedules'));
+const KpiAnalytics = lazy(() => import('./kpi-analytics'));
+const SecurityPrivacy = lazy(() => import('./security-privacy'));
 
 export const routes: AppRoute[] = [
   { path: 'dashboard', element: page(Dashboard) },
@@ -72,6 +87,31 @@ export const routes: AppRoute[] = [
   },
   { path: 'checkin', element: page(Checkin), perm: [PERM.CHECKIN_SCAN] },
   { path: 'checkins', element: page(Checkins), perm: [PERM.CHECKIN_VIEW] },
+  {
+    path: 'leads',
+    element: page(Leads),
+    perm: [PERM.LEAD_VIEW, PERM.LEAD_MANAGE, PERM.MEMBER_VIEW],
+  },
+  {
+    path: 'lockers',
+    element: page(Lockers),
+    perm: [PERM.LOCKER_VIEW, PERM.LOCKER_MANAGE],
+  },
+  {
+    path: 'loyalty',
+    element: page(Loyalty),
+    perm: [PERM.LOYALTY_VIEW, PERM.LOYALTY_MANAGE],
+  },
+  {
+    path: 'engagement',
+    element: page(Engagement),
+    perm: [PERM.ENGAGEMENT_VIEW, PERM.ENGAGEMENT_MANAGE],
+  },
+  {
+    path: 'contracts-passes',
+    element: page(ContractsPasses),
+    perm: [PERM.CONTRACT_MANAGE],
+  },
 
   // Lớp & PT
   {
@@ -82,6 +122,17 @@ export const routes: AppRoute[] = [
   { path: 'class-types', element: page(ClassTypes), perm: [PERM.CLASS_VIEW] },
   { path: 'pt-contracts', element: page(PtContracts), perm: [PERM.PT_VIEW, PERM.PT_SELL] },
   { path: 'pt-sessions', element: page(PtSessions), perm: [PERM.PT_VIEW, PERM.PT_SCHEDULE] },
+  {
+    path: 'workout-plans',
+    element: page(WorkoutPlans),
+    perm: [PERM.WORKOUT_VIEW, PERM.WORKOUT_MANAGE],
+  },
+  {
+    path: 'exercises',
+    element: page(Exercises),
+    perm: [PERM.WORKOUT_VIEW, PERM.WORKOUT_MANAGE],
+  },
+  { path: 'reviews', element: page(Reviews), perm: [PERM.REVIEW_VIEW] },
   { path: 'commissions', element: page(Commissions), perm: [PERM.COMMISSION_VIEW] },
 
   // Tài chính
@@ -93,6 +144,11 @@ export const routes: AppRoute[] = [
     perm: [PERM.INVOICE_VIEW, PERM.INVOICE_COLLECT],
   },
   { path: 'promotions', element: page(Promotions), perm: [PERM.PROMOTION_VIEW] },
+  {
+    path: 'finance',
+    element: page(Finance),
+    perm: [PERM.EXPENSE_VIEW, PERM.EXPENSE_MANAGE, PERM.CASH_SESSION_MANAGE],
+  },
 
   // Bán hàng
   { path: 'pos', element: page(Pos), perm: [PERM.POS_SELL] },
@@ -120,15 +176,45 @@ export const routes: AppRoute[] = [
   // Nhân sự
   { path: 'staff', element: page(Staff), perm: [PERM.STAFF_VIEW] },
   { path: 'shifts', element: page(Shifts), perm: [PERM.SHIFT_VIEW, PERM.SHIFT_MANAGE] },
+  {
+    path: 'payrolls',
+    element: page(Payrolls),
+    perm: [PERM.PAYROLL_VIEW, PERM.PAYROLL_MANAGE],
+  },
+  {
+    path: 'trainer-schedules',
+    element: page(TrainerSchedules),
+    perm: [PERM.LEAVE_MANAGE, PERM.HOLIDAY_MANAGE],
+  },
 
-  // Báo cáo
+  // Báo cáo & KPI
   { path: 'reports', element: page(Reports), perm: [PERM.REPORT_VIEW] },
+  {
+    path: 'kpi-analytics',
+    element: page(KpiAnalytics),
+    perm: [PERM.KPI_MANAGE, PERM.REPORT_VIEW],
+  },
 
   // Hệ thống
   { path: 'branches', element: page(Branches), perm: [PERM.BRANCH_VIEW] },
   { path: 'rooms', element: page(Rooms), perm: [PERM.ROOM_VIEW] },
+  {
+    path: 'equipments',
+    element: page(Equipments),
+    perm: [PERM.EQUIPMENT_VIEW, PERM.EQUIPMENT_MANAGE],
+  },
+  {
+    path: 'access-devices',
+    element: page(AccessDevices),
+    perm: [PERM.DEVICE_VIEW, PERM.DEVICE_MANAGE],
+  },
   { path: 'roles', element: page(Roles), perm: [PERM.ROLE_VIEW] },
   { path: 'settings', element: page(Settings), perm: [PERM.SETTING_MANAGE] },
+  {
+    path: 'security-privacy',
+    element: page(SecurityPrivacy),
+    perm: [PERM.PRIVACY_MANAGE, PERM.MEMBER_VIEW_SENSITIVE, PERM.SETTING_MANAGE],
+  },
   { path: 'audit-logs', element: page(AuditLogs), perm: [PERM.AUDIT_VIEW] },
   { path: 'jobs', element: page(Jobs), perm: [PERM.JOB_VIEW] },
 ];

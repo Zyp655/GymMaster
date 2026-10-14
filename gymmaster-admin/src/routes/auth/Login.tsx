@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Input } from 'antd';
 import { LockOutlined, MailOutlined } from '@ant-design/icons';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { login, MEMBER_ONLY_CODE } from '@/store/authSlice';
 import { useAppDispatch, useAppSelector } from '@/store';
 import { ErrorCode, isApiError } from '@/utils/api';
@@ -106,6 +106,7 @@ export default function Login() {
             <Form.Item
               name="password"
               rules={[{ required: true, message: 'Vui lòng nhập mật khẩu' }]}
+              style={{ marginBottom: 12 }}
             >
               <Input.Password
                 prefix={<LockOutlined />}
@@ -113,6 +114,12 @@ export default function Login() {
                 autoComplete="current-password"
               />
             </Form.Item>
+
+            <div style={{ textAlign: 'right', marginBottom: 18 }}>
+              <Link to="/forgot-password" style={{ color: '#fb923c', fontSize: 13 }}>
+                Quên mật khẩu?
+              </Link>
+            </div>
 
             <Form.Item style={{ marginBottom: 0 }}>
               <Button

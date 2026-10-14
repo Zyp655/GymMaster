@@ -43,20 +43,21 @@ type ClassSchedule struct {
 	ID           uint `gorm:"primaryKey;autoIncrement"`
 	ClassTypeID  uint `gorm:"not null"`
 	BranchID     uint `gorm:"not null"`
-	RoomID       uint `gorm:"not null"`
-	TrainerID    uint `gorm:"not null"`
-	StartAt      time.Time
-	EndAt        time.Time
-	Capacity     int     `gorm:"not null"`
-	BookedCount  int     `gorm:"not null;default:0"`
-	Status       string  `gorm:"type:varchar(20);not null;default:'SCHEDULED'"`
-	SeriesID     *string `gorm:"type:uuid"`
-	CancelReason string  `gorm:"type:varchar(255);not null;default:''"`
-	Note         string  `gorm:"type:varchar(255);not null;default:''"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	CreatedBy    *uint
-	UpdatedBy    *uint
+	RoomID              uint `gorm:"not null"`
+	TrainerID           uint `gorm:"not null"`
+	SubstituteTrainerID *uint
+	StartAt             time.Time
+	EndAt               time.Time
+	Capacity            int     `gorm:"not null"`
+	BookedCount         int     `gorm:"not null;default:0"`
+	Status              string  `gorm:"type:varchar(20);not null;default:'SCHEDULED'"`
+	SeriesID            *string `gorm:"type:uuid"`
+	CancelReason        string  `gorm:"type:varchar(255);not null;default:''"`
+	Note                string  `gorm:"type:varchar(255);not null;default:''"`
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	CreatedBy           *uint
+	UpdatedBy           *uint
 }
 
 func (ClassSchedule) TableName() string { return "class_schedules" }

@@ -647,3 +647,84 @@ type checkinSubWarnCase struct {
 func (c checkinSubWarnCase) toV1() *v1.CheckinSubscription {
 	return &v1.CheckinSubscription{Type: c.typ, DaysLeft: c.daysLeft, RemainingSessions: c.remaining}
 }
+
+type checkinFakeTrialRepo struct {
+	*checkinFakeRepo
+	passes map[string]*repository.CheckinTrialPassRow
+}
+
+func (f *checkinFakeTrialRepo) FindTrialPassByToken(_ context.Context, token string) (*repository.CheckinTrialPassRow, error) {
+	if tp, ok := f.passes[token]; ok {
+		cp := *tp
+		return &cp, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (f *checkinFakeTrialRepo) MarkTrialPassUsed(_ context.Context, id uint, usedAt time.Time) error {
+	for _, tp := range f.passes {
+		if tp.ID == id {
+			tp.UsedAt = &usedAt
+			return nil
+		}
+	}
+	return nil
+}
+
+func TestCheckinScanTrialPass(t *testing.T) {
+	svc, baseRepo := newCheckinFixture()
+	trialRepo := &checkinFakeTrialRepo{
+		checkinFakeRepo: baseRepo,
+		passes: map[string]*repository.CheckinTrialPassRow{
+			"TP-VALID01": {
+				ID:         1,
+				LeadID:     100,
+				BranchID:   1,
+				ValidDate:  checkinTestNow,
+				QRToken:    "TP-VALID01",
+				FullName:   "Khách Tập Thử",
+				Phone:      "0988112233",
+				BranchName: "Cầu Giấy",
+			},
+			"TP-EXPIRED01": {
+				ID:         2,
+				LeadID:     101,
+				BranchID:   1,
+				ValidDate:  checkinTestNow.AddDate(0, 0, -1),
+				QRToken:    "TP-EXPIRED01",
+				FullName:   "Khách Quá Hạn",
+				Phone:      "0988112244",
+				BranchName: "Cầu Giấy",
+			},
+		},
+	}
+	svc.repo = trialRepo
+
+	// 1. Quét lần đầu hợp lệ -> ALLOWED
+	res, err := svc.Scan(checkinStaffCtx(), "TP-VALID01", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Result != entity.CheckinAllowed {
+		t.Fatalf("muốn ALLOWED, nhận %+v", res)
+	}
+
+	// 2. Quét lần 2 cùng vé -> DENIED (TRIAL_PASS_USED)
+	res2, err := svc.Scan(checkinStaffCtx(), "TP-VALID01", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.Result != entity.CheckinDenied || res2.DenyReason != entity.CheckinDenyTrialPassUsed {
+		t.Fatalf("muốn DENIED TRIAL_PASS_USED, nhận %+v", res2)
+	}
+
+	// 3. Quét vé hết hạn -> DENIED (TRIAL_PASS_EXPIRED)
+	res3, err := svc.Scan(checkinStaffCtx(), "TP-EXPIRED01", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res3.Result != entity.CheckinDenied || res3.DenyReason != entity.CheckinDenyTrialPassExpired {
+		t.Fatalf("muốn DENIED TRIAL_PASS_EXPIRED, nhận %+v", res3)
+	}
+}
+

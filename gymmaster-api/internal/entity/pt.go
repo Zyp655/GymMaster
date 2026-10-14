@@ -59,23 +59,24 @@ func (PTContract) TableName() string { return "pt_contracts" }
 // (vắng mặt / hủy muộn bị tính buổi). NO_SHOW có CompletedAt = nil là buổi do cron đánh dấu quá giờ
 // chưa xác nhận – CHƯA trừ buổi, chờ quản lý xử lý.
 type PTSession struct {
-	ID           uint `gorm:"primaryKey;autoIncrement"`
-	ContractID   uint `gorm:"not null"`
-	TrainerID    uint `gorm:"not null"`
-	MemberID     uint `gorm:"not null"`
-	BranchID     uint `gorm:"not null"`
-	StartAt      time.Time
-	EndAt        time.Time
-	Status       string `gorm:"type:varchar(20);not null"`
-	WorkoutNote  string `gorm:"type:text;not null;default:''"`
-	TrainerNote  string `gorm:"type:text;not null;default:''"`
-	CompletedAt  *time.Time
-	CancelledAt  *time.Time
-	CancelReason string `gorm:"type:varchar(255);not null;default:''"`
-	Source       string `gorm:"type:varchar(10);not null;default:'COUNTER'"`
-	CreatedBy    *uint
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                uint `gorm:"primaryKey;autoIncrement"`
+	ContractID        uint `gorm:"not null"`
+	TrainerID         uint `gorm:"not null"`
+	OriginalTrainerID *uint
+	MemberID          uint `gorm:"not null"`
+	BranchID          uint `gorm:"not null"`
+	StartAt           time.Time
+	EndAt             time.Time
+	Status            string `gorm:"type:varchar(20);not null"`
+	WorkoutNote       string `gorm:"type:text;not null;default:''"`
+	TrainerNote       string `gorm:"type:text;not null;default:''"`
+	CompletedAt       *time.Time
+	CancelledAt       *time.Time
+	CancelReason      string `gorm:"type:varchar(255);not null;default:''"`
+	Source            string `gorm:"type:varchar(10);not null;default:'COUNTER'"`
+	CreatedBy         *uint
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 func (PTSession) TableName() string { return "pt_sessions" }

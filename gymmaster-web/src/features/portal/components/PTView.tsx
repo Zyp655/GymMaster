@@ -45,6 +45,7 @@ import {
   useAvailabilityQuery,
   useBookPTSessionMutation,
   useCancelPTSessionMutation,
+  useMemberReviewsQuery,
   usePTContractsQuery,
   usePTSessionsQuery,
 } from '../queries';
@@ -52,15 +53,18 @@ import { createCancelPTSessionSchema, type CancelPTSessionFormValues } from '../
 import type { PTContract, PTSession, SlotReason } from '../types';
 import { PortalPageHeader } from './PortalPageHeader';
 import { PTContractStatusBadge, PTSessionStatusBadge } from './PortalStatusBadge';
+import { ReviewActionOrBadge, ReviewDialog, type ReviewTarget } from './ReviewDialog';
 import { ScheduleTabs } from './ScheduleTabs';
 
 export function PTView() {
   const t = useTranslations('portal.pt');
   const contractsQuery = usePTContractsQuery();
   const sessionsQuery = usePTSessionsQuery();
+  const reviewsQuery = useMemberReviewsQuery();
 
   const [bookContract, setBookContract] = useState<PTContract | null>(null);
   const [cancelSession, setCancelSession] = useState<PTSession | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null);
 
   return (
     <div className="grid gap-6">
@@ -225,6 +229,19 @@ export function PTView() {
                         {t('cancelDeadline', { time: formatDateTime(session.cancel_deadline) })}
                       </span>
                     </div>
+                  ) : session.status === 'COMPLETED' ? (
+                    <ReviewActionOrBadge
+                      reviews={reviewsQuery.data}
+                      targetType="PT_SESSION"
+                      targetId={session.id}
+                      onReview={() =>
+                        setReviewTarget({
+                          targetType: 'PT_SESSION',
+                          targetId: session.id,
+                          targetName: `${session.package_name} · ${session.trainer_name}`,
+                        })
+                      }
+                    />
                   ) : null}
                 </div>
 
@@ -270,6 +287,11 @@ export function PTView() {
       <CancelPTSessionDialog
         session={cancelSession}
         onOpenChange={open => !open && setCancelSession(null)}
+      />
+
+      <ReviewDialog
+        target={reviewTarget}
+        onOpenChange={open => !open && setReviewTarget(null)}
       />
     </div>
   );

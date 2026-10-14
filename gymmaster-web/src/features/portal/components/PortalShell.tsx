@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { signOut } from 'next-auth/react';
+import { getSession, signOut } from 'next-auth/react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
+import { toast } from 'sonner';
 import {
   ArrowRightStartOnRectangleIcon,
   Bars3Icon,
@@ -13,11 +15,16 @@ import {
   ChartBarIcon,
   ClockIcon,
   CreditCardIcon,
+  DocumentCheckIcon,
   DocumentTextIcon,
+  FireIcon,
+  GiftIcon,
   HomeIcon,
   KeyIcon,
   QrCodeIcon,
   ShieldExclamationIcon,
+  SparklesIcon,
+  TrophyIcon,
   UserCircleIcon,
   UserGroupIcon,
 } from '@heroicons/react/24/outline';
@@ -41,16 +48,19 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
+import { getApiBaseUrl } from '@/env';
 import { ChangePasswordDialog } from '@/features/auth/components/ChangePasswordDialog';
 import { initials } from '@/lib/format';
+import { getClientAccessToken } from '@/lib/session-token';
 import { cn } from '@/lib/utils';
 import type { AuthUser } from '@/types/auth';
-import { useUnreadCountQuery } from '../queries';
+import { portalKeys, useUnreadCountQuery } from '../queries';
 
 export function PortalShell({ user, children }: { user: AuthUser; children: ReactNode }) {
   const t = useTranslations('portal');
   const tc = useTranslations('common');
   const pathname = usePathname();
+  const queryClient = useQueryClient();
   const isMember = Boolean(user.roles?.includes('MEMBER'));
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -58,13 +68,73 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
   const unreadQuery = useUnreadCountQuery(isMember);
   const unreadCount = unreadQuery.data?.count ?? 0;
 
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // Ignore service worker registration errors in dev/unsupported environments
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isMember || typeof window === 'undefined' || typeof EventSource === 'undefined') {
+      return;
+    }
+
+    let es: EventSource | null = null;
+    let cancelled = false;
+
+    const connect = async () => {
+      const token = getClientAccessToken() ?? (await getSession())?.accessToken;
+      if (!token || cancelled) return;
+
+      const streamUrl = `${getApiBaseUrl()}/notifications/stream?token=${encodeURIComponent(token)}`;
+      es = new EventSource(streamUrl);
+
+      const handleEvent = (event: MessageEvent) => {
+        void queryClient.invalidateQueries({ queryKey: portalKeys.unreadCount() });
+        void queryClient.invalidateQueries({ queryKey: portalKeys.notificationsAll() });
+        try {
+          const data = JSON.parse(String(event.data)) as {
+            title?: string;
+            content?: string;
+          } | null;
+          if (data?.title) {
+            toast.info(data.title, data.content ? { description: data.content } : undefined);
+          }
+        } catch {
+          // Heartbeat or non-JSON payload
+        }
+      };
+
+      es.addEventListener('message', handleEvent);
+      es.addEventListener('notification', handleEvent as EventListener);
+      es.onerror = () => {
+        // Fallback to polling (already handled by useUnreadCountQuery refetchInterval: 60_000)
+        es?.close();
+      };
+    };
+
+    void connect();
+
+    return () => {
+      cancelled = true;
+      es?.close();
+    };
+  }, [isMember, queryClient]);
+
   const navItems = [
     { href: '/me', label: t('nav.overview'), icon: HomeIcon, exact: true },
     { href: '/me/qr', label: t('nav.qr'), icon: QrCodeIcon },
     { href: '/me/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon },
     { href: '/me/classes', label: t('nav.classes'), icon: CalendarDaysIcon },
     { href: '/me/pt', label: t('nav.pt'), icon: UserGroupIcon },
+    { href: '/me/workout', label: t('nav.workout'), icon: FireIcon },
+    { href: '/me/nutrition', label: t('nav.nutrition'), icon: SparklesIcon },
     { href: '/me/progress', label: t('nav.progress'), icon: ChartBarIcon },
+    { href: '/me/rewards', label: t('nav.rewards'), icon: GiftIcon },
+    { href: '/me/challenges', label: t('nav.challenges'), icon: TrophyIcon },
+    { href: '/me/contracts', label: t('nav.contracts'), icon: DocumentCheckIcon },
     { href: '/me/invoices', label: t('nav.invoices'), icon: DocumentTextIcon },
   ];
 

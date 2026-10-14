@@ -6,6 +6,7 @@ import (
 	"gorm.io/gorm"
 
 	"gymmaster-api/internal/entity"
+	"gymmaster-api/internal/pkg/realtime"
 	"gymmaster-api/internal/storage/postgres"
 )
 
@@ -20,6 +21,12 @@ const (
 	NotifyPTScheduled          = "PT_SCHEDULED"
 	NotifyPTCancelled          = "PT_CANCELLED"
 	NotifyLowStock             = "LOW_STOCK"
+	NotifyPaymentSuccess       = "PAYMENT_SUCCESS"
+	NotifyReviewPrompt         = "REVIEW_PROMPT"
+	NotifyMaintenanceDue       = "MAINTENANCE_DUE"
+	NotifyBirthday             = "BIRTHDAY"
+	NotifyLeadNew              = "LEAD_NEW"
+	NotifyCheckin              = "CHECKIN"
 	NotifySystem               = "SYSTEM"
 )
 
@@ -32,11 +39,12 @@ type Notifier interface {
 }
 
 type notifier struct {
-	db *gorm.DB
+	db  *gorm.DB
+	hub *realtime.Hub
 }
 
 func NewNotifier(db *gorm.DB) Notifier {
-	return &notifier{db: db}
+	return &notifier{db: db, hub: realtime.Default()}
 }
 
 func (n *notifier) Notify(ctx context.Context, userIDs []uint, typ, title, body, link string) error {
@@ -47,7 +55,23 @@ func (n *notifier) Notify(ctx context.Context, userIDs []uint, typ, title, body,
 	for _, id := range userIDs {
 		rows = append(rows, entity.Notification{UserID: id, Type: typ, Title: title, Body: body, Link: link})
 	}
-	return postgres.Conn(ctx, n.db).Create(&rows).Error
+	if err := postgres.Conn(ctx, n.db).Create(&rows).Error; err != nil {
+		return err
+	}
+	if n.hub != nil {
+		for _, row := range rows {
+			n.hub.Publish(realtime.Event{
+				ID:        row.ID,
+				UserID:    row.UserID,
+				Type:      row.Type,
+				Title:     row.Title,
+				Body:      row.Body,
+				Link:      row.Link,
+				CreatedAt: row.CreatedAt,
+			})
+		}
+	}
+	return nil
 }
 
 func (n *notifier) NotifyPermission(ctx context.Context, perm string, branchID *uint, typ, title, body, link string) error {
@@ -68,3 +92,4 @@ func (n *notifier) NotifyPermission(ctx context.Context, perm string, branchID *
 	}
 	return n.Notify(ctx, ids, typ, title, body, link)
 }
+

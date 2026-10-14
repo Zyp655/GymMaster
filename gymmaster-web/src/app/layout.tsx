@@ -22,8 +22,8 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [session, messages] = await Promise.all([getCachedSession(), getMessages()]);
   return (
-    <html lang={LOCALE} className={beVietnam.variable}>
-      <body>
+    <html lang={LOCALE} className={beVietnam.variable} suppressHydrationWarning>
+      <body suppressHydrationWarning>
         <NextIntlClientProvider locale={LOCALE} timeZone={TIME_ZONE} messages={messages}>
           <AppProviders session={session}>{children}</AppProviders>
         </NextIntlClientProvider>

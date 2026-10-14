@@ -21,7 +21,10 @@ func Run(ctx context.Context, db *gorm.DB, cfg *config.Config) error {
 		if err := seedOwner(ctx, tx, cfg.Seed); err != nil {
 			return err
 		}
-		return seedDemo(ctx, tx, cfg.Seed)
+		if err := seedDemo(ctx, tx, cfg.Seed); err != nil {
+			return err
+		}
+		return seedStage2Demo(ctx, tx)
 	})
 }
 

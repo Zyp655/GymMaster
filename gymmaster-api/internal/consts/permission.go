@@ -84,4 +84,44 @@ const (
 	PermAuditView = "audit.view"
 
 	PermJobView = "job.view"
+
+	PermWorkoutView   = "workout.view"
+	PermWorkoutManage = "workout.manage"
+
+	PermReviewView = "review.view"
+
+	PermEquipmentView   = "equipment.view"
+	PermEquipmentManage = "equipment.manage"
+
+	PermLeadView   = "lead.view"
+	PermLeadManage = "lead.manage"
+
+	// Giai đoạn 3 (Sprint 18–23)
+	PermDeviceView   = "device.view"
+	PermDeviceManage = "device.manage"
+
+	PermLockerView   = "locker.view"
+	PermLockerManage = "locker.manage"
+
+	PermPayrollView   = "payroll.view"
+	PermPayrollManage = "payroll.manage"
+
+	PermExpenseView       = "expense.view"
+	PermExpenseManage     = "expense.manage"
+	PermCashSessionManage = "cash_session.manage"
+
+	PermLoyaltyView   = "loyalty.view"
+	PermLoyaltyManage = "loyalty.manage"
+
+	PermEngagementView   = "engagement.view"
+	PermEngagementManage = "engagement.manage"
+
+	// Giai đoạn 4 (Sprint 24–27)
+	PermContractManage      = "contract.manage"
+	PermLeaveManage         = "leave.manage"
+	PermHolidayManage       = "holiday.manage"
+	PermKpiManage           = "kpi.manage"
+	PermPrivacyManage       = "privacy.manage"
+	PermMemberViewSensitive = "member.view_sensitive"
 )
+

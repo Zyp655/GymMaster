@@ -83,7 +83,9 @@
     "nav": {
       "pricing": "Bảng giá",
       "pt": "Huấn luyện cá nhân",
+      "schedules": "Lịch lớp",
       "branches": "Chi nhánh",
+      "trial": "Tập thử",
       "login": "Đăng nhập",
       "enter": "Vào hệ thống",
       "menu": "Điều hướng"
@@ -142,6 +144,42 @@
       "perSession": "{price}/buổi",
       "emptyTitle": "Chưa có gói PT đang mở bán",
       "emptyDescription": "Vui lòng liên hệ quầy lễ tân để được tư vấn."
+    },
+    "schedules": {
+      "eyebrow": "Lịch lớp tập nhóm",
+      "title": "Lịch lớp trong tuần tại các chi nhánh",
+      "subtitle": "Xem lịch các lớp Yoga, Zumba, Cycling, Boxing sắp diễn ra và số chỗ trống theo từng cơ sở.",
+      "allBranches": "Tất cả chi nhánh",
+      "trainer": "HLV: {name}",
+      "room": "Phòng {name}",
+      "availableSlots": "Còn {available}/{capacity} chỗ",
+      "fullSlots": "Hết chỗ ({capacity}/{capacity})",
+      "emptyTitle": "Chưa có lịch lớp trong tuần này",
+      "emptyDescription": "Thử chọn chi nhánh khác hoặc quay lại sau để cập nhật lịch lớp mới nhất."
+    },
+    "trial": {
+      "eyebrow": "Đăng ký tập thử",
+      "title": "Trải nghiệm miễn phí buổi tập đầu tiên",
+      "subtitle": "Để lại thông tin, đội ngũ tư vấn của GymMaster sẽ liên hệ sắp xếp lịch tập thử và đo chỉ số cơ thể miễn phí cho bạn.",
+      "fullNameLabel": "Họ và tên",
+      "fullNamePlaceholder": "Nguyễn Văn A",
+      "phoneLabel": "Số điện thoại",
+      "phonePlaceholder": "0912345678",
+      "emailLabel": "Email (tùy chọn)",
+      "emailPlaceholder": "ban@example.com",
+      "branchLabel": "Chi nhánh mong muốn",
+      "branchPlaceholder": "Chọn chi nhánh",
+      "planLabel": "Gói tập quan tâm (tùy chọn)",
+      "planPlaceholder": "Chọn gói tập",
+      "noteLabel": "Ghi chú thêm",
+      "notePlaceholder": "Khung giờ rảnh, mục tiêu tập luyện...",
+      "submit": "Gửi đăng ký tập thử",
+      "submitting": "Đang gửi...",
+      "successTitle": "Đăng ký tập thử thành công!",
+      "successDesc": "Cảm ơn bạn đã quan tâm đến GymMaster. Nhân viên tư vấn sẽ liên hệ với bạn trong thời gian sớm nhất.",
+      "registerAnother": "Đăng ký thêm người khác",
+      "referralBadge": "Mã giới thiệu: {code}",
+      "referralNotePrefix": "[Mã giới thiệu: {code}]"
     },
     "duration": {
       "days": "{count} ngày",

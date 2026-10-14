@@ -13,14 +13,24 @@ import (
 
 type (
 	Config struct {
-		Env    string
-		Server ServerCfg
-		DB     DbCfg
-		JWT    JwtCfg
-		Seed   SeedCfg
-		Upload UploadCfg
-		Mail   MailCfg
-		Cron   CronCfg
+		Env      string
+		WebURL   string
+		AdminURL string
+		Server   ServerCfg
+		DB       DbCfg
+		JWT      JwtCfg
+		Seed     SeedCfg
+		Upload   UploadCfg
+		Mail     MailCfg
+		Cron     CronCfg
+		VNPay    VNPayCfg
+	}
+
+	VNPayCfg struct {
+		TmnCode    string
+		HashSecret string
+		PaymentURL string
+		ReturnURL  string
 	}
 
 	UploadCfg struct {
@@ -89,7 +99,9 @@ func load() *Config {
 	_ = godotenv.Load()
 
 	c := &Config{
-		Env: getEnv("APP_ENV", "dev"),
+		Env:      getEnv("APP_ENV", "dev"),
+		WebURL:   strings.TrimRight(getEnv("WEB_URL", "http://localhost:3000"), "/"),
+		AdminURL: strings.TrimRight(getEnv("ADMIN_URL", "http://localhost:3001"), "/"),
 		Server: ServerCfg{
 			Port:        parseInt("SERVER_PORT", 8000),
 			CorsOrigins: corsHosts(getEnv("CORS_ORIGINS", "localhost:3000,localhost:3001")),
@@ -126,6 +138,12 @@ func load() *Config {
 		},
 		Cron: CronCfg{
 			Enabled: parseBool("CRON_ENABLED", true),
+		},
+		VNPay: VNPayCfg{
+			TmnCode:    getEnv("VNPAY_TMN_CODE", "GYMMASTR"),
+			HashSecret: getEnv("VNPAY_HASH_SECRET", "GYMMASTER_VNPAY_SANDBOX_SECRET_KEY_32"),
+			PaymentURL: getEnv("VNPAY_PAYMENT_URL", "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"),
+			ReturnURL:  getEnv("VNPAY_RETURN_URL", "http://localhost:3000/payment/result"),
 		},
 		Seed: SeedCfg{
 			AdminEmail:    getEnv("SEED_ADMIN_EMAIL", "admin@gymmaster.vn"),

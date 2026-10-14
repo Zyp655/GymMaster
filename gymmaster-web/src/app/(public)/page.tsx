@@ -9,23 +9,27 @@ import { LandingFooter } from '@/features/landing/components/LandingFooter';
 import { LandingHeader } from '@/features/landing/components/LandingHeader';
 import { PricingSection } from '@/features/landing/components/PricingSection';
 import { PTSection } from '@/features/landing/components/PTSection';
+import { PublicScheduleSection } from '@/features/landing/components/PublicScheduleSection';
+import { TrialLeadSection } from '@/features/landing/components/TrialLeadSection';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations('common.landing');
   return { title: t('metaTitle'), description: t('metaDescription') };
 }
 
-/** Trang công khai: bảng giá, gói PT, chi nhánh. Dữ liệu lấy phía server mỗi request (no-store). */
+/** Trang công khai: bảng giá, gói PT, lịch lớp, chi nhánh, đăng ký tập thử. Dữ liệu lấy phía server mỗi request (no-store). */
 export default async function LandingPage() {
-  const [session, plans, branches] = await Promise.all([
+  const [session, plans, branches, schedules] = await Promise.all([
     getCachedSession(),
     landingApi.plans(),
     landingApi.branches(),
+    landingApi.classSchedules(),
   ]);
 
   const planList = plans.ok ? plans.data.membership_plans : [];
   const ptList = plans.ok ? plans.data.pt_packages : [];
   const branchList = branches.ok ? branches.data : [];
+  const scheduleList = schedules.ok ? schedules.data : [];
   const hours =
     branchList.length > 0
       ? {
@@ -50,7 +54,9 @@ export default async function LandingPage() {
         <Features />
         <PricingSection result={plans.ok ? { ok: true, data: planList } : { ok: false }} />
         <PTSection result={plans.ok ? { ok: true, data: ptList } : { ok: false }} />
+        <PublicScheduleSection branches={branchList} initialSchedules={scheduleList} />
         <BranchesSection result={branches} />
+        <TrialLeadSection branches={branchList} plans={planList} />
       </main>
       <LandingFooter />
     </div>

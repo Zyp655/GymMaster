@@ -47,6 +47,13 @@ var checkinDenyMessages = map[string]string{
 	entity.CheckinDenyQRExpired:            "Mã QR đã hết hạn, vui lòng mở lại mã mới trên ứng dụng",
 	entity.CheckinDenyQRInvalid:            "Mã QR không hợp lệ",
 	entity.CheckinDenyBranchClosed:         "Ngoài giờ mở cửa của chi nhánh",
+	entity.CheckinDenyTrialPassUsed:        "Vé tập thử này đã được sử dụng",
+	entity.CheckinDenyTrialPassExpired:     "Vé tập thử không có hiệu lực trong ngày hôm nay",
+	entity.CheckinDenyDayPassUsed:          "Vé ngày / vé khách này đã được sử dụng",
+	entity.CheckinDenyDayPassExpired:       "Vé ngày / vé khách không có hiệu lực trong ngày hôm nay",
+	entity.CheckinDenyInstallmentOverdue:   "Hội viên có kỳ trả góp quá hạn thanh toán",
+	entity.CheckinDenyContractUnsigned:     "Hội viên chưa ký hợp đồng điện tử",
+	entity.CheckinDenyOutsideAccessHours:   "Ngoài khung giờ được phép vào tập của gói Off-Peak",
 }
 
 // CheckinDenyMessage trả thông điệp tiếng Việt mặc định cho lý do từ chối (rỗng nếu không có).
@@ -256,12 +263,157 @@ func (s *checkinService) Scan(ctx context.Context, token string, branchID uint) 
 	if err != nil {
 		return nil, err
 	}
+	trimmed := strings.TrimSpace(token)
+	if strings.HasPrefix(trimmed, "TP-") {
+		return s.scanTrialPass(ctx, trimmed, branch)
+	}
+	if strings.HasPrefix(trimmed, "DP-") {
+		return s.scanDayPass(ctx, trimmed, branch)
+	}
 	memberID, err := qrtoken.ParseMemberID(token)
 	if err != nil {
 		// QR hỏng hoàn toàn: không xác định được hội viên → không ghi DB.
 		return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
 	}
 	return s.process(ctx, checkinAttempt{method: entity.CheckinMethodQR, branch: branch, memberID: memberID, token: token})
+}
+
+func (s *checkinService) scanTrialPass(ctx context.Context, token string, branch *entity.Branch) (*v1.ScanResult, error) {
+	tpRepo, ok := s.repo.(repository.CheckinTrialPassRepository)
+	if !ok {
+		return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
+	}
+	tp, err := tpRepo.FindTrialPassByToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
+		}
+		return nil, err
+	}
+	now := s.now()
+	today := checkinDate(now.In(checkinVNLoc))
+	memberInfo := &v1.CheckinMember{
+		ID:       tp.LeadID,
+		Code:     fmt.Sprintf("TRIAL-%d", tp.ID),
+		FullName: tp.FullName + " (Tập thử)",
+		Phone:    tp.Phone,
+		Status:   "TRIAL",
+	}
+	deny := func(reason, msg string) *v1.ScanResult {
+		if msg == "" {
+			msg = checkinDenyMessages[reason]
+		}
+		return &v1.ScanResult{
+			Result:      entity.CheckinDenied,
+			DenyReason:  reason,
+			DenyMessage: msg,
+			Member:      memberInfo,
+			Checkin: &v1.CheckinRef{
+				ID:          tp.ID,
+				CheckedInAt: now,
+				BranchID:    branch.ID,
+				BranchName:  branch.Name,
+			},
+			Warnings: []string{},
+		}
+	}
+	if !checkinBranchOpen(branch, now) {
+		return deny(entity.CheckinDenyBranchClosed, fmt.Sprintf("Ngoài giờ mở cửa của chi nhánh (%s - %s)", branch.OpenTime, branch.CloseTime)), nil
+	}
+	if tp.BranchID != branch.ID {
+		return deny(entity.CheckinDenyWrongBranch, fmt.Sprintf("Vé tập thử chỉ áp dụng tại chi nhánh %s", tp.BranchName)), nil
+	}
+	if tp.UsedAt != nil {
+		return deny(entity.CheckinDenyTrialPassUsed, ""), nil
+	}
+	if checkinDate(tp.ValidDate) != today {
+		return deny(entity.CheckinDenyTrialPassExpired, fmt.Sprintf("Vé tập thử chỉ có hiệu lực ngày %s", tp.ValidDate.Format(checkinDisplayDateLayout))), nil
+	}
+	if err := tpRepo.MarkTrialPassUsed(ctx, tp.ID, now); err != nil {
+		return nil, err
+	}
+	return &v1.ScanResult{
+		Result: entity.CheckinAllowed,
+		Member: memberInfo,
+		Checkin: &v1.CheckinRef{
+			ID:          tp.ID,
+			CheckedInAt: now,
+			BranchID:    branch.ID,
+			BranchName:  branch.Name,
+		},
+		Warnings: []string{"Khách tập thử 1 ngày theo vé " + tp.QRToken},
+	}, nil
+}
+
+func (s *checkinService) scanDayPass(ctx context.Context, token string, branch *entity.Branch) (*v1.ScanResult, error) {
+	dpRepo, ok := s.repo.(repository.CheckinDayPassRepository)
+	if !ok {
+		return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
+	}
+	dp, err := dpRepo.FindDayPassByToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
+		}
+		return nil, err
+	}
+	now := s.now()
+	today := checkinDate(now.In(checkinVNLoc))
+	label := "Vé ngày"
+	if dp.Type == entity.DayPassTypeGuest {
+		label = "Khách mời"
+	}
+	memberInfo := &v1.CheckinMember{
+		ID:       dp.ID,
+		Code:     fmt.Sprintf("DP-%d", dp.ID),
+		FullName: fmt.Sprintf("%s (%s)", dp.BuyerName, label),
+		Phone:    dp.Phone,
+		Status:   dp.Type,
+	}
+	deny := func(reason, msg string) *v1.ScanResult {
+		if msg == "" {
+			msg = checkinDenyMessages[reason]
+		}
+		return &v1.ScanResult{
+			Result:      entity.CheckinDenied,
+			DenyReason:  reason,
+			DenyMessage: msg,
+			Member:      memberInfo,
+			Checkin: &v1.CheckinRef{
+				ID:          dp.ID,
+				CheckedInAt: now,
+				BranchID:    branch.ID,
+				BranchName:  branch.Name,
+			},
+			Warnings: []string{},
+		}
+	}
+	if !checkinBranchOpen(branch, now) {
+		return deny(entity.CheckinDenyBranchClosed, fmt.Sprintf("Ngoài giờ mở cửa của chi nhánh (%s - %s)", branch.OpenTime, branch.CloseTime)), nil
+	}
+	if dp.BranchID != branch.ID {
+		return deny(entity.CheckinDenyWrongBranch, fmt.Sprintf("Vé chỉ áp dụng tại chi nhánh %s", dp.BranchName)), nil
+	}
+	if dp.UsedAt != nil {
+		return deny(entity.CheckinDenyDayPassUsed, ""), nil
+	}
+	if checkinDate(dp.ValidDate) != today {
+		return deny(entity.CheckinDenyDayPassExpired, fmt.Sprintf("Vé chỉ có hiệu lực ngày %s", dp.ValidDate.Format(checkinDisplayDateLayout))), nil
+	}
+	if err := dpRepo.MarkDayPassUsed(ctx, dp.ID, now); err != nil {
+		return nil, err
+	}
+	return &v1.ScanResult{
+		Result: entity.CheckinAllowed,
+		Member: memberInfo,
+		Checkin: &v1.CheckinRef{
+			ID:          dp.ID,
+			CheckedInAt: now,
+			BranchID:    branch.ID,
+			BranchName:  branch.Name,
+		},
+		Warnings: []string{fmt.Sprintf("%s theo mã %s", label, dp.QRToken)},
+	}, nil
 }
 
 func (s *checkinService) Manual(ctx context.Context, memberID, branchID uint, note string) (*v1.ScanResult, error) {

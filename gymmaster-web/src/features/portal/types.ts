@@ -47,6 +47,9 @@ export interface Member {
   booking_blocked_until: string | null;
   latest_metric: BodyMetric | null;
   stats: { total_checkins: number; last_checkin_at: string | null };
+  loyalty_points?: number;
+  referral_code?: string;
+  mfa_enabled?: boolean;
 }
 
 export interface Branch {
@@ -294,3 +297,695 @@ export interface FreezePayload {
   end_date: string;
   reason: string;
 }
+
+// ---- Sprint 13: Thanh toán VNPay Sandbox & Tự mua gói tập -----------------------
+
+export interface PaymentURLRes {
+  txn_ref: string;
+  payment_url: string;
+  amount: number;
+  expires_at: string;
+}
+
+export interface CheckPromotionParams {
+  code: string;
+  plan_id?: number;
+  amount?: number;
+}
+
+export interface CheckPromotionRes {
+  code: string;
+  name: string;
+  discount: number;
+  final_amount: number;
+}
+
+export interface CheckoutSubscriptionPayload {
+  plan_id: number;
+  branch_id?: number;
+  promotion_code?: string;
+}
+
+export interface CheckoutSubscriptionRes {
+  subscription_id: number;
+  invoice_id: number;
+  invoice_no: string;
+  amount: number;
+  txn_ref: string;
+  payment_url: string;
+}
+
+export interface VNPayReturnRes {
+  success: boolean;
+  txn_ref: string;
+  invoice_id: number;
+  invoice_no: string;
+  amount: number;
+  response_code: string;
+  message: string;
+}
+
+// ---- Sprint 14: Giáo án & Nhật ký tập luyện -------------------------------------
+
+export type MuscleGroup =
+  | 'CHEST'
+  | 'BACK'
+  | 'SHOULDERS'
+  | 'LEGS'
+  | 'ARMS'
+  | 'CORE'
+  | 'CARDIO'
+  | 'FULL_BODY';
+
+export interface Exercise {
+  id: number;
+  name: string;
+  muscle_group: MuscleGroup | string;
+  equipment: string;
+  video_url: string;
+  description: string;
+}
+
+export type ExerciseItem = Exercise;
+
+export interface WorkoutPlanItem {
+  id: number;
+  day_id?: number;
+  exercise_id: number;
+  exercise_name?: string;
+  muscle_group?: string;
+  equipment?: string;
+  video_url?: string;
+  sets: number;
+  reps: number | string;
+  weight?: number;
+  weight_kg?: number | null;
+  rest_sec: number | null;
+  note: string;
+  sort?: number;
+  sort_order?: number;
+}
+
+export interface WorkoutPlanDay {
+  id: number;
+  plan_id: number;
+  day_index: number;
+  title: string;
+  items: WorkoutPlanItem[];
+}
+
+export interface WorkoutPlan {
+  id: number;
+  member_id: number | null;
+  trainer_id: number;
+  trainer_name?: string;
+  pt_contract_id: number | null;
+  name?: string;
+  title?: string;
+  description?: string;
+  goal: string;
+  start_date: string | null;
+  end_date: string | null;
+  status: 'DRAFT' | 'ACTIVE' | 'COMPLETED' | 'ARCHIVED';
+  days: WorkoutPlanDay[];
+  created_at?: string;
+}
+
+export interface WorkoutLog {
+  id: number;
+  member_id: number;
+  plan_item_id: number | null;
+  exercise_id: number;
+  exercise_name?: string;
+  muscle_group?: string;
+  performed_at?: string;
+  logged_at?: string;
+  sets: number;
+  reps: number;
+  weight?: number;
+  weight_kg?: number;
+  volume?: number;
+  note: string;
+  created_at?: string;
+}
+
+export interface WorkoutProgressPoint {
+  date: string;
+  max_weight: number;
+  total_volume: number;
+  MaxWeight?: number;
+  TotalVolume?: number;
+}
+
+export type WorkoutLogsResponse =
+  | WorkoutLog[]
+  | {
+      items?: WorkoutLog[];
+      logs?: WorkoutLog[];
+      progress?: WorkoutProgressPoint[];
+      series?: WorkoutProgressPoint[];
+    };
+
+export interface CreateWorkoutLogPayload {
+  plan_item_id?: number | null;
+  exercise_id: number;
+  sets: number;
+  reps: number;
+  weight?: number;
+  weight_kg?: number;
+  note?: string;
+  performed_at?: string;
+}
+
+// ---- Sprint 15: Đánh giá HLV & Lớp học ------------------------------------------
+
+export type ReviewTargetType = 'PT_SESSION' | 'CLASS_SCHEDULE';
+
+export interface MemberReview {
+  id: number;
+  member_id: number;
+  target_type: ReviewTargetType;
+  target_id: number;
+  trainer_id: number;
+  trainer_name?: string;
+  branch_id: number | null;
+  rating: number;
+  comment: string;
+  created_at: string;
+}
+
+export type MemberReviewItem = MemberReview;
+
+export interface CreateMemberReviewPayload {
+  target_type: ReviewTargetType;
+  target_id: number;
+  rating: number;
+  comment?: string;
+}
+
+// ---- Sprint 18: Thiết bị kiểm soát ra vào & Kiosk --------------------------------
+
+export interface DeviceCheckinPayload {
+  qr_token: string;
+  device_key?: string;
+}
+
+export interface DeviceCheckinRes {
+  allow?: boolean;
+  allowed?: boolean;
+  result?: 'ALLOWED' | 'DENIED' | string;
+  deny_reason?: string;
+  message?: string;
+  deny_message?: string;
+  member_name?: string;
+  full_name?: string;
+  member_code?: string;
+  avatar_url?: string;
+  plan_name?: string;
+  device_name?: string;
+  branch_name?: string;
+  locker_code?: string;
+}
+
+export interface DeviceHeartbeatRes {
+  device?: {
+    id: number;
+    branch_id: number;
+    branch_name?: string;
+    code: string;
+    name: string;
+    type: string;
+    status: string;
+    last_seen_at?: string | null;
+  } | null;
+  server_time?: string;
+}
+
+// ---- Sprint 19 & 26: Tủ đồ & Mật độ phòng tập -----------------------------------
+
+export type LockerRentalType = 'DAILY' | 'MONTHLY';
+
+export interface MemberLocker {
+  id?: number;
+  rental_id?: number;
+  locker_id?: number;
+  code?: string;
+  locker_code?: string;
+  zone?: string;
+  size?: string;
+  type?: LockerRentalType | string;
+  rental_type?: LockerRentalType | string;
+  start_at?: string;
+  end_at?: string | null;
+  end_date?: string | null;
+  assigned_until?: string | null;
+  status?: string;
+  branch_id?: number;
+  branch_name?: string;
+  note?: string;
+}
+
+export type OccupancyLevel = 'QUIET' | 'NORMAL' | 'BUSY' | 'FULL';
+export type OccupancyStatus = OccupancyLevel;
+
+export interface BranchOccupancy {
+  branch_id: number;
+  branch_name?: string;
+  branch_code?: string;
+  present?: number;
+  current_count?: number;
+  active_count?: number;
+  capacity: number;
+  occupancy_pct?: number;
+  percentage?: number;
+  percent?: number;
+  level?: OccupancyLevel;
+  status?: OccupancyLevel;
+}
+
+// ---- Sprint 21: Kế hoạch trả góp ------------------------------------------------
+
+export type InstallmentStatus = 'PENDING' | 'PAID' | 'OVERDUE';
+export type InstallmentScheduleStatus = InstallmentStatus;
+
+export interface InstallmentScheduleItem {
+  id: number;
+  plan_id: number;
+  seq: number;
+  due_date: string;
+  amount: number;
+  paid_amount: number;
+  status: InstallmentStatus;
+  paid_at?: string | null;
+}
+
+export interface InstallmentPlanItem {
+  id: number;
+  invoice_id: number;
+  invoice_no?: string;
+  member_id?: number;
+  total: number;
+  total_amount?: number;
+  installments: number;
+  count?: number;
+  schedules?: InstallmentScheduleItem[];
+  items?: InstallmentScheduleItem[];
+  created_at?: string;
+}
+
+// ---- Sprint 22: Điểm thưởng, Đổi quà, Huy hiệu, Giới thiệu & Thử thách ----------
+
+export type LoyaltyReason =
+  | 'CHECKIN'
+  | 'RENEW'
+  | 'REFERRAL'
+  | 'REVIEW'
+  | 'REDEEM'
+  | 'CHALLENGE'
+  | 'ADJUST';
+
+export interface LoyaltyLedgerItem {
+  id: number;
+  member_id: number;
+  points: number;
+  reason: LoyaltyReason | string;
+  ref_type?: string;
+  ref_id?: number | null;
+  note: string;
+  created_at: string;
+}
+
+export interface LoyaltyRewardItem {
+  id: number;
+  name: string;
+  description: string;
+  cost_points: number;
+  points_cost?: number;
+  reward_type: 'VOUCHER' | 'PRODUCT' | string;
+  ref_id?: number | null;
+  discount_pct?: number;
+  stock: number | null;
+  status: string;
+}
+
+export interface MemberLoyaltyRes {
+  balance?: number;
+  points?: number;
+  loyalty_points?: number;
+  referral_code?: string;
+  ledgers?: LoyaltyLedgerItem[];
+  loyalty_ledgers?: LoyaltyLedgerItem[];
+  rewards?: LoyaltyRewardItem[];
+  loyalty_rewards?: LoyaltyRewardItem[];
+}
+
+export interface RedeemRewardRes {
+  points?: number;
+  loyalty_points?: number;
+  voucher_code?: string;
+  promotion_code?: string;
+  code?: string;
+  reward?: LoyaltyRewardItem;
+  ledger?: LoyaltyLedgerItem;
+  message?: string;
+}
+
+export interface BadgeItem {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+  icon: string;
+  rule?: Record<string, unknown>;
+  earned: boolean;
+  earned_at?: string | null;
+  created_at?: string;
+}
+
+export type ChallengeMetric = 'CHECKINS' | 'CLASSES' | 'PT_SESSIONS';
+
+export interface ChallengeItem {
+  id: number;
+  branch_id?: number | null;
+  branch_name?: string;
+  name: string;
+  description: string;
+  metric: ChallengeMetric | string;
+  metric_type?: ChallengeMetric | string;
+  target: number;
+  target_value?: number;
+  start_date: string;
+  end_date: string;
+  reward_points: number;
+  status: string;
+  participant_count?: number;
+  joined: boolean;
+  progress: number;
+  completed?: boolean;
+  completed_at?: string | null;
+  joined_at?: string | null;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  member_id: number;
+  member_code: string;
+  full_name: string;
+  avatar_url?: string;
+  loyalty_points: number;
+  points?: number;
+  checkin_count: number;
+  checkins?: number;
+}
+
+export type MemberLeaderboardRes =
+  | LeaderboardEntry[]
+  | {
+      by_points?: LeaderboardEntry[];
+      by_checkins?: LeaderboardEntry[];
+      items?: LeaderboardEntry[];
+    };
+
+// ---- Sprint 23: Dinh dưỡng, Bảng tin & Khảo sát NPS -----------------------------
+
+export type MealType = 'BREAKFAST' | 'LUNCH' | 'DINNER' | 'SNACK';
+
+export interface FoodItem {
+  id: number;
+  name: string;
+  unit: string;
+  calories: number;
+  protein: number;
+  protein_g?: number;
+  carbs: number;
+  carbs_g?: number;
+  fat: number;
+  fat_g?: number;
+}
+
+export interface MealPlanEntry {
+  id: number;
+  plan_id: number;
+  day_index: number;
+  meal: MealType | string;
+  meal_type?: MealType | string;
+  food_id: number;
+  food_name?: string;
+  unit?: string;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  qty: number;
+  note: string;
+}
+
+export interface MealPlanItem {
+  id: number;
+  member_id: number;
+  trainer_id?: number | null;
+  trainer_name?: string;
+  name: string;
+  goal: string;
+  description?: string;
+  target_calories: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  status: string;
+  items?: MealPlanEntry[];
+}
+
+export interface FoodLogItem {
+  id: number;
+  member_id: number;
+  food_id: number;
+  food_name?: string;
+  unit?: string;
+  qty: number;
+  meal: MealType | string;
+  meal_type?: MealType | string;
+  eaten_at: string;
+  calories?: number;
+  protein?: number;
+  protein_g?: number;
+  carbs?: number;
+  carbs_g?: number;
+  fat?: number;
+  fat_g?: number;
+  created_at?: string;
+}
+
+export interface MemberNutritionOverviewRes {
+  recommended_calories?: number;
+  plans?: MealPlanItem[];
+  meal_plans?: MealPlanItem[];
+  foods?: FoodItem[];
+}
+
+export interface FoodLogsResponse {
+  date?: string;
+  recommended_calories?: number;
+  target_calories?: number;
+  total_calories?: number;
+  total_protein?: number;
+  total_protein_g?: number;
+  total_carbs?: number;
+  total_carbs_g?: number;
+  total_fat?: number;
+  total_fat_g?: number;
+  totals?: {
+    calories?: number;
+    protein?: number;
+    carbs?: number;
+    fat?: number;
+  };
+  items?: FoodLogItem[];
+  logs?: FoodLogItem[];
+  foods?: FoodItem[];
+  meal_plans?: MealPlanItem[];
+  plans?: MealPlanItem[];
+}
+
+export interface CreateFoodLogPayload {
+  food_id: number;
+  qty: number;
+  meal?: MealType | string;
+  meal_type?: MealType | string;
+  date?: string;
+  eaten_at?: string;
+}
+
+export interface AnnouncementItem {
+  id: number;
+  branch_id?: number | null;
+  branch_name?: string;
+  title: string;
+  body: string;
+  content?: string;
+  image_url?: string;
+  publish_at: string;
+  published_at?: string;
+  expire_at?: string | null;
+  pinned: boolean;
+  is_pinned?: boolean;
+  created_at?: string;
+}
+
+export interface SurveyItem {
+  id: number;
+  title: string;
+  description?: string;
+  type: 'NPS' | 'CUSTOM' | string;
+  start_at: string;
+  end_at?: string | null;
+  status: string;
+  responded?: boolean;
+  my_score?: number | null;
+  my_comment?: string;
+  my_response?: {
+    id: number;
+    score: number;
+    comment: string;
+    created_at: string;
+  } | null;
+}
+
+export interface SubmitSurveyPayload {
+  score: number;
+  comment?: string;
+  answers?: Record<string, unknown>;
+}
+
+// ---- Sprint 24: Hợp đồng điện tử & Vé khách mời ---------------------------------
+
+export type ContractStatus = 'PENDING' | 'SIGNED';
+
+export interface MemberContractItem {
+  id: number;
+  member_id: number;
+  template_id: number;
+  template_name?: string;
+  name?: string;
+  title?: string;
+  template_version: number;
+  version?: number;
+  subscription_id?: number | null;
+  plan_name?: string;
+  rendered_html?: string;
+  body_html?: string;
+  content?: string;
+  status: ContractStatus | string;
+  signed_at?: string | null;
+  signature_url?: string;
+  signature_data?: string;
+  pdf_url?: string;
+  created_at?: string;
+}
+
+export interface SignContractPayload {
+  signature_url?: string;
+  signature_data?: string;
+  signature?: string;
+}
+
+export interface GuestPassItem {
+  id: number;
+  branch_id: number;
+  branch_name?: string;
+  buyer_name: string;
+  guest_name?: string;
+  phone: string;
+  guest_phone?: string;
+  type: 'DAY' | 'GUEST' | string;
+  valid_date: string;
+  qr_token: string;
+  token?: string;
+  price?: number;
+  used_at?: string | null;
+  created_at?: string;
+}
+
+export interface CreateGuestPassPayload {
+  buyer_name?: string;
+  guest_name?: string;
+  phone?: string;
+  guest_phone?: string;
+  branch_id?: number;
+  valid_date?: string;
+}
+
+// ---- Sprint 27: Bảo mật 2FA, Phiên đăng nhập & Quyền riêng tư -------------------
+
+export interface MFASetupRes {
+  secret?: string;
+  totp_secret?: string;
+  otpauth_url?: string;
+  qr_url?: string;
+  enabled?: boolean;
+  recovery_codes?: string[];
+}
+
+export interface MFAEnablePayload {
+  code: string;
+  otp?: string;
+  secret?: string;
+}
+
+export interface MFAEnableRes {
+  enabled?: boolean;
+  recovery_codes?: string[];
+  message?: string;
+}
+
+export interface SessionItem {
+  id: number;
+  device_name?: string;
+  device?: string;
+  user_agent?: string;
+  ip?: string;
+  ip_address?: string;
+  last_used_at?: string | null;
+  created_at?: string;
+  expires_at?: string;
+  is_current?: boolean;
+  current?: boolean;
+}
+
+export type ConsentType = 'TERMS' | 'MARKETING' | 'PHOTO';
+
+export interface ConsentItem {
+  id?: number;
+  type: ConsentType;
+  consent_type?: ConsentType;
+  granted: boolean;
+  granted_at?: string;
+}
+
+export interface UpdateConsentPayload {
+  type?: ConsentType;
+  consent_type?: ConsentType;
+  granted?: boolean;
+  consents?: { type: ConsentType; granted: boolean }[];
+}
+
+export type DataRequestType = 'EXPORT' | 'DELETE';
+export type DataRequestStatus = 'PENDING' | 'PROCESSING' | 'DONE' | 'REJECTED';
+
+export interface DataRequestItem {
+  id: number;
+  member_id?: number;
+  type: DataRequestType;
+  status: DataRequestStatus;
+  reason?: string;
+  file_url?: string;
+  export_url?: string;
+  note?: string;
+  created_at: string;
+  done_at?: string | null;
+}
+
+export interface CreateDataRequestPayload {
+  type: DataRequestType;
+  reason?: string;
+}
+

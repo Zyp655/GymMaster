@@ -525,8 +525,14 @@ func (s *ptService) CompleteSession(ctx context.Context, id uint, workoutNote, t
 	if err != nil {
 		return nil, err
 	}
-	res, _, err := s.sessionRes(ctx, id)
-	return res, err
+	res, row, err := s.sessionRes(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	s.notifyParticipants(ctx, nil, row.MemberUserID, NotifyReviewPrompt, "Đánh giá buổi tập PT",
+		fmt.Sprintf("Buổi tập PT với HLV %s lúc %s đã hoàn thành. Hãy dành ít phút đánh giá chất lượng buổi tập!", row.TrainerName, ptFmtTime(row.StartAt)),
+		"/me/pt")
+	return res, nil
 }
 
 func (s *ptService) MarkNoShow(ctx context.Context, id uint, note string) (*v1.Session, error) {

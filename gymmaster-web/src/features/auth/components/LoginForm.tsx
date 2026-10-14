@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import { useTranslations } from 'next-intl';
@@ -57,9 +58,11 @@ export function LoginForm() {
           ? t('errors.invalidCredentials')
           : code === ApiCode.ACCOUNT_LOCKED
             ? t('errors.accountLocked')
-            : code === ApiCode.NETWORK
-              ? t('errors.network')
-              : t('errors.unknown');
+            : code === ApiCode.TOO_MANY_ATTEMPTS
+              ? t('errors.tooManyAttempts')
+              : code === ApiCode.NETWORK
+                ? t('errors.network')
+                : t('errors.unknown');
       toast.error(message);
       if (code === ApiCode.INVALID_CREDENTIALS) form.setFocus('password');
       return;
@@ -99,7 +102,15 @@ export function LoginForm() {
           name="password"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{t('login.password')}</FormLabel>
+              <div className="flex items-center justify-between gap-2">
+                <FormLabel>{t('login.password')}</FormLabel>
+                <Link
+                  href="/forgot-password"
+                  className="text-caption font-medium text-brand-600 hover:underline"
+                >
+                  {t('login.forgotPasswordLink')}
+                </Link>
+              </div>
               <FormControl>
                 <PasswordInput
                   {...field}
@@ -115,6 +126,12 @@ export function LoginForm() {
         <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
           {isSubmitting ? t('login.submitting') : t('login.submit')}
         </Button>
+        <p className="text-center text-body text-secondary">
+          {t('login.noAccount')}{' '}
+          <Link href="/register" className="font-semibold text-brand-600 hover:underline">
+            {t('login.registerLink')}
+          </Link>
+        </p>
       </form>
     </Form>
   );

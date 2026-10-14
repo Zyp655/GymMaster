@@ -20,17 +20,13 @@ import {
   RollbackOutlined,
 } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import invoiceApi, {
-  INVOICE_ITEM_TYPE_LABEL,
-  INVOICE_SOURCE_LABEL,
-  PAYMENT_METHOD_LABEL,
-} from '@/api/invoice';
+import invoiceApi, { INVOICE_ITEM_TYPE_LABEL, INVOICE_SOURCE_LABEL } from '@/api/invoice';
 import type { InvoiceItem, Payment, Refund } from '@/api/invoice';
 import MoneyText from '@/components/Money/MoneyText';
 import PageTitle from '@/components/PageTitle';
 import StatusTag from '@/components/StatusTag';
 import { PERM } from '@/constants/permissions';
-import { INVOICE_STATUS_MAP } from '@/constants/status';
+import { INVOICE_STATUS_MAP, PAYMENT_METHOD_MAP } from '@/constants/status';
 import { usePermission } from '@/hooks/usePermission';
 import { openInvoicePrint } from '@/routes/subscriptions/utils';
 import { getErrorMessage } from '@/utils/errors';
@@ -283,7 +279,9 @@ export default function InvoiceDetailPage() {
                 {
                   title: 'Phương thức',
                   dataIndex: 'method',
-                  render: (v: Payment['method']) => PAYMENT_METHOD_LABEL[v] ?? v,
+                  render: (v: Payment['method']) => (
+                    <StatusTag status={v} map={PAYMENT_METHOD_MAP} />
+                  ),
                 },
                 { title: 'Mã GD', dataIndex: 'reference', render: (v: string) => v || '—' },
                 { title: 'Người thu', dataIndex: 'received_by_name' },
@@ -321,7 +319,9 @@ export default function InvoiceDetailPage() {
                 {
                   title: 'Phương thức',
                   dataIndex: 'method',
-                  render: (v: Refund['method']) => PAYMENT_METHOD_LABEL[v] ?? v,
+                  render: (v: Refund['method']) => (
+                    <StatusTag status={v} map={PAYMENT_METHOD_MAP} />
+                  ),
                 },
                 { title: 'Lý do', dataIndex: 'reason' },
                 { title: 'Người hoàn', dataIndex: 'refunded_by_name' },

@@ -4,9 +4,10 @@ import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import dayjs from 'dayjs';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
-import { CreditCardIcon, PauseCircleIcon } from '@heroicons/react/24/outline';
+import { CreditCardIcon, PauseCircleIcon, PlusIcon } from '@heroicons/react/24/outline';
 import { EmptyState } from '@/components/common/EmptyState';
 import { LoadError } from '@/components/common/LoadError';
 import { Badge } from '@/components/ui/badge';
@@ -71,7 +72,18 @@ export function SubscriptionsView() {
 
   return (
     <div className="grid gap-6">
-      <PortalPageHeader title={t('title')} subtitle={t('subtitle')} />
+      <PortalPageHeader
+        title={t('title')}
+        subtitle={t('subtitle')}
+        actions={
+          <Button asChild size="sm">
+            <Link href="/me/subscriptions/buy">
+              <PlusIcon />
+              {t('buyNew')}
+            </Link>
+          </Button>
+        }
+      />
 
       {subscriptions.length === 0 ? (
         <Card>
@@ -79,6 +91,14 @@ export function SubscriptionsView() {
             icon={CreditCardIcon}
             title={t('emptyTitle')}
             description={t('emptyDesc')}
+            action={
+              <Button asChild size="sm">
+                <Link href="/me/subscriptions/buy">
+                  <PlusIcon />
+                  {t('buyNew')}
+                </Link>
+              </Button>
+            }
           />
         </Card>
       ) : (

@@ -281,3 +281,77 @@ func (r *checkinRepository) Stats(ctx context.Context, branchIDs []uint, from, t
 		Count(&out.Present).Error
 	return out, err
 }
+
+// CheckinTrialPassRow là thông tin vé tập thử kèm tên khách tiềm năng và chi nhánh.
+type CheckinTrialPassRow struct {
+	ID         uint       `gorm:"column:id"`
+	LeadID     uint       `gorm:"column:lead_id"`
+	BranchID   uint       `gorm:"column:branch_id"`
+	BranchName string     `gorm:"column:branch_name"`
+	ValidDate  time.Time  `gorm:"column:valid_date"`
+	QRToken    string     `gorm:"column:qr_token"`
+	UsedAt     *time.Time `gorm:"column:used_at"`
+	FullName   string     `gorm:"column:full_name"`
+	Phone      string     `gorm:"column:phone"`
+}
+
+// CheckinTrialPassRepository mở rộng cho phép quét mã QR vé tập thử (TP-...) tại quầy check-in.
+type CheckinTrialPassRepository interface {
+	FindTrialPassByToken(ctx context.Context, token string) (*CheckinTrialPassRow, error)
+	MarkTrialPassUsed(ctx context.Context, id uint, at time.Time) error
+}
+
+func (r *checkinRepository) FindTrialPassByToken(ctx context.Context, token string) (*CheckinTrialPassRow, error) {
+	var row CheckinTrialPassRow
+	err := postgres.Conn(ctx, r.db).Table("trial_passes tp").
+		Select("tp.id, tp.lead_id, tp.branch_id, b.name AS branch_name, tp.valid_date, tp.qr_token, tp.used_at, l.full_name, l.phone").
+		Joins("JOIN leads l ON l.id = tp.lead_id AND l.deleted_at IS NULL").
+		Joins("JOIN branches b ON b.id = tp.branch_id").
+		Where("tp.qr_token = ?", token).
+		Take(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *checkinRepository) MarkTrialPassUsed(ctx context.Context, id uint, at time.Time) error {
+	return postgres.Conn(ctx, r.db).Table("trial_passes").Where("id = ? AND used_at IS NULL", id).Update("used_at", at).Error
+}
+
+// CheckinDayPassRow là thông tin vé ngày / vé khách mời (DP-...).
+type CheckinDayPassRow struct {
+	ID         uint       `gorm:"column:id"`
+	BranchID   uint       `gorm:"column:branch_id"`
+	BranchName string     `gorm:"column:branch_name"`
+	BuyerName  string     `gorm:"column:buyer_name"`
+	Phone      string     `gorm:"column:phone"`
+	Type       string     `gorm:"column:type"`
+	ValidDate  time.Time  `gorm:"column:valid_date"`
+	QRToken    string     `gorm:"column:qr_token"`
+	UsedAt     *time.Time `gorm:"column:used_at"`
+}
+
+// CheckinDayPassRepository mở rộng cho phép quét mã QR vé ngày / vé khách (DP-...) tại quầy check-in.
+type CheckinDayPassRepository interface {
+	FindDayPassByToken(ctx context.Context, token string) (*CheckinDayPassRow, error)
+	MarkDayPassUsed(ctx context.Context, id uint, at time.Time) error
+}
+
+func (r *checkinRepository) FindDayPassByToken(ctx context.Context, token string) (*CheckinDayPassRow, error) {
+	var row CheckinDayPassRow
+	err := postgres.Conn(ctx, r.db).Table("day_passes dp").
+		Select("dp.id, dp.branch_id, b.name AS branch_name, dp.buyer_name, dp.phone, dp.type, dp.valid_date, dp.qr_token, dp.used_at").
+		Joins("JOIN branches b ON b.id = dp.branch_id").
+		Where("dp.qr_token = ?", token).
+		Take(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *checkinRepository) MarkDayPassUsed(ctx context.Context, id uint, at time.Time) error {
+	return postgres.Conn(ctx, r.db).Table("day_passes").Where("id = ? AND used_at IS NULL", id).Update("used_at", at).Error
+}
+

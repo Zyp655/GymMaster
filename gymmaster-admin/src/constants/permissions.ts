@@ -84,6 +84,45 @@ export const PERM = {
   AUDIT_VIEW: 'audit.view',
 
   JOB_VIEW: 'job.view',
+
+  WORKOUT_VIEW: 'workout.view',
+  WORKOUT_MANAGE: 'workout.manage',
+
+  REVIEW_VIEW: 'review.view',
+
+  EQUIPMENT_VIEW: 'equipment.view',
+  EQUIPMENT_MANAGE: 'equipment.manage',
+
+  LEAD_VIEW: 'lead.view',
+  LEAD_MANAGE: 'lead.manage',
+
+  // Giai đoạn 3 (Sprint 18–23)
+  DEVICE_VIEW: 'device.view',
+  DEVICE_MANAGE: 'device.manage',
+
+  LOCKER_VIEW: 'locker.view',
+  LOCKER_MANAGE: 'locker.manage',
+
+  PAYROLL_VIEW: 'payroll.view',
+  PAYROLL_MANAGE: 'payroll.manage',
+
+  EXPENSE_VIEW: 'expense.view',
+  EXPENSE_MANAGE: 'expense.manage',
+  CASH_SESSION_MANAGE: 'cash_session.manage',
+
+  LOYALTY_VIEW: 'loyalty.view',
+  LOYALTY_MANAGE: 'loyalty.manage',
+
+  ENGAGEMENT_VIEW: 'engagement.view',
+  ENGAGEMENT_MANAGE: 'engagement.manage',
+
+  // Giai đoạn 4 (Sprint 24–27)
+  CONTRACT_MANAGE: 'contract.manage',
+  LEAVE_MANAGE: 'leave.manage',
+  HOLIDAY_MANAGE: 'holiday.manage',
+  KPI_MANAGE: 'kpi.manage',
+  PRIVACY_MANAGE: 'privacy.manage',
+  MEMBER_VIEW_SENSITIVE: 'member.view_sensitive',
 } as const;
 
 export type PermCode = (typeof PERM)[keyof typeof PERM];
@@ -122,6 +161,22 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   audit: 'Nhật ký thao tác',
   system: 'Hệ thống',
   job: 'Tác vụ nền',
+  workout: 'Giáo án & bài tập',
+  review: 'Đánh giá',
+  equipment: 'Thiết bị & bảo trì',
+  lead: 'Khách tiềm năng (CRM)',
+  device: 'Thiết bị ra vào & Kiosk',
+  locker: 'Tủ đồ & dịch vụ',
+  payroll: 'Chấm công & bảng lương',
+  expense: 'Chi phí & P&L',
+  cash_session: 'Đối soát ca thu ngân',
+  loyalty: 'Điểm thưởng & thử thách',
+  engagement: 'Dinh dưỡng, bảng tin & NPS',
+  contract: 'Hợp đồng điện tử & vé ngày',
+  leave: 'Lịch rảnh & nghỉ phép HLV',
+  holiday: 'Lịch nghỉ lễ',
+  kpi: 'Chỉ tiêu KPI & Cohort',
+  privacy: 'Bảo mật & dữ liệu cá nhân',
 };
 
 /** Tên tiếng Việt của vai trò hệ thống (fallback khi chưa tải danh sách vai trò). */

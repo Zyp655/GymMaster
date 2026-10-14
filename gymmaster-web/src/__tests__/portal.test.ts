@@ -3,12 +3,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
-import { createChangePasswordSchema, createLoginSchema } from '@/features/auth/schema';
+import {
+  createChangePasswordSchema,
+  createForgotPasswordSchema,
+  createLoginSchema,
+  createRegisterMemberSchema,
+  createResetPasswordSchema,
+  createVerifyOtpSchema,
+} from '@/features/auth/schema';
 import {
   createBookPTSessionSchema,
   createCancelPTSessionSchema,
+  createFoodLogSchema,
   createFreezeSchema,
+  createGuestPassSchema,
+  createMemberReviewSchema,
+  createMfaEnableSchema,
   createProfileSchema,
+  createSurveyResponseSchema,
+  createWorkoutLogSchema,
 } from '@/features/portal/schema';
 import { formatCurrency, formatDate, formatDateTime, initials } from '@/lib/format';
 import { buildUrl, sendRequest } from '@/lib/http.core';
@@ -196,6 +209,110 @@ describe('gymmaster-web: features/portal/schema & features/auth/schema', () => {
       false,
     );
   });
+
+  it('Sprint 12–17 auth & portal schemas (forgot, reset, register, workout, review) hoạt động chuẩn xác', () => {
+    const forgotSchema = createForgotPasswordSchema(mockTranslate);
+    assert.equal(forgotSchema.safeParse({ email: 'hoivien@gymmaster.vn' }).success, true);
+    assert.equal(forgotSchema.safeParse({ email: 'invalid' }).success, false);
+
+    const resetSchema = createResetPasswordSchema(mockTranslate, mockTranslate);
+    assert.equal(
+      resetSchema.safeParse({
+        new_password: 'NewPassword123',
+        confirm_password: 'NewPassword123',
+      }).success,
+      true,
+    );
+    assert.equal(
+      resetSchema.safeParse({
+        new_password: 'NewPassword123',
+        confirm_password: 'WrongPassword',
+      }).success,
+      false,
+    );
+
+    const registerSchema = createRegisterMemberSchema(mockTranslate, mockTranslate);
+    assert.equal(
+      registerSchema.safeParse({
+        full_name: 'Trần Minh Anh',
+        email: 'minhanh@gymmaster.vn',
+        phone: '0912345678',
+        password: 'Password123',
+        confirm_password: 'Password123',
+        branch_id: 1,
+      }).success,
+      true,
+    );
+
+    const otpSchema = createVerifyOtpSchema(mockTranslate);
+    assert.equal(otpSchema.safeParse({ otp: '123456' }).success, true);
+
+    const workoutSchema = createWorkoutLogSchema(mockTranslate);
+    assert.equal(
+      workoutSchema.safeParse({
+        exercise_id: 1,
+        sets: 4,
+        reps: 10,
+        weight_kg: 60,
+        note: 'Tốt',
+      }).success,
+      true,
+    );
+    assert.equal(
+      workoutSchema.safeParse({
+        exercise_id: 0,
+        sets: 0,
+        reps: 0,
+        weight_kg: -5,
+        note: '',
+      }).success,
+      false,
+    );
+
+    const reviewSchema = createMemberReviewSchema(mockTranslate);
+    assert.equal(reviewSchema.safeParse({ rating: 5, comment: 'HLV nhiệt tình' }).success, true);
+    assert.equal(reviewSchema.safeParse({ rating: 6, comment: '' }).success, false);
+  });
+
+  it('Sprint 18–27 Stage 3 & Stage 4 schemas (survey, food log, guest pass, 2FA MFA) hoạt động chuẩn xác', () => {
+    const surveySchema = createSurveyResponseSchema(mockTranslate);
+    assert.equal(surveySchema.safeParse({ score: 9, comment: 'Phòng tập sạch đẹp' }).success, true);
+    assert.equal(surveySchema.safeParse({ score: 11, comment: '' }).success, false);
+
+    const foodSchema = createFoodLogSchema(mockTranslate);
+    assert.equal(
+      foodSchema.safeParse({ food_id: 2, meal_type: 'LUNCH', qty: 150 }).success,
+      true,
+    );
+    assert.equal(
+      foodSchema.safeParse({ food_id: 0, meal_type: 'LUNCH', qty: 0 }).success,
+      false,
+    );
+
+    const guestPassSchema = createGuestPassSchema(mockTranslate);
+    assert.equal(
+      guestPassSchema.safeParse({
+        guest_name: 'Lê Hoàng Nam',
+        guest_phone: '0987654321',
+        branch_id: 1,
+        valid_date: '2026-10-20',
+      }).success,
+      true,
+    );
+    assert.equal(
+      guestPassSchema.safeParse({
+        guest_name: '',
+        guest_phone: '123',
+        branch_id: 0,
+        valid_date: '',
+      }).success,
+      false,
+    );
+
+    const mfaSchema = createMfaEnableSchema(mockTranslate);
+    assert.equal(mfaSchema.safeParse({ code: '123456' }).success, true);
+    assert.equal(mfaSchema.safeParse({ code: '12a456' }).success, false);
+  });
 });
 
 describe('gymmaster-web: messages/vi translations completeness', () => {
@@ -207,19 +324,34 @@ describe('gymmaster-web: messages/vi translations completeness', () => {
 
     assert.ok(common.actions);
     assert.ok(common.validation);
+    assert.ok(common.landing.schedules);
+    assert.ok(common.landing.trial);
     assert.ok(auth.login);
     assert.ok(auth.changePassword);
+    assert.ok(auth.forgotPassword);
+    assert.ok(auth.resetPassword);
+    assert.ok(auth.register);
 
     for (const section of [
       'nav',
       'overview',
       'qr',
       'subscriptions',
+      'buySubscription',
+      'paymentResult',
+      'workout',
+      'reviews',
       'classes',
       'pt',
       'progress',
       'invoices',
       'notifications',
+      'account',
+      'rewards',
+      'challenges',
+      'nutrition',
+      'contracts',
+      'kiosk',
       'status',
     ]) {
       assert.ok(portal[section], `portal.json phải có mục ${section}`);
@@ -235,6 +367,11 @@ describe('gymmaster-web: messages/vi translations completeness', () => {
       'invoice',
       'checkinResult',
       'checkinMethod',
+      'occupancy',
+      'lockerType',
+      'installment',
+      'contract',
+      'dataRequest',
     ]) {
       assert.ok(portal.status[statusGroup], `portal.status phải có nhóm ${statusGroup}`);
     }

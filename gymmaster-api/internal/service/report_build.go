@@ -549,6 +549,7 @@ func reportBuildOccupancy(rows []repository.ReportClassRow) (v1.OccupancyRow, []
 func reportBuildTrainers(rows []repository.ReportTrainerRow) ([]v1.TrainerPerformance, v1.TrainerPerformance) {
 	items := make([]v1.TrainerPerformance, 0, len(rows))
 	total := v1.TrainerPerformance{TrainerName: "Tổng"}
+	var weightedRating float64
 	for _, r := range rows {
 		it := v1.TrainerPerformance{
 			TrainerID: r.TrainerID, TrainerName: r.TrainerName, Level: r.Level,
@@ -556,6 +557,7 @@ func reportBuildTrainers(rows []repository.ReportTrainerRow) ([]v1.TrainerPerfor
 			ClassesTaught: r.ClassesTaught, ClassAttendees: r.ClassAttendees, ActivePTMembers: r.ActivePTMembers,
 			PTContractsSold: r.PTContractsSold, PTRevenue: reportMoney(r.PTRevenue),
 			Commission: reportMoney(r.Commission), CommissionPaid: reportMoney(r.CommissionPaid),
+			RatingAvg: r.RatingAvg, RatingCount: r.RatingCount,
 		}
 		items = append(items, it)
 		total.PTCompleted += it.PTCompleted
@@ -569,6 +571,11 @@ func reportBuildTrainers(rows []repository.ReportTrainerRow) ([]v1.TrainerPerfor
 		total.PTRevenue += it.PTRevenue
 		total.Commission += it.Commission
 		total.CommissionPaid += it.CommissionPaid
+		total.RatingCount += it.RatingCount
+		weightedRating += it.RatingAvg * float64(it.RatingCount)
+	}
+	if total.RatingCount > 0 {
+		total.RatingAvg = math.Round((weightedRating/float64(total.RatingCount))*100) / 100
 	}
 	return items, total
 }

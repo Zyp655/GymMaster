@@ -1,9 +1,9 @@
 import { useCallback, useMemo } from 'react';
-import { Card, Col, DatePicker, Row } from 'antd';
+import { Button, Card, Col, DatePicker, Row } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import { useNavigate } from 'react-router-dom';
-import invoiceApi, { INVOICE_SOURCE_OPTIONS } from '@/api/invoice';
+import { Link, useNavigate } from 'react-router-dom';
+import invoiceApi, { INVOICE_SOURCE_OPTIONS, PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
 import type { Invoice, InvoiceListParams, InvoiceSource, InvoiceStatus } from '@/api/invoice';
 import ActionBar from '@/components/ActionBar';
 import DataTable from '@/components/DataTable';
@@ -21,7 +21,7 @@ import { DATE_FORMAT, formatDateTime, formatMoney, toApiDate } from '@/utils/for
 import { invoiceColumns } from './columns';
 
 const TITLE = 'Hóa đơn';
-const SUBTITLE = 'Hóa đơn bán gói, PT, sản phẩm – thu tiền, hủy, hoàn tiền';
+const SUBTITLE = 'Hóa đơn bán gói, PT, sản phẩm – thu tiền, hủy, hoàn tiền, VNPay';
 
 function InvoicesDesktop() {
   const url = useUrlParams();
@@ -32,7 +32,7 @@ function InvoicesDesktop() {
   const table = useTableQuery<Invoice, InvoiceListParams>({
     queryKey: [invoiceApi.key, 'list'],
     queryFn: (p) => invoiceApi.list(p),
-    filterKeys: ['status', 'source', 'branch_id', 'member_id', 'from', 'to'],
+    filterKeys: ['status', 'source', 'method', 'branch_id', 'member_id', 'from', 'to'],
     numberKeys: ['branch_id', 'member_id'],
     defaults: { order_by: 'id', order_dir: 'DESC' },
     extraParams: { branch_id: urlBranch ? undefined : (branchId ?? undefined) },
@@ -48,19 +48,25 @@ function InvoicesDesktop() {
           <PageTitle title={TITLE} subtitle={SUBTITLE} />
         </Col>
         <Col>
-          <ActionBar onRefresh={() => table.refetch()} refreshing={table.isFetching} />
+          <ActionBar onRefresh={() => table.refetch()} refreshing={table.isFetching}>
+            <Link to="/app/payments">
+              <Button>Sổ thu & VNPay</Button>
+            </Link>
+          </ActionBar>
         </Col>
       </Row>
       <FilterBar
         searchPlaceholder="Số HĐ, tên/SĐT/mã hội viên"
-        colTextSearch={5}
+        colTextSearch={4}
         filters={[
           { name: 'status', placeholder: 'Trạng thái', options: INVOICE_STATUS_OPTIONS, col: 3 },
           { name: 'source', placeholder: 'Nguồn', options: INVOICE_SOURCE_OPTIONS, col: 3 },
+          { name: 'method', placeholder: 'Phương thức', options: PAYMENT_METHOD_OPTIONS, col: 3 },
           {
             name: 'branch_id',
             placeholder: 'Chi nhánh',
             options: branches.map((b) => ({ label: b.name, value: b.id })),
+            col: 4,
           },
         ]}
       >

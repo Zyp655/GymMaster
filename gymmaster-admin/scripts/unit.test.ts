@@ -3,13 +3,28 @@ import { describe, it } from 'node:test';
 import { AxiosError } from 'axios';
 
 import { auditActionLabel, auditEntityLabel } from '../src/api/audit.ts';
-import { toAppLink } from '../src/api/notification.ts';
-import { PERM, ROLE, ROLE_LABELS } from '../src/constants/permissions.ts';
+import { NOTIFICATION_TYPE_LABEL, toAppLink } from '../src/api/notification.ts';
+import { PERM, PERMISSION_MODULE_LABELS, ROLE, ROLE_LABELS } from '../src/constants/permissions.ts';
 import {
+  ACCESS_DEVICE_STATUS_MAP,
+  CASH_SESSION_STATUS_MAP,
+  CONTRACT_STATUS_MAP,
+  DATA_REQUEST_STATUS_MAP,
+  EQUIPMENT_STATUS_MAP,
+  EXPENSE_STATUS_MAP,
   FREEZE_STATUS_MAP,
+  INSTALLMENT_STATUS_MAP,
   INVOICE_STATUS_MAP,
+  LEAD_STATUS_MAP,
+  LEAVE_STATUS_MAP,
+  LOCKER_STATUS_MAP,
+  MAINTENANCE_STATUS_MAP,
+  PAYMENT_METHOD_MAP,
+  PAYROLL_STATUS_MAP,
+  STATUS_PRESETS,
   STOCK_TX_TYPE_MAP,
   SUBSCRIPTION_STATUS_MAP,
+  WORKOUT_PLAN_STATUS_MAP,
 } from '../src/constants/status.ts';
 import { EXPORT_LABEL, heatColor, rangeParams, shortMoney } from '../src/routes/reports/types.ts';
 import { ApiError, createApiClient, ErrorCode } from '../src/utils/apiClient.ts';
@@ -212,14 +227,73 @@ describe('gymmaster-admin: reports/types & constants', () => {
     assert.equal(EXPORT_LABEL.invoices, 'Hóa đơn');
   });
 
-  it('constants/permissions & constants/status đầy đủ mã quyền và trạng thái nghiệp vụ', () => {
+  it('constants/permissions & constants/status đầy đủ mã quyền và trạng thái nghiệp vụ (Sprint 1–27)', () => {
     assert.equal(PERM.POS_SELL, 'pos.sell');
     assert.equal(PERM.REPORT_EXPORT, 'report.export');
+    assert.equal(PERM.WORKOUT_VIEW, 'workout.view');
+    assert.equal(PERM.WORKOUT_MANAGE, 'workout.manage');
+    assert.equal(PERM.REVIEW_VIEW, 'review.view');
+    assert.equal(PERM.EQUIPMENT_VIEW, 'equipment.view');
+    assert.equal(PERM.EQUIPMENT_MANAGE, 'equipment.manage');
+    assert.equal(PERM.LEAD_VIEW, 'lead.view');
+    assert.equal(PERM.LEAD_MANAGE, 'lead.manage');
+    assert.equal(PERM.DEVICE_VIEW, 'device.view');
+    assert.equal(PERM.DEVICE_MANAGE, 'device.manage');
+    assert.equal(PERM.LOCKER_VIEW, 'locker.view');
+    assert.equal(PERM.LOCKER_MANAGE, 'locker.manage');
+    assert.equal(PERM.PAYROLL_VIEW, 'payroll.view');
+    assert.equal(PERM.PAYROLL_MANAGE, 'payroll.manage');
+    assert.equal(PERM.EXPENSE_VIEW, 'expense.view');
+    assert.equal(PERM.EXPENSE_MANAGE, 'expense.manage');
+    assert.equal(PERM.CASH_SESSION_MANAGE, 'cash_session.manage');
+    assert.equal(PERM.LOYALTY_VIEW, 'loyalty.view');
+    assert.equal(PERM.LOYALTY_MANAGE, 'loyalty.manage');
+    assert.equal(PERM.ENGAGEMENT_VIEW, 'engagement.view');
+    assert.equal(PERM.ENGAGEMENT_MANAGE, 'engagement.manage');
+    assert.equal(PERM.CONTRACT_MANAGE, 'contract.manage');
+    assert.equal(PERM.LEAVE_MANAGE, 'leave.manage');
+    assert.equal(PERM.HOLIDAY_MANAGE, 'holiday.manage');
+    assert.equal(PERM.KPI_MANAGE, 'kpi.manage');
+    assert.equal(PERM.PRIVACY_MANAGE, 'privacy.manage');
+    assert.equal(PERM.MEMBER_VIEW_SENSITIVE, 'member.view_sensitive');
+
+    assert.equal(PERMISSION_MODULE_LABELS.workout, 'Giáo án & bài tập');
+    assert.equal(PERMISSION_MODULE_LABELS.review, 'Đánh giá');
+    assert.equal(PERMISSION_MODULE_LABELS.equipment, 'Thiết bị & bảo trì');
+    assert.equal(PERMISSION_MODULE_LABELS.lead, 'Khách tiềm năng (CRM)');
+    assert.equal(PERMISSION_MODULE_LABELS.device, 'Thiết bị ra vào & Kiosk');
+    assert.equal(PERMISSION_MODULE_LABELS.locker, 'Tủ đồ & dịch vụ');
+    assert.equal(PERMISSION_MODULE_LABELS.payroll, 'Chấm công & bảng lương');
+    assert.equal(PERMISSION_MODULE_LABELS.expense, 'Chi phí & P&L');
+    assert.equal(PERMISSION_MODULE_LABELS.loyalty, 'Điểm thưởng & thử thách');
+    assert.equal(PERMISSION_MODULE_LABELS.privacy, 'Bảo mật & dữ liệu cá nhân');
     assert.equal(ROLE_LABELS[ROLE.OWNER], 'Chủ trung tâm');
 
     assert.ok(SUBSCRIPTION_STATUS_MAP.TRANSFERRED);
     assert.ok(FREEZE_STATUS_MAP.APPROVED);
     assert.ok(INVOICE_STATUS_MAP.PARTIAL);
     assert.ok(STOCK_TX_TYPE_MAP.SALE_RETURN);
+    assert.equal(STATUS_PRESETS.VNPAY.label, 'VNPay Online');
+    assert.equal(PAYMENT_METHOD_MAP.VNPAY.label, 'VNPay Online');
+    assert.ok(WORKOUT_PLAN_STATUS_MAP.ACTIVE);
+    assert.ok(EQUIPMENT_STATUS_MAP.BROKEN);
+    assert.ok(MAINTENANCE_STATUS_MAP.IN_PROGRESS);
+    assert.ok(LEAD_STATUS_MAP.CONVERTED);
+    assert.ok(ACCESS_DEVICE_STATUS_MAP.ACTIVE);
+    assert.ok(LOCKER_STATUS_MAP.RENTED);
+    assert.ok(PAYROLL_STATUS_MAP.LOCKED);
+    assert.ok(EXPENSE_STATUS_MAP.APPROVED);
+    assert.ok(CASH_SESSION_STATUS_MAP.CLOSED);
+    assert.ok(INSTALLMENT_STATUS_MAP.OVERDUE);
+    assert.ok(CONTRACT_STATUS_MAP.SIGNED);
+    assert.ok(LEAVE_STATUS_MAP.APPROVED);
+    assert.ok(DATA_REQUEST_STATUS_MAP.DONE);
+
+    assert.equal(NOTIFICATION_TYPE_LABEL.PAYMENT_SUCCESS, 'Thanh toán thành công');
+    assert.equal(NOTIFICATION_TYPE_LABEL.REVIEW_PROMPT, 'Đánh giá buổi tập');
+    assert.equal(NOTIFICATION_TYPE_LABEL.MAINTENANCE_DUE, 'Đến hạn bảo trì');
+    assert.equal(NOTIFICATION_TYPE_LABEL.BIRTHDAY, 'Sinh nhật hội viên');
+    assert.equal(NOTIFICATION_TYPE_LABEL.LEAD_NEW, 'Khách tiềm năng mới');
+    assert.equal(NOTIFICATION_TYPE_LABEL.CHECKIN, 'Check-in mới');
   });
 });

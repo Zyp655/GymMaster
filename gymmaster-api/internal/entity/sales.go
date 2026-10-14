@@ -54,12 +54,20 @@ const (
 	InvoiceItemPT         = "PT"         // ref_id = pt_contracts.id
 	InvoiceItemProduct    = "PRODUCT"    // ref_id = products.id
 	InvoiceItemFee        = "FEE"        // phí chuyển nhượng gói: ref_id = subscriptions.id (gói của người nhận)
+	InvoiceItemLocker     = "LOCKER"     // ref_id = locker_rentals.id
 	InvoiceItemOther      = "OTHER"
 
 	// Phương thức thanh toán / hoàn tiền.
 	PaymentCash     = "CASH"
 	PaymentTransfer = "TRANSFER"
 	PaymentCard     = "CARD"
+	PaymentVNPay    = "VNPAY"
+
+	// Trạng thái giao dịch thanh toán trực tuyến (online_payment_txns.status).
+	OnlineTxnPending = "PENDING"
+	OnlineTxnSuccess = "SUCCESS"
+	OnlineTxnFailed  = "FAILED"
+	OnlineTxnExpired = "EXPIRED"
 )
 
 // Subscription là một lần đăng ký gói tập của hội viên.
@@ -191,3 +199,21 @@ type Refund struct {
 }
 
 func (Refund) TableName() string { return "refunds" }
+
+// OnlinePaymentTxn là một giao dịch thanh toán trực tuyến qua cổng VNPay.
+type OnlinePaymentTxn struct {
+	ID            uint           `gorm:"primaryKey;autoIncrement"`
+	InvoiceID     uint           `gorm:"not null"`
+	MemberID      uint           `gorm:"not null"`
+	TxnRef        string         `gorm:"type:varchar(64);not null;unique"`
+	Amount        float64        `gorm:"type:numeric(14,2);not null"`
+	Status        string         `gorm:"type:varchar(20);not null;default:'PENDING'"`
+	ProviderTxnNo string         `gorm:"type:varchar(100);not null;default:''"`
+	BankCode      string         `gorm:"type:varchar(50);not null;default:''"`
+	RawIPN        datatypes.JSON `gorm:"column:raw_ipn;type:jsonb"`
+	CreatedAt     time.Time
+	PaidAt        *time.Time
+}
+
+func (OnlinePaymentTxn) TableName() string { return "online_payment_txns" }
+

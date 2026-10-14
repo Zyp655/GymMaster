@@ -9,7 +9,9 @@ export async function LandingHeader({ isAuthenticated }: { isAuthenticated: bool
   const links = [
     { href: '#bang-gia', label: t('pricing') },
     { href: '#huan-luyen-ca-nhan', label: t('pt') },
+    { href: '#lich-lop', label: t('schedules') },
     { href: '#chi-nhanh', label: t('branches') },
+    { href: '#tap-thu', label: t('trial') },
   ];
 
   return (

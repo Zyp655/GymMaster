@@ -2,15 +2,21 @@ import type { ReactNode } from 'react';
 import {
   BellOutlined,
   CalendarOutlined,
+  CheckCircleOutlined,
   CloseCircleOutlined,
   DollarOutlined,
   ExclamationCircleOutlined,
   FieldTimeOutlined,
+  GiftOutlined,
   InboxOutlined,
+  LoginOutlined,
   PauseCircleOutlined,
   RiseOutlined,
   ScheduleOutlined,
+  StarOutlined,
   StopOutlined,
+  ToolOutlined,
+  UserAddOutlined,
   UserDeleteOutlined,
 } from '@ant-design/icons';
 import './notifications.css';
@@ -34,6 +40,12 @@ const META: Record<string, TypeMeta> = {
   PT_NO_SHOW: { icon: <UserDeleteOutlined />, fg: '#B45309', bg: '#FEF3C7' },
   COMMISSION_PAID: { icon: <DollarOutlined />, fg: '#12805C', bg: '#E5F6F0' },
   LOW_STOCK: { icon: <InboxOutlined />, fg: '#C2410C', bg: '#FFF1E6' },
+  PAYMENT_SUCCESS: { icon: <CheckCircleOutlined />, fg: '#12805C', bg: '#E5F6F0' },
+  REVIEW_PROMPT: { icon: <StarOutlined />, fg: '#D97706', bg: '#FEF3C7' },
+  MAINTENANCE_DUE: { icon: <ToolOutlined />, fg: '#C2410C', bg: '#FFF1E6' },
+  BIRTHDAY: { icon: <GiftOutlined />, fg: '#9333EA', bg: '#F3E8FF' },
+  LEAD_NEW: { icon: <UserAddOutlined />, fg: '#1D4ED8', bg: '#DBEAFE' },
+  CHECKIN: { icon: <LoginOutlined />, fg: '#0F766E', bg: '#CCFBF1' },
   SYSTEM: { icon: <BellOutlined />, fg: '#4B5563', bg: '#F1F3F6' },
 };
 

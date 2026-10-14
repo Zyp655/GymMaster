@@ -41,6 +41,9 @@ type Member struct {
 	// Bí mật ký QR động (pkg/qrtoken). DB sinh khi tạo – chỉ đọc qua GORM, đổi bằng UpdateColumn.
 	QRSecret            string `gorm:"->;column:qr_secret;type:varchar(64)"`
 	BookingBlockedUntil *time.Time
+	LoyaltyPoints       int     `gorm:"not null;default:0"`
+	ReferralCode        *string `gorm:"type:varchar(30);unique"`
+	ReferredBy          *uint
 	Note                string `gorm:"type:text;not null;default:''"`
 }
 

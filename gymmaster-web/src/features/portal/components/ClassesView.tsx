@@ -36,9 +36,11 @@ import {
   useBranchesQuery,
   useCancelBookingMutation,
   useClassesQuery,
+  useMemberReviewsQuery,
 } from '../queries';
 import { PortalPageHeader } from './PortalPageHeader';
 import { BookingStatusBadge } from './PortalStatusBadge';
+import { ReviewActionOrBadge, ReviewDialog, type ReviewTarget } from './ReviewDialog';
 import { ScheduleTabs } from './ScheduleTabs';
 
 interface CancelTarget {
@@ -57,6 +59,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
   const [toDate, setToDate] = useState(() => dayjs().add(7, 'day').format('YYYY-MM-DD'));
   const [bookingScheduleId, setBookingScheduleId] = useState<number | null>(null);
   const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null);
 
   const branchesQuery = useBranchesQuery();
   const effectiveBranchId = branchId ?? branchesQuery.data?.[0]?.id;
@@ -66,6 +69,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
     !branchesQuery.isLoading,
   );
   const bookingsQuery = useBookingsQuery();
+  const reviewsQuery = useMemberReviewsQuery();
 
   const bookMutation = useBookClassMutation();
   const cancelMutation = useCancelBookingMutation();
@@ -286,6 +290,19 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
                           >
                             {canCancel ? t('cancelBtn') : t('cancelDeadlinePassed')}
                           </Button>
+                        ) : myBooking.status === 'ATTENDED' ? (
+                          <ReviewActionOrBadge
+                            reviews={reviewsQuery.data}
+                            targetType="CLASS_SCHEDULE"
+                            targetId={item.id}
+                            onReview={() =>
+                              setReviewTarget({
+                                targetType: 'CLASS_SCHEDULE',
+                                targetId: item.id,
+                                targetName: `${item.class_type_name} · ${item.trainer_name}`,
+                              })
+                            }
+                          />
                         ) : null
                       ) : (
                         <Button
@@ -367,7 +384,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
                     </p>
                   </div>
 
-                  {(booking.status === 'BOOKED' || booking.status === 'WAITLIST') ? (
+                  {booking.status === 'BOOKED' || booking.status === 'WAITLIST' ? (
                     <Button
                       variant="outline"
                       size="sm"
@@ -382,6 +399,19 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
                     >
                       {booking.can_cancel ? t('cancelBtn') : t('cancelDeadlinePassed')}
                     </Button>
+                  ) : booking.status === 'ATTENDED' ? (
+                    <ReviewActionOrBadge
+                      reviews={reviewsQuery.data}
+                      targetType="CLASS_SCHEDULE"
+                      targetId={booking.schedule_id}
+                      onReview={() =>
+                        setReviewTarget({
+                          targetType: 'CLASS_SCHEDULE',
+                          targetId: booking.schedule_id,
+                          targetName: `${booking.class_type_name} · ${booking.trainer_name}`,
+                        })
+                      }
+                    />
                   ) : null}
                 </Card>
               ))}
@@ -405,6 +435,11 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
         confirmLabel={t('cancelConfirmBtn')}
         loading={cancelMutation.isPending}
         onConfirm={handleConfirmCancel}
+      />
+
+      <ReviewDialog
+        target={reviewTarget}
+        onOpenChange={open => !open && setReviewTarget(null)}
       />
     </div>
   );
