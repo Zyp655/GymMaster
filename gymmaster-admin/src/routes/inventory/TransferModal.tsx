@@ -192,7 +192,7 @@ export default function TransferModal({ open, onClose, onDone }: VoucherFormModa
                           max={p ? Math.max(1, stock) : undefined}
                           precision={0}
                           style={{ width: '100%' }}
-                          addonAfter={p?.unit}
+                          suffix={p?.unit}
                         />
                       </Form.Item>
                     </Col>

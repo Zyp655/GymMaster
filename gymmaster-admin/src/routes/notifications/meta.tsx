@@ -39,7 +39,7 @@ const META: Record<string, TypeMeta> = {
 
 const FALLBACK: TypeMeta = { icon: <CalendarOutlined />, fg: '#4B5563', bg: '#F1F3F6' };
 
-export function notificationMeta(type?: string): TypeMeta {
+function notificationMeta(type?: string): TypeMeta {
   return (type && META[type]) || FALLBACK;
 }
 

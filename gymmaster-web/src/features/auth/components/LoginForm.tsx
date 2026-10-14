@@ -22,7 +22,7 @@ import { ApiCode } from '@/types/api';
 import { createLoginSchema, type LoginFormValues } from '../schema';
 import { PasswordInput } from './PasswordInput';
 
-const DEFAULT_REDIRECT = '/admin/dashboard';
+const DEFAULT_REDIRECT = '/me';
 
 /** Chỉ cho phép chuyển hướng nội bộ để tránh open-redirect. */
 function safeReturnUrl(value: string | null) {

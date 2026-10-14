@@ -82,7 +82,9 @@ export interface PosReturnResult extends PosOrderDetail {
   refund_amount: number;
 }
 
-export type PosOrderListParams = Omit<InvoiceListParams, 'source'>;
+export interface PosOrderListParams extends Omit<InvoiceListParams, 'source'> {
+  method?: PaymentMethod;
+}
 
 export interface PosSummary {
   date: string;

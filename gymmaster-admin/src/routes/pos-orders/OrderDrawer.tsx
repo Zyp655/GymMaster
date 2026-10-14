@@ -58,6 +58,8 @@ export default function OrderDrawer({ invoiceId, onClose }: OrderDrawerProps) {
   const [qty, setQty] = useState<Record<number, number | null>>({});
   const [method, setMethod] = useState<PaymentMethod>('CASH');
   const [reasonForm] = Form.useForm<{ reason: string }>();
+  // Đổi key = form gắn lại từ đầu (xóa lý do) mà không gọi resetFields khi Form chưa mount.
+  const [formKey, setFormKey] = useState(0);
   const [voidOpen, setVoidOpen] = useState(false);
 
   const query = useQuery({
@@ -69,8 +71,7 @@ export default function OrderDrawer({ invoiceId, onClose }: OrderDrawerProps) {
   useEffect(() => {
     setQty({});
     setMethod('CASH');
-    reasonForm.resetFields();
-  }, [invoiceId, reasonForm]);
+  }, [invoiceId]);
 
   const ret = useMutation({
     mutationFn: (data: Parameters<typeof posApi.returnItems>[1]) =>
@@ -135,7 +136,7 @@ export default function OrderDrawer({ invoiceId, onClose }: OrderDrawerProps) {
               `Đã trả hàng (${res.voucher_no})${res.refund_amount ? `, hoàn ${formatMoney(res.refund_amount)}` : ''}`,
             );
             setQty({});
-            reasonForm.resetFields();
+            setFormKey((k) => k + 1);
           })
           .catch((e: unknown) => showError(e, 'Không thể trả hàng')),
     });
@@ -285,7 +286,7 @@ export default function OrderDrawer({ invoiceId, onClose }: OrderDrawerProps) {
 
           {canReturn && (
             <div style={{ marginTop: 16 }}>
-              <Form form={reasonForm} layout="vertical">
+              <Form form={reasonForm} layout="vertical" preserve={false} key={`${invoiceId}-${formKey}`}>
                 <Form.Item label="Phương thức hoàn tiền" required>
                   <Segmented<PaymentMethod>
                     options={PAYMENT_METHOD_OPTIONS}

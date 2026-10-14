@@ -56,9 +56,9 @@ var demoPlanDefs = []planDef{
 }
 
 type ptPkgDef struct {
-	Code, Name, Desc                string
-	Sessions, Minutes, Validity     int
-	Price                           float64
+	Code, Name, Desc            string
+	Sessions, Minutes, Validity int
+	Price                       float64
 }
 
 var demoPTPkgDefs = []ptPkgDef{
@@ -126,7 +126,7 @@ var demoSupplierDefs = []supplierDef{
 
 type productDef struct {
 	SKU, Barcode, Name, Unit string
-	Category, Supplier       int // chỉ số trong demoCategoryDefs / demoSupplierDefs
+	Category, Supplier       int     // chỉ số trong demoCategoryDefs / demoSupplierDefs
 	Cost, Sell, Member       float64 // Member = 0 → NULL
 	MinStock                 int
 	Target                   [3]int // mức tồn mục tiêu khi nhập hàng (HN01, HN02, HCM01)

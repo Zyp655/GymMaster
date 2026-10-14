@@ -286,10 +286,10 @@ function PosScreen({ branchId, branchName }: { branchId: number; branchName: str
     return () => window.removeEventListener('keydown', onKey);
   }, [checkout, result]);
 
-  const newOrder = () => {
+  const newOrder = useCallback(() => {
     setResult(null);
     setTimeout(focusScan, 50);
-  };
+  }, [focusScan]);
 
   const qtyInCart = (id: number) => cart.lines.find((l) => l.product.id === id)?.quantity ?? 0;
 

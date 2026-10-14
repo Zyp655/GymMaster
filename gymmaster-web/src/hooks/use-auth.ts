@@ -1,9 +1,8 @@
 'use client';
 
 import { useSession } from 'next-auth/react';
-import { hasPermission, type PermCode } from '@/lib/permissions';
 
-/** Người dùng hiện tại + helper kiểm tra quyền phía client. */
+/** Người dùng hiện tại trên cổng hội viên. */
 export function useAuth() {
   const { data: session, status } = useSession();
   const user = session?.user ?? null;
@@ -11,6 +10,6 @@ export function useAuth() {
     user,
     status,
     isLoading: status === 'loading',
-    can: (perm: PermCode) => hasPermission(user, perm),
+    isMember: Boolean(user?.roles?.includes('MEMBER')),
   };
 }

@@ -17,6 +17,7 @@ import {
   CreditCardOutlined,
   DashboardOutlined,
   DollarOutlined,
+  FieldTimeOutlined,
   FileTextOutlined,
   GiftOutlined,
   HistoryOutlined,
@@ -169,9 +170,21 @@ const menu: MenuNode[] = [
     children: [
       { key: '/app/pos', label: 'POS', icon: <ShoppingCartOutlined />, perm: [PERM.POS_SELL] },
       {
+        key: '/app/pos-orders',
+        label: 'Đơn hàng POS',
+        icon: <FileTextOutlined />,
+        perm: [PERM.POS_SELL, PERM.INVOICE_VIEW],
+      },
+      {
         key: '/app/products',
         label: 'Sản phẩm',
         icon: <TagsOutlined />,
+        perm: [PERM.PRODUCT_VIEW],
+      },
+      {
+        key: '/app/product-categories',
+        label: 'Danh mục sản phẩm',
+        icon: <AppstoreOutlined />,
         perm: [PERM.PRODUCT_VIEW],
       },
       {
@@ -184,7 +197,7 @@ const menu: MenuNode[] = [
         key: '/app/suppliers',
         label: 'Nhà cung cấp',
         icon: <TruckOutlined />,
-        perm: [PERM.INVENTORY_VIEW, PERM.INVENTORY_IMPORT],
+        perm: [PERM.PRODUCT_VIEW, PERM.INVENTORY_VIEW, PERM.INVENTORY_IMPORT],
       },
     ],
   },
@@ -250,6 +263,12 @@ const menu: MenuNode[] = [
         label: 'Nhật ký thao tác',
         icon: <AuditOutlined />,
         perm: [PERM.AUDIT_VIEW],
+      },
+      {
+        key: '/app/jobs',
+        label: 'Job định kỳ',
+        icon: <FieldTimeOutlined />,
+        perm: [PERM.JOB_VIEW],
       },
     ],
   },

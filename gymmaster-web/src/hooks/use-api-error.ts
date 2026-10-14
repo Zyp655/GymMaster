@@ -30,9 +30,9 @@ export function useApiErrorMessage() {
         case 403:
           return t('forbidden');
         case 404:
-          return t('notFound');
+          return error.message || t('notFound');
         case 409:
-          return t('conflict');
+          return error.message || t('conflict');
         default:
           return error.status >= 500 ? t('internal') : t('unknown');
       }

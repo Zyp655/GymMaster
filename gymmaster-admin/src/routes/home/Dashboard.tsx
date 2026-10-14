@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react';
-import { Card, Col, Empty, Row, Typography } from 'antd';
+import { Button, Card, Col, Empty, Row, Table, Tag, Typography } from 'antd';
 import {
   BankOutlined,
   CalendarOutlined,
   DollarOutlined,
   IdcardOutlined,
+  InboxOutlined,
   LoginOutlined,
+  PauseCircleOutlined,
   SafetyCertificateOutlined,
+  ScheduleOutlined,
   ShoppingCartOutlined,
   TeamOutlined,
   UserAddOutlined,
@@ -16,18 +19,21 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import branchApi from '@/api/branch';
+import reportApi from '@/api/report';
+import type { LowStockItem } from '@/api/report';
 import StatCard, { SectionHeader } from '@/components/StatCard';
 import { CARD_STYLE, TONES } from '@/components/StatCard/tokens';
 import { PERM } from '@/constants/permissions';
+import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
-import { useBranchOptions } from '@/hooks/useBranchOptions';
+import { formatMoney, formatNumber } from '@/utils/format';
 
 const { Title, Text } = Typography;
 
 // 4 ô / hàng trên desktop, 2 trên tablet, 1 trên điện thoại (giống mẫu).
 const QUARTER_COL = { xs: 24, sm: 12, lg: 6 };
-const PENDING_CAPTION = 'Chờ module báo cáo';
+const NO_PERM_CAPTION = 'Không có quyền xem';
 
 interface Shortcut {
   label: string;
@@ -49,7 +55,7 @@ const SHORTCUTS: Shortcut[] = [
     icon: <IdcardOutlined />,
     perm: [PERM.SUBSCRIPTION_SELL],
   },
-  { label: 'Check-in', path: '/app/checkins', icon: <LoginOutlined />, perm: [PERM.CHECKIN_SCAN] },
+  { label: 'Check-in', path: '/app/checkin', icon: <LoginOutlined />, perm: [PERM.CHECKIN_SCAN] },
   {
     label: 'Bán hàng (POS)',
     path: '/app/pos',
@@ -85,6 +91,7 @@ export default function Dashboard() {
   const { branchId } = useWorkingBranch();
   const { branches } = useBranchOptions();
   const canBranch = can(PERM.BRANCH_VIEW);
+  const canReport = can(PERM.REPORT_VIEW);
 
   // Đếm chi nhánh theo trạng thái (limit=1, chỉ lấy total).
   const branchStats = useQuery({
@@ -98,6 +105,14 @@ export default function Dashboard() {
       return { total: all.total, active: active.total, inactive: all.total - active.total };
     },
   });
+
+  const overview = useQuery({
+    queryKey: [reportApi.key, 'overview', branchId ?? null],
+    enabled: canReport,
+    queryFn: () => reportApi.overview({ branch_id: branchId ?? undefined }),
+  });
+
+  const ov = overview.data;
 
   const workingName = branchId
     ? (branches.find((b) => b.id === branchId)?.name ?? 'Chi nhánh đang chọn')
@@ -133,7 +148,7 @@ export default function Dashboard() {
             caption={
               canBranch && branchStats.data
                 ? `${branchStats.data.active} đang hoạt động`
-                : 'Không có quyền xem'
+                : NO_PERM_CAPTION
             }
             progress={
               branchStats.data && branchStats.data.total > 0
@@ -147,28 +162,113 @@ export default function Dashboard() {
           <StatCard
             label="Hội viên đang hoạt động"
             icon={<TeamOutlined />}
-            value={null}
-            caption={PENDING_CAPTION}
+            value={canReport ? ov?.members.active : '—'}
+            loading={canReport && overview.isLoading}
+            caption={
+              canReport && ov
+                ? `+${formatNumber(ov.members.new_this_month)} mới tháng này · ${formatNumber(ov.members.expiring_7d)} sắp hết hạn`
+                : canReport
+                  ? undefined
+                  : NO_PERM_CAPTION
+            }
+            onClick={can(PERM.MEMBER_VIEW) ? () => navigate('/app/members') : undefined}
           />
         </Col>
         <Col {...QUARTER_COL}>
           <StatCard
             label="Lượt check-in hôm nay"
             icon={<LoginOutlined />}
-            value={null}
-            caption={PENDING_CAPTION}
+            value={canReport ? ov?.checkins.today : '—'}
+            loading={canReport && overview.isLoading}
+            caption={
+              canReport && ov
+                ? `${formatNumber(ov.checkins.present)} đang trong phòng tập`
+                : canReport
+                  ? undefined
+                  : NO_PERM_CAPTION
+            }
+            onClick={can(PERM.CHECKIN_VIEW) ? () => navigate('/app/checkins') : undefined}
           />
         </Col>
         <Col {...QUARTER_COL}>
           <StatCard
             label="Doanh thu tháng này"
             icon={<DollarOutlined />}
-            value={null}
+            value={canReport ? ov?.revenue.month : '—'}
             currency
-            caption={PENDING_CAPTION}
+            loading={canReport && overview.isLoading}
+            delta={canReport ? ov?.revenue.change_pct : null}
+            deltaLabel="% so với kỳ trước"
+            caption={
+              canReport && ov
+                ? `Hôm nay: ${formatMoney(ov.revenue.today)}`
+                : canReport
+                  ? undefined
+                  : NO_PERM_CAPTION
+            }
+            onClick={canReport ? () => navigate('/app/reports') : undefined}
           />
         </Col>
       </Row>
+
+      {canReport && (
+        <>
+          <SectionHeader title="Vận hành hôm nay" />
+          <Row gutter={[16, 16]} style={{ marginBottom: 28 }}>
+            <Col xs={24} sm={8}>
+              <StatCard
+                label="Lớp học hôm nay"
+                icon={<CalendarOutlined />}
+                value={ov ? `${formatNumber(ov.classes.today)} buổi` : null}
+                loading={overview.isLoading}
+                progress={ov?.classes.fill_rate ?? null}
+                caption={
+                  ov
+                    ? `Lấp đầy ${ov.classes.fill_rate}% (${formatNumber(ov.classes.booked)}/${formatNumber(ov.classes.capacity)} chỗ)`
+                    : undefined
+                }
+                onClick={
+                  can([PERM.CLASS_VIEW, PERM.BOOKING_MANAGE])
+                    ? () => navigate('/app/classes')
+                    : undefined
+                }
+              />
+            </Col>
+            <Col xs={24} sm={8}>
+              <StatCard
+                label="Buổi PT hôm nay"
+                icon={<ScheduleOutlined />}
+                value={ov ? `${formatNumber(ov.pt.completed)}/${formatNumber(ov.pt.today)}` : null}
+                valueSuffix="hoàn thành"
+                loading={overview.isLoading}
+                progress={
+                  ov && ov.pt.today > 0 ? Math.round((ov.pt.completed / ov.pt.today) * 100) : null
+                }
+                caption={ov ? `Tổng ${formatNumber(ov.pt.today)} buổi lên lịch hôm nay` : undefined}
+                onClick={
+                  can([PERM.PT_VIEW, PERM.PT_SCHEDULE])
+                    ? () => navigate('/app/pt-sessions')
+                    : undefined
+                }
+              />
+            </Col>
+            <Col xs={24} sm={8}>
+              <StatCard
+                label="Bảo lưu chờ duyệt"
+                icon={<PauseCircleOutlined />}
+                value={ov?.pending_freezes ?? 0}
+                loading={overview.isLoading}
+                caption="Bấm để xử lý yêu cầu bảo lưu"
+                onClick={
+                  can([PERM.SUBSCRIPTION_VIEW, PERM.SUBSCRIPTION_APPROVE_FREEZE])
+                    ? () => navigate('/app/subscription-freezes')
+                    : undefined
+                }
+              />
+            </Col>
+          </Row>
+        </>
+      )}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={14}>
@@ -211,6 +311,66 @@ export default function Dashboard() {
                 </Col>
               ))}
             </Row>
+          )}
+
+          {canReport && (
+            <div style={{ marginTop: 24 }}>
+              <SectionHeader
+                title={
+                  <span>
+                    <InboxOutlined style={{ marginRight: 6 }} />
+                    Cảnh báo tồn kho thấp ({ov?.low_stock_count ?? 0})
+                  </span>
+                }
+                extra={
+                  can(PERM.INVENTORY_VIEW) ? (
+                    <Button type="link" size="small" onClick={() => navigate('/app/inventory')}>
+                      Xem kho hàng
+                    </Button>
+                  ) : null
+                }
+              />
+              <Card style={CARD_STYLE} loading={overview.isLoading}>
+                {!ov?.low_stock_items?.length ? (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="Không có sản phẩm nào dưới mức tồn tối thiểu"
+                  />
+                ) : (
+                  <Table<LowStockItem>
+                    size="small"
+                    rowKey={(r) => `${r.product_id}-${r.branch_id}`}
+                    pagination={false}
+                    dataSource={ov.low_stock_items}
+                    columns={[
+                      {
+                        title: 'Sản phẩm',
+                        key: 'name',
+                        render: (_, r) => (
+                          <span>
+                            <b>{r.name}</b>{' '}
+                            <Text type="secondary" className="code-text" style={{ fontSize: 12 }}>
+                              ({r.sku})
+                            </Text>
+                          </span>
+                        ),
+                      },
+                      { title: 'Chi nhánh', dataIndex: 'branch_name' },
+                      {
+                        title: 'Tồn / Tối thiểu',
+                        key: 'stock',
+                        align: 'right',
+                        render: (_, r) => (
+                          <Tag color="orange">
+                            {formatNumber(r.quantity)} / {formatNumber(r.min_stock)}
+                          </Tag>
+                        ),
+                      },
+                    ]}
+                  />
+                )}
+              </Card>
+            </div>
           )}
         </Col>
 

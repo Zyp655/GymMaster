@@ -8,6 +8,7 @@
     "start": "next start -p 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-loader.mjs --test src/__tests__/portal.test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

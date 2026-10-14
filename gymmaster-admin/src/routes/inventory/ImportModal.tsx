@@ -190,7 +190,7 @@ export default function ImportModal({ open, onClose, onDone }: VoucherFormModalP
                             min={1}
                             precision={0}
                             style={{ width: '100%' }}
-                            addonAfter={p?.unit}
+                            suffix={p?.unit}
                           />
                         </Form.Item>
                       </Col>

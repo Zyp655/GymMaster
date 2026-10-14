@@ -12,7 +12,7 @@ export default async function NotFound() {
         <p className="text-body text-secondary">{t('description')}</p>
       </div>
       <Button asChild>
-        <Link href="/admin/dashboard">{t('backHome')}</Link>
+        <Link href="/">{t('backHome')}</Link>
       </Button>
     </div>
   );

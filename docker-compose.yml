@@ -67,6 +67,16 @@ services:
     depends_on:
       - api
 
+  admin:
+    build:
+      context: ./gymmaster-admin
+      args:
+        VITE_API_URL: http://localhost:8000/v1
+    ports:
+      - "3001:80"
+    depends_on:
+      - api
+
 volumes:
   pgdata:
   uploads:

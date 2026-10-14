@@ -20,11 +20,21 @@ Lệnh trên tự áp migration và seed dữ liệu khởi tạo. Sau khi chạ
 
 | Thành phần | Địa chỉ |
 |---|---|
-| Web | http://localhost:3000 |
+| Web (Landing + Cổng hội viên) | http://localhost:3000 |
+| Admin (Trang quản trị) | http://localhost:3001 |
 | API | http://localhost:8000 |
 | Swagger | http://localhost:8000/swagger |
+| Mailpit (Xem email dev) | http://localhost:8025 |
 
-Tài khoản demo: `admin@gymmaster.vn` / `Admin@123`.
+### Tài khoản demo (mật khẩu chung: `Admin@123`)
+
+| Vai trò | Email | Ứng dụng sử dụng |
+|---|---|---|
+| Chủ hệ thống (`OWNER`) | `admin@gymmaster.vn` | Trang quản trị (`http://localhost:3001`) |
+| Quản lý chi nhánh Cầu Giấy (`MANAGER`) | `quanly.cg@gymmaster.vn` | Trang quản trị (`http://localhost:3001`) |
+| Lễ tân chi nhánh Cầu Giấy (`RECEPTIONIST`) | `letan.cg@gymmaster.vn` | Trang quản trị (`http://localhost:3001`) |
+| Huấn luyện viên (`TRAINER`) | `hlv.cg@gymmaster.vn` | Trang quản trị (`http://localhost:3001`) |
+| Hội viên (`MEMBER`) | `hoivien@gymmaster.vn` | Cổng hội viên (`http://localhost:3000/me`) |
 
 ## Chạy khi phát triển
 
@@ -34,22 +44,26 @@ docker compose up -d postgres
 # Terminal 1 – backend
 cd gymmaster-api && cp .env.example .env && make migrate-up && make seed && make run
 
-# Terminal 2 – frontend
+# Terminal 2 – trang quản trị (admin)
+cd gymmaster-admin && cp .env.example .env && npm install && npm run dev
+
+# Terminal 3 – trang công khai + cổng hội viên (web)
 cd gymmaster-web && cp .env.example .env.local && npm install && npm run dev
 ```
 
 ## Tài liệu
+- [Hướng dẫn cài đặt package & chạy hệ thống](docs/SETUP_GUIDE.md): yêu cầu môi trường, cài đặt thư viện, cấu hình `.env`, chạy Docker/Local, tài khoản demo và kiểm thử.
 - [Kế hoạch phát triển chi tiết](docs/PLAN.md): phạm vi, kiến trúc, ERD, nghiệp vụ, lộ trình 16 tuần.
-- [API contract Sprint 01](docs/api/sprint-01-auth-rbac-branch.md): Auth, RBAC, Chi nhánh.
+- [API contracts](docs/api/): đặc tả chi tiết tất cả các module.
 
 ## Tiến độ
 - [x] **Sprint 01** – Khởi tạo dự án, đăng nhập/refresh token, RBAC theo permission, CRUD chi nhánh, CRUD vai trò
-- [ ] Sprint 02 – Nhân sự, HLV, ca làm, phòng tập
-- [ ] Sprint 03 – Hội viên, chỉ số cơ thể
-- [ ] Sprint 04–05 – Gói tập, đăng ký/gia hạn/bảo lưu/chuyển nhượng, hóa đơn, thanh toán tại quầy
-- [ ] Sprint 06 – Check-in QR
-- [ ] Sprint 07 – Lớp nhóm, đặt chỗ, waitlist
-- [ ] Sprint 08 – PT
-- [ ] Sprint 09 – Cổng hội viên
-- [ ] Sprint 10 – Báo cáo, thông báo
-- [ ] Sprint 11 – POS bán hàng + tồn kho
+- [x] **Sprint 02** – Nhân sự, HLV, ca làm, phòng tập
+- [x] **Sprint 03** – Hội viên, chỉ số cơ thể
+- [x] **Sprint 04–05** – Gói tập, đăng ký/gia hạn/bảo lưu/chuyển nhượng, hóa đơn, thanh toán tại quầy
+- [x] **Sprint 06** – Check-in QR
+- [x] **Sprint 07** – Lớp nhóm, đặt chỗ, waitlist
+- [x] **Sprint 08** – PT
+- [x] **Sprint 09** – Cổng hội viên
+- [x] **Sprint 10** – Báo cáo, thông báo, nhật ký thao tác, job định kỳ
+- [x] **Sprint 11** – POS bán hàng + tồn kho

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Button, Descriptions, Modal, Result, Space, Typography } from 'antd';
 import { PlusOutlined, PrinterOutlined } from '@ant-design/icons';
 import { PAYMENT_METHOD_LABEL } from '@/api/invoice';
@@ -13,6 +14,23 @@ export interface SuccessModalProps {
 /** Thanh toán xong: tiền thừa cỡ lớn, In hóa đơn 80mm, Đơn mới (Enter). */
 export default function SuccessModal({ result, onNewOrder }: SuccessModalProps) {
   const inv = result?.invoice;
+
+  // Enter = Đơn mới (máy quét/thu ngân không cần chạm chuột).
+  useEffect(() => {
+    if (!result) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        onNewOrder();
+      }
+    };
+    const t = setTimeout(() => window.addEventListener('keydown', onKey), 300);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [result, onNewOrder]);
+
   return (
     <Modal
       open={!!result}

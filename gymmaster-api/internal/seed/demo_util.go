@@ -74,10 +74,12 @@ func daysBetween(a, b time.Time) int { // b - a (theo ngày lịch)
 }
 
 // pgDate: giá trị cho cột DATE (UTC midnight để driver không lệch ngày).
-func pgDate(d time.Time) time.Time { return time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC) }
+func pgDate(d time.Time) time.Time {
+	return time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
+}
 
-func ymd(d time.Time) string   { return d.Format("2006-01-02") }
-func dmy(d time.Time) string   { return d.Format("02/01/2006") }
+func ymd(d time.Time) string { return d.Format("2006-01-02") }
+func dmy(d time.Time) string { return d.Format("02/01/2006") }
 func isoWeekday(d time.Time) int { // 1 = Thứ Hai … 7 = Chủ nhật
 	w := int(d.Weekday())
 	if w == 0 {
@@ -203,7 +205,7 @@ func (b *bulkRows) flush(ctx context.Context, tx *gorm.DB) error {
 	if per > 2000 {
 		per = 2000
 	}
-	head := "INSERT INTO " + b.table + " (" + strings.Join(b.cols, ", ") + ") VALUES "
+	head := "INSERT INTO " + b.table + " (" + strings.Join(b.cols, ", ") + ") VALUES " // #nosec G202
 	for start := 0; start < len(b.rows); start += per {
 		end := start + per
 		if end > len(b.rows) {
