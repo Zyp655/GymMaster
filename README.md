@@ -53,7 +53,10 @@ cd gymmaster-web && cp .env.example .env.local && npm install && npm run dev
 
 ## Tài liệu
 - [Hướng dẫn cài đặt package & chạy hệ thống](docs/SETUP_GUIDE.md): yêu cầu môi trường, cài đặt thư viện, cấu hình `.env`, chạy Docker/Local, tài khoản demo và kiểm thử.
-- [Kế hoạch phát triển chi tiết](docs/PLAN.md): phạm vi, kiến trúc, ERD, nghiệp vụ, lộ trình 16 tuần.
+- [Kế hoạch phát triển chi tiết](docs/PLAN.md): phạm vi, kiến trúc, ERD, nghiệp vụ, lộ trình.
+- [Hướng dẫn sử dụng theo vai trò](docs/user-guide/README.md): hướng dẫn cho Chủ phòng tập/Quản lý, Lễ tân – Thu ngân, Huấn luyện viên và Hội viên.
+- [Sơ đồ kiến trúc & UML mở rộng (Use Case, Sequence, Activity, State, ERD)](docs/architecture/diagrams-stage2-4.md).
+- [Báo cáo kiểm thử bảo mật OWASP Top 10 & Phi chức năng](docs/security/owasp-audit.md).
 - [API contracts](docs/api/): đặc tả chi tiết tất cả các module.
 
 ## Tiến độ
@@ -84,4 +87,7 @@ cd gymmaster-web && cp .env.example .env.local && npm install && npm run dev
 - [x] **Sprint 26** – Mật độ phòng tập realtime, chỉ tiêu doanh số KPI & báo cáo Cohort Retention
 - [x] **Sprint 27** – Xác thực 2 lớp (2FA TOTP), quản lý phiên đăng nhập & tuân thủ Nghị định 13/2023
 - [x] **Sprint 28** – Bộ kiểm thử E2E Playwright (`e2e/`), kiểm thử tải k6 (`perf/`), Postman/Newman (`postman/`) & CI
+- [x] **Sprint 29** – Landing mở rộng (hồ sơ HLV công khai, chi tiết lớp, cảm nhận hội viên, blog/tin tức, liên hệ, bản đồ) + SEO (`sitemap.ts`, `robots.ts`, `schema.org/ExerciseGym`) + Nhắn tin HLV ↔ Hội viên + Lịch `.ics` + Tùy chọn thông báo
+- [x] **Sprint 30** – Chuyển đổi dữ liệu cũ (`legacy_import_jobs` Dry-Run & Commit) + Wizard thiết lập ban đầu + Chuyển chi nhánh chính + Hoàn tiền VNPay Online + Tìm kiếm nhanh `Ctrl+K` & Dark Mode Admin + Tài liệu người dùng
+
 

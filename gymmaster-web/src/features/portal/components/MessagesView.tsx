@@ -1,0 +1,277 @@
+'use client';
+
+import { useState } from 'react';
+import { toast } from 'sonner';
+import {
+  BellAlertIcon,
+  CalendarDaysIcon,
+  ChatBubbleLeftRightIcon,
+  ClipboardDocumentIcon,
+  PaperAirplaneIcon,
+} from '@heroicons/react/24/outline';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { formatDateTime } from '@/lib/format';
+import {
+  useMemberCalendarTokenQuery,
+  useMemberConversationsQuery,
+  useMemberMessagesQuery,
+  useMemberNotificationPreferencesQuery,
+  useRotateMemberCalendarTokenMutation,
+  useSaveMemberNotificationPreferencesMutation,
+  useSendMemberMessageMutation,
+} from '../queries';
+import type { NotificationPrefItem } from '../types';
+
+const PREF_LABELS: Record<string, string> = {
+  PAYMENT_SUCCESS: 'Thanh toán & Hóa đơn thành công (Bắt buộc)',
+  SUBSCRIPTION_EXPIRING: 'Nhắc gia hạn gói tập sắp hết hạn',
+  CLASS_REMINDER: 'Nhắc lịch lớp học nhóm đã đặt',
+  PT_REMINDER: 'Nhắc lịch tập PT 1-1',
+  PROMOTION: 'Chương trình khuyến mãi & Ưu đãi',
+  BIRTHDAY: 'Lời chúc & Quà tặng sinh nhật',
+  SYSTEM: 'Thông báo bảo mật & Hệ thống (Bắt buộc)',
+};
+
+export function MessagesView() {
+  const [selectedConvId, setSelectedConvId] = useState<number | null>(null);
+  const [chatText, setChatText] = useState('');
+
+  const convQuery = useMemberConversationsQuery();
+  const conversations = convQuery.data ?? [];
+  const activeConvId = selectedConvId ?? conversations[0]?.id ?? null;
+
+  const messagesQuery = useMemberMessagesQuery(activeConvId);
+  const sendMut = useSendMemberMessageMutation();
+
+  const calQuery = useMemberCalendarTokenQuery();
+  const rotateCalMut = useRotateMemberCalendarTokenMutation();
+
+  const prefsQuery = useMemberNotificationPreferencesQuery();
+  const savePrefsMut = useSaveMemberNotificationPreferencesMutation();
+
+  const handleSend = () => {
+    if (!activeConvId || !chatText.trim()) return;
+    sendMut.mutate(
+      { conversationId: activeConvId, content: chatText.trim() },
+      {
+        onSuccess: () => setChatText(''),
+        onError: err => {
+          toast.error(err instanceof Error ? err.message : 'Không thể gửi tin nhắn');
+        },
+      },
+    );
+  };
+
+  const togglePref = (target: NotificationPrefItem) => {
+    if (target.mandatory) return;
+    const current = prefsQuery.data ?? [];
+    const next = current.map(item =>
+      item.channel === target.channel && item.type === target.type
+        ? { ...item, enabled: !item.enabled }
+        : item,
+    );
+    savePrefsMut.mutate(next, {
+      onSuccess: () => toast.success('Đã lưu tùy chọn thông báo'),
+    });
+  };
+
+  const copyIcsUrl = () => {
+    const url = calQuery.data?.ics_url;
+    if (!url) return;
+    const fullUrl =
+      typeof window !== 'undefined' && url.startsWith('/')
+        ? `${window.location.origin}${url}`
+        : url;
+    void navigator.clipboard.writeText(fullUrl);
+    toast.success('Đã sao chép đường dẫn lịch .ics');
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-h2 font-bold text-primary">
+          Tin nhắn PT, Đồng bộ Lịch & Tùy chọn Thông báo
+        </h1>
+        <p className="mt-1 text-body text-secondary">
+          Trao đổi trực tiếp với Huấn luyện viên cá nhân, đồng bộ lịch tập .ics sang Google/Apple
+          Calendar và tùy chỉnh thông báo.
+        </p>
+      </div>
+
+      {/* Khu vực Chat HLV ↔ Hội viên */}
+      <Card className="p-5">
+        <div className="mb-4 flex items-center gap-2">
+          <ChatBubbleLeftRightIcon className="size-5 text-brand-600" />
+          <h2 className="text-h4 font-semibold text-primary">
+            Trò chuyện cùng Huấn luyện viên (PT)
+          </h2>
+        </div>
+
+        {conversations.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-line p-6 text-center text-small text-secondary">
+            Bạn chưa có hợp đồng PT đang hoạt động để mở hội thoại với Huấn luyện viên.
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2 md:border-r md:border-line md:pr-4">
+              {conversations.map(conv => {
+                const active = conv.id === activeConvId;
+                return (
+                  <button
+                    key={conv.id}
+                    type="button"
+                    onClick={() => setSelectedConvId(conv.id)}
+                    className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                      active
+                        ? 'border-brand-500 bg-brand-50/70'
+                        : 'border-line bg-surface hover:bg-subtle'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-primary">HLV {conv.trainer_name}</span>
+                      {conv.unread_count > 0 ? (
+                        <Badge variant="brand">{conv.unread_count} mới</Badge>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 text-xs text-secondary">
+                      Còn {conv.remaining_sessions} buổi · {conv.contract_status}
+                    </div>
+                    {conv.last_message_preview ? (
+                      <div className="mt-1 truncate text-xs text-muted">
+                        {conv.last_message_preview}
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col justify-between md:col-span-2">
+              <div className="max-h-80 min-h-56 space-y-3 overflow-y-auto rounded-xl bg-subtle/50 p-4">
+                {(messagesQuery.data ?? []).length === 0 ? (
+                  <p className="text-center text-small text-secondary">
+                    Chưa có tin nhắn nào. Hãy gửi lời chào tới HLV của bạn!
+                  </p>
+                ) : (
+                  (messagesQuery.data ?? []).map(m => {
+                    const isMine = m.sender_role === 'MEMBER';
+                    return (
+                      <div
+                        key={m.id}
+                        className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
+                      >
+                        <div className="mb-1 text-xs text-muted">
+                          {m.sender_name} · {formatDateTime(m.created_at)}
+                        </div>
+                        <div
+                          className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-small ${
+                            isMine
+                              ? 'bg-brand-600 text-white'
+                              : 'border border-line bg-surface text-primary'
+                          }`}
+                        >
+                          {m.content}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                <Input
+                  value={chatText}
+                  onChange={e => setChatText(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleSend();
+                  }}
+                  placeholder="Nhập câu hỏi về lịch tập, bài tập hoặc dinh dưỡng..."
+                />
+                <Button onClick={handleSend} disabled={sendMut.isPending || !chatText.trim()}>
+                  <PaperAirplaneIcon className="size-4" />
+                  Gửi
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Đồng bộ lịch tập .ics */}
+      <Card className="p-5">
+        <div className="mb-2 flex items-center gap-2">
+          <CalendarDaysIcon className="size-5 text-brand-600" />
+          <h2 className="text-h4 font-semibold text-primary">
+            Đồng bộ Lịch tập (.ics) sang Google Calendar / Apple Calendar
+          </h2>
+        </div>
+        <p className="mb-4 text-small text-secondary">
+          Sao chép liên kết iCalendar bên dưới để tự động đồng bộ các buổi tập PT và lớp học nhóm
+          sắp tới vào ứng dụng Lịch trên điện thoại của bạn.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            readOnly
+            value={calQuery.data?.ics_url ?? 'Đang tạo liên kết .ics...'}
+            className="max-w-xl font-mono text-xs"
+          />
+          <Button variant="outline" onClick={copyIcsUrl}>
+            <ClipboardDocumentIcon className="size-4" />
+            Sao chép link .ics
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() =>
+              rotateCalMut.mutate(undefined, {
+                onSuccess: () => toast.success('Đã tạo mới mã token lịch .ics'),
+              })
+            }
+            disabled={rotateCalMut.isPending}
+          >
+            Đổi mã token mới
+          </Button>
+        </div>
+      </Card>
+
+      {/* Tùy chọn nhận thông báo */}
+      <Card className="p-5">
+        <div className="mb-2 flex items-center gap-2">
+          <BellAlertIcon className="size-5 text-brand-600" />
+          <h2 className="text-h4 font-semibold text-primary">Tùy chọn Kênh & Loại Thông báo</h2>
+        </div>
+        <p className="mb-4 text-small text-secondary">
+          Bật hoặc tắt các nhóm thông báo không bắt buộc theo nhu cầu của bạn.
+        </p>
+
+        <div className="divide-y divide-line">
+          {(prefsQuery.data ?? [])
+            .filter(item => item.channel === 'IN_APP')
+            .map(item => (
+              <div
+                key={`${item.channel}-${item.type}`}
+                className="flex items-center justify-between gap-4 py-3"
+              >
+                <div>
+                  <div className="text-small font-medium text-primary">
+                    {PREF_LABELS[item.type] ?? item.type}
+                  </div>
+                  <div className="text-xs text-muted">Kênh: Thông báo trên ứng dụng & Email</div>
+                </div>
+                <Button
+                  size="sm"
+                  variant={item.enabled ? 'primary' : 'outline'}
+                  disabled={item.mandatory || savePrefsMut.isPending}
+                  onClick={() => togglePref(item)}
+                >
+                  {item.enabled ? 'Đang bật' : 'Đang tắt'}
+                </Button>
+              </div>
+            ))}
+        </div>
+      </Card>
+    </div>
+  );
+}

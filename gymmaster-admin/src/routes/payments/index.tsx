@@ -1,18 +1,32 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Card, Col, DatePicker, Row, Segmented, Space, Tag, Typography } from 'antd';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  Button,
+  Card,
+  Col,
+  DatePicker,
+  Popconfirm,
+  Row,
+  Segmented,
+  Space,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   BankOutlined,
   CreditCardOutlined,
   DollarOutlined,
   GlobalOutlined,
+  RollbackOutlined,
   WalletOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import { Link } from 'react-router-dom';
+import { cmsSystemApi } from '@/api/cms-system';
 import invoiceApi, { PAYMENT_METHOD_LABEL, PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
 import type {
   OnlinePaymentListParams,
@@ -103,8 +117,19 @@ function SummaryCards({ data, loading }: { data?: PaymentListResult; loading?: b
 }
 
 function OnlinePaymentsSection() {
+  const qc = useQueryClient();
   const { branchId } = useWorkingBranch();
   const { branches } = useBranchOptions();
+  const { can } = usePermission();
+
+  const refundMut = useMutation({
+    mutationFn: (id: number) =>
+      cmsSystemApi.refundOnlineTxn(id, { reason: 'Hoàn tiền giao dịch VNPay trực tuyến' }),
+    onSuccess: (res) => {
+      message.success(`Đã hoàn tiền VNPay thành công (${res.gateway_ref})`);
+      qc.invalidateQueries({ queryKey: [invoiceApi.key] });
+    },
+  });
 
   const table = useTableQuery<OnlinePaymentTxn, OnlinePaymentListParams>({
     queryKey: [invoiceApi.key, 'online-payments'],
@@ -188,8 +213,25 @@ function OnlinePaymentsSection() {
         className: 'text-nowrap',
         render: (v: string | null) => (v ? formatDateTime(v) : '—'),
       },
+      {
+        title: 'Thao tác',
+        key: 'actions',
+        render: (_, r) =>
+          r.status === 'SUCCESS' && can(PERM.INVOICE_REFUND) ? (
+            <Popconfirm
+              title="Hoàn tiền giao dịch VNPay trực tuyến này?"
+              onConfirm={() => refundMut.mutate(r.id)}
+            >
+              <Button size="small" danger icon={<RollbackOutlined />}>
+                Hoàn tiền Online
+              </Button>
+            </Popconfirm>
+          ) : (
+            '—'
+          ),
+      },
     ],
-    [],
+    [can, refundMut],
   );
 
   return (

@@ -78,5 +78,43 @@ export interface CreatePublicLeadRes {
   message?: string;
 }
 
+export interface PublicTrainer {
+  id: number;
+  user_id: number;
+  full_name: string;
+  slug: string;
+  headline: string;
+  bio: string;
+  specialties: string;
+  certifications: string;
+  experience_years: number;
+  avatar_url: string;
+  featured: boolean;
+  rating_avg: number;
+  rating_count: number;
+}
+
+export interface PublicTestimonial {
+  id: number;
+  author_name: string;
+  author_role: string;
+  avatar_url?: string;
+  rating: number;
+  content: string;
+  before_after_note?: string;
+}
+
+export interface PublicPost {
+  id: number;
+  slug: string;
+  title: string;
+  excerpt: string;
+  cover_url?: string;
+  category: string;
+  content: string;
+  published_at?: string;
+  created_at: string;
+}
+
 /** Kết quả tải dữ liệu phía server: null = lỗi (hiển thị thông báo thay vì làm hỏng cả trang). */
 export type LoadResult<T> = { ok: true; data: T } | { ok: false };

@@ -189,13 +189,16 @@ func (Payment) TableName() string { return "payments" }
 
 // Refund là một lần hoàn tiền cho hóa đơn.
 type Refund struct {
-	ID         uint    `gorm:"primaryKey;autoIncrement"`
-	InvoiceID  uint    `gorm:"not null"`
-	Amount     float64 `gorm:"type:numeric(14,2);not null"`
-	Method     string  `gorm:"type:varchar(20);not null"`
-	Reason     string  `gorm:"type:varchar(255);not null"`
-	RefundedBy *uint
-	CreatedAt  time.Time
+	ID          uint    `gorm:"primaryKey;autoIncrement"`
+	InvoiceID   uint    `gorm:"not null"`
+	OnlineTxnID *uint   `gorm:"column:online_txn_id"`
+	Amount      float64 `gorm:"type:numeric(14,2);not null"`
+	Method      string  `gorm:"type:varchar(20);not null"`
+	Status      string  `gorm:"type:varchar(20);not null;default:'SUCCESS'"`
+	GatewayRef  string  `gorm:"column:gateway_ref;type:varchar(100);not null;default:''"`
+	Reason      string  `gorm:"type:varchar(255);not null"`
+	RefundedBy  *uint
+	CreatedAt   time.Time
 }
 
 func (Refund) TableName() string { return "refunds" }

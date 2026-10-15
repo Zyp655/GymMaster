@@ -66,6 +66,8 @@ const ContractsPasses = lazy(() => import('./contracts-passes'));
 const TrainerSchedules = lazy(() => import('./trainer-schedules'));
 const KpiAnalytics = lazy(() => import('./kpi-analytics'));
 const SecurityPrivacy = lazy(() => import('./security-privacy'));
+const CmsMarketing = lazy(() => import('./cms-marketing'));
+const SystemTools = lazy(() => import('./system-tools'));
 
 export const routes: AppRoute[] = [
   { path: 'dashboard', element: page(Dashboard) },
@@ -214,6 +216,16 @@ export const routes: AppRoute[] = [
     path: 'security-privacy',
     element: page(SecurityPrivacy),
     perm: [PERM.PRIVACY_MANAGE, PERM.MEMBER_VIEW_SENSITIVE, PERM.SETTING_MANAGE],
+  },
+  {
+    path: 'cms-marketing',
+    element: page(CmsMarketing),
+    perm: [PERM.CMS_MANAGE, PERM.PT_VIEW, PERM.LEAD_VIEW],
+  },
+  {
+    path: 'system-tools',
+    element: page(SystemTools),
+    perm: [PERM.IMPORT_LEGACY, PERM.SETUP_WIZARD, PERM.SETTING_MANAGE, PERM.MEMBER_IMPORT],
   },
   { path: 'audit-logs', element: page(AuditLogs), perm: [PERM.AUDIT_VIEW] },
   { path: 'jobs', element: page(Jobs), perm: [PERM.JOB_VIEW] },

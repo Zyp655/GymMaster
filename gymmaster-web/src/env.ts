@@ -45,3 +45,8 @@ export function getApiBaseUrl(): string {
   }
   return env.NEXT_PUBLIC_API_URL;
 }
+
+/** URL trang web public dùng cho SEO sitemap / robots. */
+export function getSiteUrl(): string {
+  return process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000';
+}

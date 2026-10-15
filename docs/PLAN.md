@@ -58,6 +58,8 @@ Số hóa toàn bộ vòng đời hội viên: **Tiếp nhận → Đăng ký g�
 - Khuyến mãi/voucher
 - Audit log
 
+**Giai đoạn sau (hướng phát triển, ngoài phạm vi 16 tuần):** xem §12–§15 (Sprint 12–30) và cách phân phạm vi ở §16.1.
+
 ---
 
 ## 2. Kiến trúc tổng thể
@@ -185,6 +187,9 @@ gymmaster-api/
 | 42xxx | checkin |
 | 43xxx | booking |
 | 44xxx | payment |
+| 45xxx | POS / tồn kho |
+
+Mã mới dự kiến cho giai đoạn 2–4 được tổng hợp ở §16.3.
 
 ---
 
@@ -246,6 +251,28 @@ Quy ước:
 - `equipments`, `maintenance_logs`
 - `notifications` (id, user_id, type, title, body, read_at)
 - `audit_logs` (id, actor_id, action, entity, entity_id, before jsonb, after jsonb, ip, created_at)
+
+**Bổ sung giai đoạn 2–4** (chi tiết cột trong từng sprint ở §12–§15)
+| Migration | Bảng mới / thay đổi |
+|---|---|
+| 000011 | `password_resets`, `login_attempts` |
+| 000012 | `online_payment_txns`; `payments.method` thêm `VNPAY` |
+| 000013 | `exercises`, `workout_plans`, `workout_plan_days`, `workout_plan_items`, `workout_logs` |
+| 000014 | `reviews`; `trainer_profiles.rating_avg`, `rating_count` |
+| 000015 | `equipments`, `maintenance_logs` (thay cho mục "Mở rộng" ở trên) |
+| 000016 | `leads`, `lead_activities`, `trial_passes` |
+| 000017 | `access_devices`; `checkins.device_id`, method `DEVICE` |
+| 000018 | `lockers`, `locker_rentals` |
+| 000019 | `staff_attendances`, `payrolls`, `payroll_items` |
+| 000020 | `expense_categories`, `expenses`, `cash_sessions`, `installment_plans`, `installment_schedules` |
+| 000021 | `loyalty_ledgers`, `loyalty_rewards`, `badges`, `member_badges`, `challenges`, `challenge_participants`; `members.loyalty_points`, `referral_code`, `referred_by` |
+| 000022 | `foods`, `meal_plans`, `meal_plan_items`, `food_logs`, `announcements`, `surveys`, `survey_responses` |
+| 000023 | `contract_templates`, `member_contracts`, `day_passes`; `membership_plans.access_hours`, `guest_passes_per_month` |
+| 000024 | `trainer_availabilities`, `staff_leave_requests`, `branch_holidays`; HLV thay thế trên `class_schedules`/`pt_sessions` |
+| 000025 | `sales_targets`; `branches.capacity` |
+| 000026 | `user_mfa`, `consents`, `data_requests`; `refresh_tokens.device_name`, `last_used_at` |
+| 000027 | `trainer_public_profiles`, `testimonials`, `posts`, `contact_messages`, `conversations`, `messages`, `notification_preferences` |
+| 000028 | `refunds` thêm `online_txn_id`; `member_branch_transfers`; `legacy_import_jobs` |
 
 ### 4.2 Ràng buộc & index quan trọng (nên đưa vào báo cáo)
 - **EXCLUDE constraint** (`btree_gist`) chống trùng lịch:
@@ -322,6 +349,8 @@ Quy ước:
 | Notification | `/notifications`, `PUT /notifications/{id}/read` |
 
 Swagger tự sinh tại `/swagger`. Có thể đưa ảnh chụp Swagger vào phụ lục báo cáo.
+
+> Bảng trên là API của giai đoạn 1. Endpoint của giai đoạn 2–4 liệt kê trong từng sprint ở §12–§15. Module mới: password reset, VNPay, workout, review, equipment, lead, access device, locker, payroll, expense/cash session/installment, loyalty, nutrition/announcement/survey, contract/day pass, availability/leave/holiday, KPI/cohort, MFA/session/privacy, CMS landing, messaging.
 
 ---
 
@@ -446,6 +475,8 @@ Bảng test case (ID, mô tả, input, expected, kết quả) sẽ được đư
 | 14 | Mở rộng | POS bán hàng + tồn kho theo chi nhánh (sản phẩm, nhập/xuất/điều chuyển/kiểm kê, cảnh báo tồn thấp), audit log |
 | 15 | Kiểm thử & tối ưu | Test, sửa lỗi, k6, index, deploy demo |
 | 16 | Báo cáo & bảo vệ | Hoàn thiện quyển, slide, video demo, dữ liệu demo đẹp |
+
+> Lộ trình 16 tuần trên là phạm vi đồ án (giai đoạn 1, đã hoàn thành Sprint 01–11). Sprint 12–30 là các giai đoạn tiếp theo (§12–§15), phạm vi xem §16.1.
 
 ---
 
@@ -845,3 +876,155 @@ Thứ tự ưu tiên gợi ý: **18 (kiosk) → 20 (lương) → 22 (điểm th�
 |---|---|---|
 | Tối ưu dữ liệu lớn | Phân vùng `checkins`/`audit_logs` theo tháng, materialized view cho báo cáo | ⭐⭐ |
 | Đa ngôn ngữ | Thêm `messages/en` cho web (đã có `next-intl`), i18n cho admin | ⭐ |
+
+---
+
+## 15. Bổ sung còn thiếu (Sprint 29–30 + Backlog)
+
+> Migration tiếp `000027`, `000028`. Phạm vi vẫn không gồm mobile app, tích hợp bên ngoài, AI, SaaS.
+
+### 15.1 Tính năng còn thiếu
+| Mảng | Nội dung | Ưu tiên |
+|---|---|---|
+| Landing / marketing | Trang hồ sơ HLV công khai (`trainer_public_profiles`: ảnh, chuyên môn, chứng chỉ, rating), trang chi tiết lớp, cảm nhận hội viên (`testimonials`, admin duyệt), tin tức/blog (`posts` – CMS đơn giản: tiêu đề, slug, ảnh bìa, nội dung, trạng thái), form liên hệ (`contact_messages` → thông báo lễ tân), bản đồ chi nhánh (nhúng iframe) | ⭐⭐⭐ |
+| SEO | `generateMetadata` từng trang, `sitemap.ts`, `robots.ts`, structured data `schema.org/ExerciseGym` cho chi nhánh, ảnh Open Graph | ⭐⭐ |
+| Nhắn tin HLV ↔ hội viên | `conversations` (gắn `pt_contract_id`), `messages` (text/ảnh, read_at); chỉ nhắn trong hợp đồng PT còn hiệu lực; dùng SSE của Sprint 17 để đẩy tin mới | ⭐⭐ |
+| Tùy chọn thông báo | `notification_preferences` (user_id, type, channel[`IN_APP`|`EMAIL`], enabled); `Notifier` kiểm tra trước khi gửi; thông báo bắt buộc (bảo mật, hóa đơn) không tắt được | ⭐⭐ |
+| Hoàn tiền online | Hoàn tiền giao dịch VNPay qua API refund sandbox; `refunds.online_txn_id`; trạng thái chờ xử lý → thành công/thất bại | ⭐⭐ |
+| Chuyển chi nhánh chính | `member_branch_transfers` (from, to, reason, approved_by); gói `SINGLE_BRANCH` đang chạy được chuyển theo hoặc tính phí theo cấu hình | ⭐ |
+| Xuất lịch .ics | `GET /member/calendar.ics?token=` (token riêng, thu hồi được) và tương tự cho HLV – lịch lớp đã đặt + buổi PT | ⭐ |
+| Trải nghiệm admin | Tìm kiếm nhanh toàn hệ thống (Ctrl+K: hội viên, hóa đơn, sản phẩm – `GET /admin/search?q=`), thao tác hàng loạt (gửi thông báo, gắn tag, xuất Excel), tùy biến mẫu in hóa đơn (logo, chân trang, khổ A5/80mm), dark mode | ⭐⭐ |
+
+### 15.2 Triển khai thực tế
+| Mảng | Nội dung | Ưu tiên |
+|---|---|---|
+| Chuyển đổi dữ liệu cũ | Import Excel nhiều sheet: hội viên → gói đang chạy (ngày bắt đầu/kết thúc, số buổi còn lại) → hợp đồng PT (buổi còn lại) → công nợ. `legacy_import_jobs` (file, trạng thái, số dòng OK/lỗi, file lỗi tải về); chạy thử (dry-run) trước khi ghi; dữ liệu nhập ghi `source = 'IMPORT'` để truy vết | ⭐⭐⭐ |
+| Wizard thiết lập ban đầu | Lần đầu OWNER đăng nhập: thông tin trung tâm → chi nhánh → phòng → gói tập mẫu → nhân viên → cài đặt (giờ mở cửa, quy định hủy lớp); có thể bỏ qua và quay lại | ⭐⭐ |
+| Tài liệu người dùng | Hướng dẫn theo vai trò (lễ tân, HLV, quản lý, hội viên) ở `docs/user-guide/`; nút "?" trên từng màn hình admin mở hướng dẫn tương ứng; tour giới thiệu lần đầu | ⭐⭐ |
+
+**Gợi ý chia sprint**
+| Sprint | Nội dung | Migration |
+|---|---|---|
+| 29 | Landing (hồ sơ HLV, chi tiết lớp, cảm nhận, blog, liên hệ) + SEO | 000027 (một phần) |
+| 30 | Chuyển đổi dữ liệu cũ + wizard thiết lập + tài liệu người dùng | 000028 (một phần) |
+
+Các mục còn lại của 15.1 (nhắn tin, tùy chọn thông báo, hoàn tiền online, chuyển chi nhánh, .ics, trải nghiệm admin) đưa vào Backlog §14.
+
+### 15.3 Yêu cầu phi chức năng & kiểm thử bảo mật
+**Mục tiêu đo được** (kiểm chứng ở Sprint 28 bằng k6, ghi vào chương Kiểm thử)
+| Chỉ số | Mục tiêu |
+|---|---|
+| API đọc thông thường | p95 < 300 ms |
+| Quét check-in (đầu cuối) | < 1 s |
+| Danh sách 10k hội viên có phân trang/lọc | p95 < 500 ms |
+| Tải check-in | 100 req/s, tỉ lệ lỗi < 0,1% |
+| Đặt lớp đồng thời | 0 lần vượt sức chứa |
+| Trang landing (Lighthouse mobile) | Performance ≥ 85, SEO ≥ 90 |
+
+**Kiểm thử bảo mật**
+- Checklist OWASP Top 10 cho từng module (ghi kết quả vào phụ lục): kiểm soát truy cập (IDOR trên `/member/*`), injection, xác thực, cấu hình CORS/header bảo mật, log sự kiện bảo mật.
+- CI: `govulncheck ./...`, `npm audit --audit-level=high` cho web và admin; `gosec` trong `golangci-lint`.
+- Test phân quyền tự động: mỗi endpoint admin gọi bằng token thiếu quyền → phải trả `40300`; hội viên A không đọc được dữ liệu hội viên B.
+
+**Accessibility & responsive**
+- Cổng hội viên và landing đạt WCAG 2.1 AA cơ bản: tương phản màu, nhãn form, điều hướng bàn phím, `alt` ảnh; kiểm bằng axe/Lighthouse.
+- Kiểm tra responsive ở 360px, 768px, 1280px; admin ưu tiên ≥ 1280px nhưng các màn quầy (check-in, POS) dùng được trên tablet.
+
+---
+
+## 16. Quản lý lộ trình mở rộng
+
+### 16.1 Phân phạm vi
+| Phạm vi | Nội dung | Dùng trong quyển đồ án |
+|---|---|---|
+| **Đồ án (đã xong)** | Giai đoạn 1 – Sprint 01–11 | Chương Phân tích, Thiết kế, Cài đặt, Kiểm thử |
+| **Đồ án (nếu kịp trước bảo vệ)** | Sprint 12 (quên mật khẩu), 13 (VNPay), 28 (E2E/k6) | Bổ sung chương Cài đặt & Kiểm thử |
+| **Hướng phát triển** | Sprint 14–27, 29–30, Backlog | Chương Kết luận & hướng phát triển (tóm tắt theo nhóm) |
+
+### 16.2 Phụ thuộc giữa các sprint
+| Sprint | Cần có trước | Lý do |
+|---|---|---|
+| 13 VNPay | 12 | Luồng email/token dùng chung; hội viên tự thanh toán cần khôi phục mật khẩu |
+| 16 CRM | 13 (khuyến nghị) | Convert lead → mua gói online |
+| 17 SSE | — | Hạ tầng cho 15.1 nhắn tin, thông báo realtime |
+| 18 Kiosk | 17 (khuyến nghị) | Admin nhận check-in mới realtime |
+| 19 Tủ đồ | 18 | Gán tủ trong luồng check-in/kiosk |
+| 20 Lương | 18 | Chấm công nhân viên qua kiosk |
+| 21 Chi phí/P&L | 15, 20 | Chi phí bảo trì, lương đưa vào P&L |
+| 22 Điểm thưởng | 14, 15, 16 | Cộng điểm khi ghi tập, đánh giá; mã giới thiệu đi qua form tập thử |
+| 23 Dinh dưỡng/NPS | 16 | NPS thấp đẩy vào danh sách at-risk |
+| 24 Hợp đồng/vé ngày | 18 | Kiosk nhận QR vé ngày |
+| 25 Lịch rảnh/ngày lễ | 20 | Nghỉ phép trừ vào bảng lương |
+| 26 Mật độ/KPI | 16, 20 | Nguồn khách cho KPI, nhân viên bán hàng |
+| 28 E2E | 13 | Kịch bản mua gói online |
+| 15.1 Nhắn tin | 17 | Đẩy tin nhắn qua SSE |
+| 15.1 Hoàn tiền online | 13 | Dựa trên giao dịch VNPay |
+
+Thứ tự an toàn: **12 → 13 → 28 → 17 → 14 → 15 → 16 → 18 → 20 → 22 → 21 → 24 → 25 → 26 → 27 → 19 → 23 → 29 → 30**.
+
+### 16.3 Permission & mã lỗi mới
+**Permission** (khai báo trong `consts/permission.go`, seed vào role mặc định)
+| Module | Permission | Role mặc định |
+|---|---|---|
+| Workout | `workout.view`, `workout.manage` | MANAGER, TRAINER |
+| Review | `review.view` | OWNER, MANAGER |
+| Equipment | `equipment.view`, `equipment.manage`, `equipment.report` | MANAGER (manage); RECEPTIONIST, TRAINER (report) |
+| Lead | `lead.view`, `lead.manage`, `lead.convert` | MANAGER, RECEPTIONIST |
+| Device | `device.manage` | OWNER, MANAGER |
+| Locker | `locker.view`, `locker.manage` | MANAGER, RECEPTIONIST |
+| Payroll | `attendance.view`, `payroll.view`, `payroll.manage`, `payroll.lock` | OWNER, MANAGER (lock: OWNER) |
+| Finance | `expense.manage`, `expense.approve`, `cash_session.manage`, `installment.manage`, `report.profit_loss` | MANAGER; RECEPTIONIST (cash_session) |
+| Loyalty | `loyalty.manage`, `loyalty.adjust` | MANAGER |
+| Engagement | `nutrition.manage`, `announcement.manage`, `survey.manage` | MANAGER, TRAINER (nutrition) |
+| Contract / pass | `contract.manage`, `day_pass.sell` | MANAGER; RECEPTIONIST (day_pass) |
+| Schedule | `availability.manage`, `leave.request`, `leave.approve`, `holiday.manage` | TRAINER (availability, leave.request); MANAGER |
+| KPI | `kpi.manage`, `report.cohort` | OWNER, MANAGER |
+| Privacy | `member.view_sensitive`, `data_request.process` | OWNER, MANAGER |
+| CMS / landing | `cms.manage` | OWNER, MANAGER |
+| Hệ thống | `import.legacy`, `setup.wizard` | OWNER |
+
+**Mã lỗi** (đã khai báo sẵn trong `internal/pkg/rescode`, cần thêm các mã còn lại khi cài đặt)
+| Mã | Tên | Sprint |
+|---|---|---|
+| 40104 | `RESET_TOKEN_INVALID` | 12 |
+| 40105 | `TOO_MANY_ATTEMPTS` | 12 |
+| 40106 | `DEVICE_UNAUTHORIZED` | 18 |
+| 40107 / 40108 | `MFA_REQUIRED` / `MFA_INVALID_CODE` | 27 |
+| 40901 | `LOCKER_UNAVAILABLE` | 19 |
+| 40902 | `PAYROLL_LOCKED` | 20 |
+| 40903 / 40904 | `INSUFFICIENT_POINTS` / `REWARD_OUT_OF_STOCK` | 22 |
+| 42001 | `CONTRACT_UNSIGNED` | 24 |
+| 42002 | `OUTSIDE_ACCESS_HOURS` | 24 |
+| 42003 | `INSTALLMENT_OVERDUE` | 21 |
+| 42004 | `BRANCH_HOLIDAY_CLOSED` | 25 |
+| 44001–44003 | `PAYMENT_INVALID_SIGNATURE` / `PAYMENT_AMOUNT_MISMATCH` / `PAYMENT_TXN_EXPIRED` | 13 |
+| 43xxx (mới) | Lịch rảnh HLV / ngoài khung giờ nhận PT | 25 |
+| 46xxx (mới) | Thiết bị, tủ đồ | 18–19 |
+| 47xxx (mới) | Lương, chi phí, đối soát ca | 20–21 |
+
+### 16.4 Sơ đồ cần bổ sung cho quyển đồ án
+- **Use case**: hội viên tự mua gói online; HLV soạn giáo án; lễ tân quản lý lead; quản lý chốt lương.
+- **Sequence**: thanh toán VNPay (redirect → IPN → kích hoạt gói); quên mật khẩu; check-in qua kiosk/thiết bị; đăng nhập 2FA.
+- **Activity**: vòng đời lead (NEW → CONVERTED/LOST); trả góp (kỳ → quá hạn → chặn check-in).
+- **State**: `online_payment_txns`, `leads`, `payrolls`, `data_requests`.
+- **ERD**: bổ sung các bảng ở §4.1 (phần giai đoạn 2–4), tách sơ đồ theo nhóm để dễ đọc.
+
+### 16.5 Definition of Done (mỗi sprint)
+- [ ] Migration up/down chạy được, có seed demo cho module mới.
+- [ ] API có Req/Res + `g.Meta` đầy đủ, hiện trên Swagger; permission kiểm tra ở middleware.
+- [ ] Unit test service cho các quy tắc nghiệp vụ; integration test cho transaction/constraint quan trọng.
+- [ ] Admin/web có màn hình tương ứng, xử lý trạng thái loading/rỗng/lỗi.
+- [ ] Audit log cho thao tác thay đổi dữ liệu quan trọng.
+- [ ] CI xanh (lint, typecheck, test, build).
+- [ ] Cập nhật `docs/api/<module>.md` và tick tiến độ ở README.
+
+### 16.6 Rủi ro & cách giảm thiểu
+| Rủi ro | Ảnh hưởng | Giảm thiểu |
+|---|---|---|
+| Phạm vi quá lớn so với thời gian | Không kịp bảo vệ | Chỉ cam kết phạm vi §16.1; còn lại ghi vào hướng phát triển |
+| VNPay sandbox không ổn định / cần đăng ký | Trễ Sprint 13 | Interface `PaymentGateway` + bản mock để demo; IPN test bằng script ký giả lập |
+| Sai lệch tiền (thanh toán, lương, P&L) | Mất niềm tin khi demo | Test đối chiếu tổng; mọi nghiệp vụ tiền chạy trong transaction; idempotency |
+| Migration lớn phá dữ liệu demo | Mất thời gian seed lại | Luôn có `down`; backup DB trước khi migrate; seed tái tạo được |
+| Rule engine check-in phình to (hợp đồng, khung giờ, trả góp, ngày lễ, vé ngày) | Khó bảo trì, chậm | Tách mỗi rule thành hàm/struct riêng theo interface `CheckinRule`, test từng rule |
+| Dữ liệu cá nhân (CCCD, sức khỏe, ảnh) | Rủi ro pháp lý | Sprint 27: mã hóa, che theo quyền, ghi nhận đồng ý, audit log |
+| Hiệu năng báo cáo khi dữ liệu lớn | Dashboard chậm | Index theo §4.2, materialized view, giới hạn khoảng thời gian truy vấn |

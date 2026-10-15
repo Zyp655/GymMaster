@@ -12,6 +12,7 @@ import type {
   CreateWorkoutLogPayload,
   FreezePayload,
   MFAEnablePayload,
+  NotificationPrefItem,
   ProfilePayload,
   SignContractPayload,
   SubmitSurveyPayload,
@@ -73,6 +74,11 @@ export const portalKeys = {
   sessions: () => [...portalKeys.all, 'sessions'] as const,
   consents: () => [...portalKeys.all, 'consents'] as const,
   dataRequests: () => [...portalKeys.all, 'data-requests'] as const,
+  conversations: () => [...portalKeys.all, 'conversations'] as const,
+  messages: (conversationId: number) =>
+    [...portalKeys.all, 'messages', conversationId] as const,
+  notificationPreferences: () => [...portalKeys.all, 'notification-preferences'] as const,
+  calendarToken: () => [...portalKeys.all, 'calendar-token'] as const,
 };
 
 export function useProfileQuery() {
@@ -642,4 +648,68 @@ export function useCreateMemberDataRequestMutation() {
     },
   });
 }
+
+// ---- Sprint 29: Nhắn tin HLV ↔ Hội viên, Tùy chọn thông báo, Lịch .ics -----------
+
+export function useMemberConversationsQuery() {
+  return useQuery({
+    queryKey: portalKeys.conversations(),
+    queryFn: () => portalApi.getMemberConversations(),
+  });
+}
+
+export function useMemberMessagesQuery(conversationId: number | null) {
+  return useQuery({
+    queryKey: portalKeys.messages(conversationId ?? 0),
+    queryFn: () => portalApi.getMemberMessages(conversationId!),
+    enabled: conversationId !== null && conversationId > 0,
+  });
+}
+
+export function useSendMemberMessageMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, content }: { conversationId: number; content: string }) =>
+      portalApi.sendMemberMessage(conversationId, content),
+    onSuccess: (_, variables) => {
+      void qc.invalidateQueries({ queryKey: portalKeys.messages(variables.conversationId) });
+      void qc.invalidateQueries({ queryKey: portalKeys.conversations() });
+    },
+  });
+}
+
+export function useMemberNotificationPreferencesQuery() {
+  return useQuery({
+    queryKey: portalKeys.notificationPreferences(),
+    queryFn: () => portalApi.getMemberNotificationPreferences(),
+  });
+}
+
+export function useSaveMemberNotificationPreferencesMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (items: NotificationPrefItem[]) => portalApi.saveMemberNotificationPreferences(items),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: portalKeys.notificationPreferences() });
+    },
+  });
+}
+
+export function useMemberCalendarTokenQuery() {
+  return useQuery({
+    queryKey: portalKeys.calendarToken(),
+    queryFn: () => portalApi.getMemberCalendarToken(),
+  });
+}
+
+export function useRotateMemberCalendarTokenMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => portalApi.rotateMemberCalendarToken(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: portalKeys.calendarToken() });
+    },
+  });
+}
+
 

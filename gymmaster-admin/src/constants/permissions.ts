@@ -118,11 +118,33 @@ export const PERM = {
 
   // Giai đoạn 4 (Sprint 24–27)
   CONTRACT_MANAGE: 'contract.manage',
+  DAY_PASS_SELL: 'day_pass.sell',
   LEAVE_MANAGE: 'leave.manage',
+  AVAILABILITY_MANAGE: 'availability.manage',
+  LEAVE_REQUEST: 'leave.request',
+  LEAVE_APPROVE: 'leave.approve',
   HOLIDAY_MANAGE: 'holiday.manage',
   KPI_MANAGE: 'kpi.manage',
+  REPORT_COHORT: 'report.cohort',
   PRIVACY_MANAGE: 'privacy.manage',
   MEMBER_VIEW_SENSITIVE: 'member.view_sensitive',
+  DATA_REQUEST_PROCESS: 'data_request.process',
+
+  // Giai đoạn 5 (Sprint 29–30 & Mục 16.3)
+  EQUIPMENT_REPORT: 'equipment.report',
+  LEAD_CONVERT: 'lead.convert',
+  ATTENDANCE_VIEW: 'attendance.view',
+  PAYROLL_LOCK: 'payroll.lock',
+  EXPENSE_APPROVE: 'expense.approve',
+  INSTALLMENT_MANAGE: 'installment.manage',
+  REPORT_PROFIT_LOSS: 'report.profit_loss',
+  LOYALTY_ADJUST: 'loyalty.adjust',
+  NUTRITION_MANAGE: 'nutrition.manage',
+  ANNOUNCEMENT_MANAGE: 'announcement.manage',
+  SURVEY_MANAGE: 'survey.manage',
+  CMS_MANAGE: 'cms.manage',
+  IMPORT_LEGACY: 'import.legacy',
+  SETUP_WIZARD: 'setup.wizard',
 } as const;
 
 export type PermCode = (typeof PERM)[keyof typeof PERM];
@@ -177,6 +199,7 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   holiday: 'Lịch nghỉ lễ',
   kpi: 'Chỉ tiêu KPI & Cohort',
   privacy: 'Bảo mật & dữ liệu cá nhân',
+  cms: 'Nội dung Landing & Blog',
 };
 
 /** Tên tiếng Việt của vai trò hệ thống (fallback khi chưa tải danh sách vai trò). */

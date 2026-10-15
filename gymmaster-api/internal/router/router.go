@@ -76,6 +76,10 @@ func Register(s *ghttp.Server, d *module.Deps) {
 		module.RegisterScheduleExt(d, admin, public)
 		module.RegisterKPI(d, admin, member, public)
 		module.RegisterPrivacy(d, admin, member)
+
+		// Giai đoạn 5 (Sprint 29–30 & Mục 15.1–15.2): CMS Landing/Blog, Tin nhắn PT, Lịch .ics, Import dữ liệu cũ & Setup Wizard
+		module.RegisterCMS(d, admin, member, public)
+		module.RegisterSystemExt(d, admin)
 	})
 }
 

@@ -40,6 +40,19 @@ var (
 	InstallmentOverdue  = gcode.New(42003, "INSTALLMENT_OVERDUE", nil)
 	BranchHolidayClosed = gcode.New(42004, "BRANCH_HOLIDAY_CLOSED", nil)
 
+	// 43xxx: Lịch rảnh HLV / ngoài khung giờ nhận PT (Sprint 25)
+	PTOutsideAvailability = gcode.New(43005, "PT_OUTSIDE_AVAILABILITY", nil)
+	TrainerOnLeave        = gcode.New(43006, "TRAINER_ON_LEAVE", nil)
+
+	// 46xxx: Thiết bị ra vào & Tủ đồ (Sprint 18–19)
+	DeviceOfflineError   = gcode.New(46001, "DEVICE_OFFLINE", nil)
+	LockerAlreadyRented  = gcode.New(46002, "LOCKER_ALREADY_RENTED", nil)
+
+	// 47xxx: Lương, chi phí & đối soát ca (Sprint 20–21)
+	PayrollPeriodInvalid = gcode.New(47001, "PAYROLL_PERIOD_INVALID", nil)
+	CashSessionAlreadyOpen = gcode.New(47002, "CASH_SESSION_ALREADY_OPEN", nil)
+	CashSessionClosed    = gcode.New(47003, "CASH_SESSION_CLOSED", nil)
+
 	Internal = gcode.New(50000, "INTERNAL", nil)
 )
 

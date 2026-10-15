@@ -361,6 +361,18 @@ const menu: MenuNode[] = [
         perm: [PERM.PRIVACY_MANAGE, PERM.MEMBER_VIEW_SENSITIVE, PERM.SETTING_MANAGE],
       },
       {
+        key: '/app/cms-marketing',
+        label: 'Nội dung Landing & Tin nhắn PT',
+        icon: <NotificationOutlined />,
+        perm: [PERM.CMS_MANAGE, PERM.PT_VIEW, PERM.LEAD_VIEW],
+      },
+      {
+        key: '/app/system-tools',
+        label: 'Thiết lập & Chuyển đổi dữ liệu',
+        icon: <ToolOutlined />,
+        perm: [PERM.IMPORT_LEGACY, PERM.SETUP_WIZARD, PERM.SETTING_MANAGE, PERM.MEMBER_IMPORT],
+      },
+      {
         key: '/app/audit-logs',
         label: 'Nhật ký thao tác',
         icon: <AuditOutlined />,

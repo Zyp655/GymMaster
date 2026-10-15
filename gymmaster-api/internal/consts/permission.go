@@ -118,10 +118,33 @@ const (
 
 	// Giai đoạn 4 (Sprint 24–27)
 	PermContractManage      = "contract.manage"
+	PermDayPassSell         = "day_pass.sell"
 	PermLeaveManage         = "leave.manage"
+	PermAvailabilityManage  = "availability.manage"
+	PermLeaveRequest        = "leave.request"
+	PermLeaveApprove        = "leave.approve"
 	PermHolidayManage       = "holiday.manage"
 	PermKpiManage           = "kpi.manage"
+	PermReportCohort        = "report.cohort"
 	PermPrivacyManage       = "privacy.manage"
 	PermMemberViewSensitive = "member.view_sensitive"
+	PermDataRequestProcess  = "data_request.process"
+
+	// Bổ sung chi tiết phân quyền theo §16.3 & Sprint 29–30
+	PermEquipmentReport   = "equipment.report"
+	PermLeadConvert       = "lead.convert"
+	PermAttendanceView    = "attendance.view"
+	PermPayrollLock       = "payroll.lock"
+	PermExpenseApprove    = "expense.approve"
+	PermInstallmentManage = "installment.manage"
+	PermReportProfitLoss  = "report.profit_loss"
+	PermLoyaltyAdjust     = "loyalty.adjust"
+	PermNutritionManage   = "nutrition.manage"
+	PermAnnouncementManage = "announcement.manage"
+	PermSurveyManage      = "survey.manage"
+	PermCmsManage         = "cms.manage"
+	PermImportLegacy      = "import.legacy"
+	PermSetupWizard       = "setup.wizard"
 )
+
 

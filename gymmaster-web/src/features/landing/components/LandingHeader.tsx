@@ -7,11 +7,13 @@ import { Button } from '@/components/ui/button';
 export async function LandingHeader({ isAuthenticated }: { isAuthenticated: boolean }) {
   const t = await getTranslations('common.landing.nav');
   const links = [
-    { href: '#bang-gia', label: t('pricing') },
-    { href: '#huan-luyen-ca-nhan', label: t('pt') },
-    { href: '#lich-lop', label: t('schedules') },
-    { href: '#chi-nhanh', label: t('branches') },
-    { href: '#tap-thu', label: t('trial') },
+    { href: '/#bang-gia', label: t('pricing') },
+    { href: '/#huan-luyen-ca-nhan', label: t('pt') },
+    { href: '/#lich-lop', label: t('schedules') },
+    { href: '/trainers', label: 'Đội ngũ HLV' },
+    { href: '/blog', label: 'Blog & Kiến thức' },
+    { href: '/#chi-nhanh', label: t('branches') },
+    { href: '/#tap-thu', label: t('trial') },
   ];
 
   return (

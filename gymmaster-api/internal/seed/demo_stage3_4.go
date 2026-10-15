@@ -371,6 +371,69 @@ func seedDemoStage3And4(tx *gorm.DB, now time.Time, branches map[string]uint, st
 	}
 	_ = tx.Create(&consents).Error
 
+	// 8. Sprint 29–30: Hồ sơ HLV công khai, Cảm nhận hội viên & Bài viết Blog CMS
+	trainerPub := entity.TrainerPublicProfile{
+		UserID:          trainer1,
+		Slug:            "hlv-nguyen-minh-quan",
+		Headline:        "Chuyên gia Hình thể & Phục hồi Chấn thương Thể thao",
+		Bio:             "Hơn 6 năm kinh nghiệm huấn luyện cá nhân 1-1, giúp hơn 200 học viên giảm mỡ bền vững và cải thiện tư thế cột sống.",
+		Specialties:     "Hypertrophy, Giảm mỡ chuyển hóa, Strength & Conditioning, Mobility",
+		Certifications:  "NASM-CPT Quốc tế, Chứng chỉ Dinh dưỡng Thể thao ISSA",
+		ExperienceYears: 6,
+		Featured:        true,
+		IsPublished:     true,
+	}
+	_ = tx.Create(&trainerPub).Error
+
+	testimonials := []entity.Testimonial{
+		{
+			MemberID:        &memberIDs[0],
+			AuthorName:      "Nguyễn Minh Anh",
+			AuthorRole:      "Chuyên viên Tài chính · Hội viên 12 tháng",
+			Rating:          5,
+			Content:         "Sau 4 tháng tập cùng HLV tại GymMaster Cầu Giấy, mình đã giảm 7kg mỡ, hết đau mỏi vai gáy và duy trì thói quen tập đều đặn 4 buổi/tuần!",
+			BeforeAfterNote: "Giảm 7kg mỡ · Tăng 2.5kg cơ xương",
+			Status:          entity.TestimonialApproved,
+			ApprovedBy:      &ownerID,
+			ApprovedAt:      &now,
+		},
+		{
+			AuthorName:      "Trần Quốc Bảo",
+			AuthorRole:      "Kỹ sư Phần mềm · Hội viên VIP",
+			Rating:          5,
+			Content:         "Hệ thống đặt lịch lớp, check-in QR qua Kiosk và theo dõi giáo án/dinh dưỡng ngay trên Web cực kỳ tiện lợi, không phải chờ đợi ở quầy.",
+			BeforeAfterNote: "Hoàn thành Thử thách 12 buổi/tháng",
+			Status:          entity.TestimonialApproved,
+			ApprovedBy:      &ownerID,
+			ApprovedAt:      &now,
+		},
+	}
+	_ = tx.Create(&testimonials).Error
+
+	posts := []entity.Post{
+		{
+			Slug:        "lo-trinh-tang-co-giam-mo-cho-nguoi-moi",
+			Title:       "Lộ trình Tăng cơ Giảm mỡ (Body Recomposition) chuẩn khoa học cho người mới",
+			Excerpt:     "Hướng dẫn kết hợp tập kháng lực Progressive Overload và tính toán TDEE/Macro để vừa giảm mỡ vừa giữ cơ hiệu quả.",
+			Category:    "TAP_LUYEN",
+			Content:     "Body Recomposition là quá trình giảm tỷ lệ mỡ cơ thể đồng thời tăng khối lượng cơ nạc. Để đạt hiệu quả tối ưu, bạn cần duy trì mức thâm hụt calo nhẹ (200–300 kcal/ngày), nạp đủ 1.8–2.2g Protein/kg cân nặng và tập kháng lực 3–4 buổi/tuần với nguyên tắc tăng tiến mức tạ (Progressive Overload).",
+			Status:      entity.PostStatusPublished,
+			AuthorID:    &ownerID,
+			PublishedAt: &now,
+		},
+		{
+			Slug:        "thuc-don-eat-clean-viet-nam-2000-kcal",
+			Title:       "Gợi ý Thực đơn Eat Clean món Việt 2000 kcal giàu Protein dễ chuẩn bị",
+			Excerpt:     "Chẳng cần ức gà luộc nhàm chán — khám phá thực đơn cơm gạo lứt, thịt bò xào, cá hồi và phở bò giàu đạm cho người tập gym.",
+			Category:    "DINH_DUONG",
+			Content:     "Ẩm thực Việt Nam có rất nhiều món ăn giàu đạm và cân bằng dinh dưỡng. Bạn có thể kết hợp phở bò tái nạm cho bữa sáng, cơm gạo lứt cùng ức gà áp chảo hoặc cá hồi cho bữa trưa, và khoai lang nướng kèm salad trứng cho bữa tối.",
+			Status:      entity.PostStatusPublished,
+			AuthorID:    &ownerID,
+			PublishedAt: &now,
+		},
+	}
+	_ = tx.Create(&posts).Error
+
 	return nil
 }
 

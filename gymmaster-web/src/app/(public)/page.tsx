@@ -3,6 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { getCachedSession } from '@/guards/getCachedSession';
 import { landingApi } from '@/features/landing/api';
 import { BranchesSection } from '@/features/landing/components/BranchesSection';
+import { CommunitySection } from '@/features/landing/components/CommunitySection';
 import { Features } from '@/features/landing/components/Features';
 import { Hero } from '@/features/landing/components/Hero';
 import { LandingFooter } from '@/features/landing/components/LandingFooter';
@@ -17,19 +18,25 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: t('metaTitle'), description: t('metaDescription') };
 }
 
-/** Trang công khai: bảng giá, gói PT, lịch lớp, chi nhánh, đăng ký tập thử. Dữ liệu lấy phía server mỗi request (no-store). */
+/** Trang công khai: bảng giá, gói PT, lịch lớp, HLV, cảm nhận, blog, chi nhánh, đăng ký tập thử. */
 export default async function LandingPage() {
-  const [session, plans, branches, schedules] = await Promise.all([
+  const [session, plans, branches, schedules, trainers, testimonials, posts] = await Promise.all([
     getCachedSession(),
     landingApi.plans(),
     landingApi.branches(),
     landingApi.classSchedules(),
+    landingApi.trainers(),
+    landingApi.testimonials(),
+    landingApi.posts(),
   ]);
 
   const planList = plans.ok ? plans.data.membership_plans : [];
   const ptList = plans.ok ? plans.data.pt_packages : [];
   const branchList = branches.ok ? branches.data : [];
   const scheduleList = schedules.ok ? schedules.data : [];
+  const trainerList = trainers.ok ? trainers.data : [];
+  const testimonialList = testimonials.ok ? testimonials.data : [];
+  const postList = posts.ok ? posts.data : [];
   const hours =
     branchList.length > 0
       ? {
@@ -55,6 +62,11 @@ export default async function LandingPage() {
         <PricingSection result={plans.ok ? { ok: true, data: planList } : { ok: false }} />
         <PTSection result={plans.ok ? { ok: true, data: ptList } : { ok: false }} />
         <PublicScheduleSection branches={branchList} initialSchedules={scheduleList} />
+        <CommunitySection
+          trainers={trainerList}
+          testimonials={testimonialList}
+          posts={postList}
+        />
         <BranchesSection result={branches} />
         <TrialLeadSection branches={branchList} plans={planList} />
       </main>

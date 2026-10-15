@@ -9,6 +9,7 @@ import type {
   Booking,
   Branch,
   BranchOccupancy,
+  CalendarTokenRes,
   ChallengeItem,
   CheckinItem,
   CheckoutSubscriptionPayload,
@@ -17,6 +18,7 @@ import type {
   CheckPromotionRes,
   ClassesResponse,
   ConsentItem,
+  ConversationItem,
   CreateDataRequestPayload,
   CreateFoodLogPayload,
   CreateGuestPassPayload,
@@ -43,10 +45,12 @@ import type {
   MemberLoyaltyRes,
   MemberNutritionOverviewRes,
   MemberReview,
+  MessageItem,
   MFAEnablePayload,
   MFAEnableRes,
   MFASetupRes,
   Notification,
+  NotificationPrefItem,
   PaymentURLRes,
   Profile,
   ProfilePayload,
@@ -421,6 +425,41 @@ export const getMemberDataRequests = async (): Promise<DataRequestItem[]> => {
 export const createMemberDataRequest = (payload: CreateDataRequestPayload) =>
   apiClient.post<DataRequestItem>('/member/data-requests', payload);
 
+// ---- Sprint 29: Nhắn tin HLV ↔ Hội viên, Tùy chọn thông báo, Lịch .ics -----------
+
+export const getMemberConversations = async (): Promise<ConversationItem[]> => {
+  const res = await apiClient.get<ConversationItem[] | { items?: ConversationItem[] }>(
+    '/member/conversations',
+  );
+  return unwrapArray(res);
+};
+
+export const getMemberMessages = async (conversationId: number): Promise<MessageItem[]> => {
+  const res = await apiClient.get<MessageItem[] | { items?: MessageItem[] }>(
+    `/member/conversations/${conversationId}/messages`,
+  );
+  return unwrapArray(res);
+};
+
+export const sendMemberMessage = (conversationId: number, content: string) =>
+  apiClient.post<MessageItem>(`/member/conversations/${conversationId}/messages`, { content });
+
+export const getMemberNotificationPreferences = async (): Promise<NotificationPrefItem[]> => {
+  const res = await apiClient.get<NotificationPrefItem[] | { items?: NotificationPrefItem[] }>(
+    '/member/notification-preferences',
+  );
+  return unwrapArray(res);
+};
+
+export const saveMemberNotificationPreferences = (items: NotificationPrefItem[]) =>
+  apiClient.put<NotificationPrefItem[]>('/member/notification-preferences', { items });
+
+export const getMemberCalendarToken = () =>
+  apiClient.get<CalendarTokenRes>('/member/calendar-token');
+
+export const rotateMemberCalendarToken = () =>
+  apiClient.post<CalendarTokenRes>('/member/calendar-token/rotate');
+
 /** API cổng hội viên (/v1/member/*). Hội viên được xác định từ token – không truyền member_id. */
 export const portalApi = {
   profile: () => apiClient.get<Profile>('/member/profile'),
@@ -520,4 +559,11 @@ export const portalApi = {
   updateMemberConsents,
   getMemberDataRequests,
   createMemberDataRequest,
+  getMemberConversations,
+  getMemberMessages,
+  sendMemberMessage,
+  getMemberNotificationPreferences,
+  saveMemberNotificationPreferences,
+  getMemberCalendarToken,
+  rotateMemberCalendarToken,
 };

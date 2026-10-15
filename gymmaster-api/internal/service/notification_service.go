@@ -51,9 +51,25 @@ func (n *notifier) Notify(ctx context.Context, userIDs []uint, typ, title, body,
 	if len(userIDs) == 0 {
 		return nil
 	}
+	disabledUsers := make(map[uint]bool)
+	if typ != NotifyPaymentSuccess && typ != NotifySystem {
+		var disabledIDs []uint
+		_ = postgres.Conn(ctx, n.db).Model(&entity.NotificationPreference{}).
+			Where("user_id IN ? AND type = ? AND channel = 'IN_APP' AND enabled = FALSE", userIDs, typ).
+			Pluck("user_id", &disabledIDs).Error
+		for _, id := range disabledIDs {
+			disabledUsers[id] = true
+		}
+	}
 	rows := make([]entity.Notification, 0, len(userIDs))
 	for _, id := range userIDs {
+		if disabledUsers[id] {
+			continue
+		}
 		rows = append(rows, entity.Notification{UserID: id, Type: typ, Title: title, Body: body, Link: link})
+	}
+	if len(rows) == 0 {
+		return nil
 	}
 	if err := postgres.Conn(ctx, n.db).Create(&rows).Error; err != nil {
 		return err

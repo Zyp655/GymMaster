@@ -989,3 +989,45 @@ export interface CreateDataRequestPayload {
   reason?: string;
 }
 
+// ---- Sprint 29: Nhắn tin HLV ↔ Hội viên, Tùy chọn thông báo, Lịch .ics -----------
+
+export interface ConversationItem {
+  id: number;
+  pt_contract_id: number;
+  member_id: number;
+  member_name: string;
+  member_code: string;
+  trainer_id: number;
+  trainer_name: string;
+  contract_status: string;
+  remaining_sessions: number;
+  last_message_at?: string | null;
+  last_message_preview?: string;
+  unread_count: number;
+}
+
+export interface MessageItem {
+  id: number;
+  conversation_id: number;
+  sender_user_id: number;
+  sender_name: string;
+  sender_role: string;
+  content: string;
+  attachment_url?: string;
+  read_at?: string | null;
+  created_at: string;
+}
+
+export interface NotificationPrefItem {
+  channel: 'IN_APP' | 'EMAIL' | string;
+  type: string;
+  enabled: boolean;
+  mandatory: boolean;
+}
+
+export interface CalendarTokenRes {
+  token: string;
+  ics_url: string;
+}
+
+

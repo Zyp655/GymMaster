@@ -7,6 +7,9 @@ import type {
   PublicClassSchedule,
   PublicClassSchedulesRaw,
   PublicPlansRes,
+  PublicPost,
+  PublicTestimonial,
+  PublicTrainer,
 } from './types';
 
 async function safe<T>(fn: () => Promise<T>): Promise<LoadResult<T>> {
@@ -39,4 +42,14 @@ export const landingApi = {
       });
       return normalizePublicSchedules(raw);
     }),
+  trainers: () => safe(() => serverApi.get<PublicTrainer[]>('/public/trainers', { auth: false })),
+  testimonials: () =>
+    safe(() => serverApi.get<PublicTestimonial[]>('/public/testimonials', { auth: false })),
+  posts: (category?: string) =>
+    safe(() =>
+      serverApi.get<PublicPost[]>('/public/posts', {
+        auth: false,
+        query: category ? { category } : undefined,
+      }),
+    ),
 };

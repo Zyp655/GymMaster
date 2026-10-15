@@ -9,8 +9,9 @@ type User struct {
 	PasswordHash string `gorm:"type:varchar(100);not null"`
 	FullName     string `gorm:"type:varchar(150);not null"`
 	AvatarURL    string `gorm:"column:avatar_url;type:varchar(500);not null;default:''"`
-	Status       string `gorm:"type:varchar(20);not null;default:'ACTIVE'"`
-	LastLoginAt  *time.Time
+	Status        string  `gorm:"type:varchar(20);not null;default:'ACTIVE'"`
+	CalendarToken *string `gorm:"column:calendar_token;type:varchar(80);unique"`
+	LastLoginAt   *time.Time
 
 	UserRoles []UserRole `gorm:"foreignKey:UserID"`
 }
