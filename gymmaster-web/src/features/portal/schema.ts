@@ -70,10 +70,11 @@ export type CancelPTSessionFormValues = z.infer<ReturnType<typeof createCancelPT
 
 export function createWorkoutLogSchema(tv: Translate) {
   return z.object({
+    plan_item_id: z.number().int().positive().nullable().optional(),
     exercise_id: z.number().int().positive(tv('required')),
     sets: z.number().int().min(1, tv('required')).max(50),
     reps: z.number().int().min(1, tv('required')).max(500),
-    weight_kg: z.number().min(0, tv('required')).max(1000),
+    weight: z.number().min(0, tv('required')).max(1000),
     note: z.string().trim().max(255, tv('maxLength', { max: 255 })),
   });
 }
@@ -101,7 +102,10 @@ export type SurveyResponseFormValues = z.infer<ReturnType<typeof createSurveyRes
 export function createFoodLogSchema(tv: Translate) {
   return z.object({
     food_id: z.number().int().positive(tv('required')),
-    qty: z.number().min(0.1, tv('required')).max(5000),
+    // Số nhập theo đơn vị của món (gam hoặc khẩu phần); giới hạn chi tiết theo món kiểm tra ở form.
+    qty: z
+      .number({ invalid_type_error: tv('required') })
+      .refine(v => Number.isFinite(v) && v > 0, tv('positiveNumber')),
     meal_type: z.enum(['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK']),
   });
 }

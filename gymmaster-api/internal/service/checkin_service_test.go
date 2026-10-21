@@ -416,7 +416,7 @@ func TestCheckinPickSubscription_Priority(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := checkinPickSubscription(tc.subs, 1, today)
+			p := checkinPickSubscription(tc.subs, 1, today, time.Time{})
 			if p.chosen == nil || p.chosen.ID != tc.want {
 				t.Fatalf("chọn %+v, muốn gói %d", p.chosen, tc.want)
 			}
@@ -661,14 +661,17 @@ func (f *checkinFakeTrialRepo) FindTrialPassByToken(_ context.Context, token str
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (f *checkinFakeTrialRepo) MarkTrialPassUsed(_ context.Context, id uint, usedAt time.Time) error {
+func (f *checkinFakeTrialRepo) MarkTrialPassUsed(_ context.Context, id uint, usedAt time.Time) (bool, error) {
 	for _, tp := range f.passes {
 		if tp.ID == id {
+			if tp.UsedAt != nil {
+				return false, nil
+			}
 			tp.UsedAt = &usedAt
-			return nil
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func TestCheckinScanTrialPass(t *testing.T) {
@@ -727,4 +730,3 @@ func TestCheckinScanTrialPass(t *testing.T) {
 		t.Fatalf("muốn DENIED TRIAL_PASS_EXPIRED, nhận %+v", res3)
 	}
 }
-

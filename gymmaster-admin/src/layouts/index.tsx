@@ -44,7 +44,7 @@ export function AppLayout() {
         <Layout.Sider
           className="app-sider"
           theme="light"
-          width={240}
+          width={256}
           collapsedWidth={72}
           collapsed={collapsed}
           trigger={null}
@@ -54,7 +54,20 @@ export function AppLayout() {
             {collapsed ? (
               <img src="/logo-icon.svg" alt="GymMaster" style={{ height: 34 }} />
             ) : (
-              <img src="/logo.svg" alt="GymMaster" style={{ height: 36 }} />
+              <>
+                <img
+                  className="app-logo__img--light"
+                  src="/logo.svg"
+                  alt="GymMaster"
+                  style={{ height: 36 }}
+                />
+                <img
+                  className="app-logo__img--dark"
+                  src="/logo-dark.svg"
+                  alt="GymMaster"
+                  style={{ height: 36 }}
+                />
+              </>
             )}
           </Link>
           <AppSidebar collapsed={collapsed} />

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -88,6 +89,9 @@ func (s *roomService) Update(ctx context.Context, id uint, in v1.RoomInput) (*v1
 	if err := s.validate(ctx, in, id); err != nil {
 		return nil, err
 	}
+	if err := s.checkUpcomingSchedules(ctx, r, in); err != nil {
+		return nil, err
+	}
 	applyRoomInput(r, in)
 	r.UpdatedBy = reqctx.UserID(ctx)
 	if err := s.roomRepo.Update(ctx, r); err != nil {
@@ -124,6 +128,37 @@ func (s *roomService) Options(ctx context.Context, branchID uint) ([]*v1.RoomOpt
 		out = append(out, &v1.RoomOption{ID: r.ID, BranchID: r.BranchID, Name: r.Name, Capacity: r.Capacity})
 	}
 	return out, nil
+}
+
+// checkUpcomingSchedules: phòng còn lịch lớp sắp diễn ra (SCHEDULED) thì không được chuyển chi nhánh / ngừng hoạt động,
+// và không được giảm sức chứa xuống dưới sức chứa của các buổi lớp đã xếp (409).
+func (s *roomService) checkUpcomingSchedules(ctx context.Context, r *entity.Room, in v1.RoomInput) error {
+	now := s.now()
+	branchChanged := in.BranchID != r.BranchID
+	deactivated := in.Status != "" && in.Status != "ACTIVE" && r.Status == "ACTIVE"
+	if branchChanged || deactivated {
+		n, err := s.roomRepo.CountFutureSchedules(ctx, r.ID, now)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			if branchChanged {
+				return rescode.New(rescode.Conflict, fmt.Sprintf("Không thể chuyển chi nhánh: phòng còn %d buổi lớp sắp diễn ra", n))
+			}
+			return rescode.New(rescode.Conflict, fmt.Sprintf("Không thể ngừng hoạt động: phòng còn %d buổi lớp sắp diễn ra", n))
+		}
+	}
+	if in.Capacity < r.Capacity {
+		maxCap, err := s.roomRepo.MaxFutureScheduleCapacity(ctx, r.ID, now)
+		if err != nil {
+			return err
+		}
+		if in.Capacity < maxCap {
+			return rescode.New(rescode.Conflict, fmt.Sprintf(
+				"Không thể giảm sức chứa xuống %d: phòng có buổi lớp sắp diễn ra với sức chứa %d, hãy giảm sức chứa các buổi lớp trước", in.Capacity, maxCap))
+		}
+	}
+	return nil
 }
 
 // find trả phòng nếu người dùng được thao tác trên chi nhánh của phòng (ngoài phạm vi → 404).

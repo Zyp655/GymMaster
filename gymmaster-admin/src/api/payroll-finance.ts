@@ -239,7 +239,8 @@ export const payrollApi = new PayrollApi();
 export type ExpenseCategoryType = 'FIXED' | 'VARIABLE';
 export type ExpenseStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type CashSessionStatus = 'OPEN' | 'CLOSED';
-export type InstallmentStatus = 'PENDING' | 'PAID' | 'OVERDUE';
+/** SETTLED: hóa đơn đã thu đủ trực tiếp; CANCELLED: hóa đơn hủy/hoàn/xóa nợ. */
+export type InstallmentStatus = 'PENDING' | 'PAID' | 'OVERDUE' | 'SETTLED' | 'CANCELLED';
 
 export const EXPENSE_CATEGORY_TYPE_LABELS: Record<ExpenseCategoryType, string> = {
   FIXED: 'Chi phí cố định (Fixed)',
@@ -270,9 +271,9 @@ export interface Expense {
   attachment_url?: string;
   maintenance_log_id?: number | null;
   created_by?: number | null;
-  created_by_name?: string;
+  creator_name?: string;
   approved_by?: number | null;
-  approved_by_name?: string;
+  approver_name?: string;
   status: ExpenseStatus;
   created_at: string;
 }
@@ -307,13 +308,11 @@ export interface InstallmentSchedule {
   id: number;
   plan_id: number;
   invoice_id?: number;
-  invoice_code?: string;
+  invoice_no?: string;
   member_id?: number;
   member_name?: string;
   member_code?: string;
-  member_phone?: string;
   seq: number;
-  total_installments?: number;
   due_date: string;
   amount: number;
   paid_amount: number;
@@ -325,7 +324,7 @@ export interface InstallmentSchedule {
 export interface InstallmentPlan {
   id: number;
   invoice_id: number;
-  invoice_code?: string;
+  invoice_no?: string;
   member_id: number;
   member_name?: string;
   total: number;
@@ -334,43 +333,38 @@ export interface InstallmentPlan {
   created_at?: string;
 }
 
+export interface ExpenseByCategory {
+  category_id: number;
+  category_name: string;
+  category_type?: ExpenseCategoryType;
+  amount: number;
+}
+
+/** GET /admin/reports/profit-loss (khớp ProfitLossReportRes của API) + 2 trường suy ra ở client. */
 export interface ProfitLossReport {
-  from?: string;
-  to?: string;
-  branch_id?: number | null;
-  revenue: {
-    total: number;
-    membership?: number;
-    pt?: number;
-    pos?: number;
-    locker?: number;
-    day_pass?: number;
-    other?: number;
-  };
-  total_revenue?: number;
-  pos_cogs: number;
-  cogs?: number;
-  gross_profit?: number;
+  from: string;
+  to: string;
+  membership_revenue: number;
+  pt_revenue: number;
+  pos_revenue: number;
+  locker_revenue: number;
+  /** Phí chuyển nhượng, vé ngày, dịch vụ khác (FEE/OTHER) */
+  other_revenue: number;
+  gross_revenue: number;
+  refunds: number;
+  /** Doanh thu thuần = gross_revenue − refunds */
+  net_revenue: number;
+  /** Giá vốn POS (đã trừ hàng trả lại) */
+  pos_cost: number;
   operating_expenses: number;
-  expenses_total?: number;
-  payroll_cost: number;
-  payroll_total?: number;
+  payroll_expenses: number;
+  total_expenses: number;
   net_profit: number;
-  margin_pct?: number;
-  expenses_by_category?: {
-    category_id?: number;
-    category_name: string;
-    type?: ExpenseCategoryType;
-    amount: number;
-  }[];
-  monthly?: {
-    period: string;
-    revenue: number;
-    cogs: number;
-    expenses: number;
-    payroll: number;
-    net_profit: number;
-  }[];
+  expenses_by_category: ExpenseByCategory[];
+  /** Suy ra: lợi nhuận gộp = net_revenue − pos_cost */
+  gross_profit: number;
+  /** Suy ra: biên lợi nhuận ròng (%) trên doanh thu thuần */
+  margin_pct: number;
 }
 
 export interface EInvoiceResult {
@@ -394,42 +388,33 @@ class FinanceExtApi {
   async profitLoss(
     params: { branch_id?: number; from?: string; to?: string; period?: string } = {},
   ): Promise<ProfitLossReport> {
-    const raw = await http.get<Record<string, unknown>>('/admin/reports/profit-loss', { params });
-    const revObj = (raw?.revenue && typeof raw.revenue === 'object' ? raw.revenue : {}) as Record<
-      string,
-      number
-    >;
-    const totalRevenue = Number(
-      revObj.total ?? raw?.total_revenue ?? raw?.revenue ?? 0,
-    );
-    const posCogs = Number(raw?.pos_cogs ?? raw?.cogs ?? 0);
-    const operatingExpenses = Number(
-      raw?.operating_expenses ?? raw?.expenses_total ?? raw?.expenses ?? 0,
-    );
-    const payrollCost = Number(raw?.payroll_cost ?? raw?.payroll_total ?? raw?.payroll ?? 0);
-    const netProfit = Number(
-      raw?.net_profit ?? totalRevenue - posCogs - operatingExpenses - payrollCost,
-    );
-
+    const raw = await http.get<Partial<ProfitLossReport>>('/admin/reports/profit-loss', { params });
+    const num = (v: unknown) => Number(v ?? 0) || 0;
+    const netRevenue = num(raw?.net_revenue);
+    const posCost = num(raw?.pos_cost);
+    const netProfit = num(raw?.net_profit);
     return {
-      ...(raw as unknown as ProfitLossReport),
-      revenue: {
-        total: totalRevenue,
-        membership: Number(revObj.membership ?? raw?.membership_revenue ?? 0),
-        pt: Number(revObj.pt ?? raw?.pt_revenue ?? 0),
-        pos: Number(revObj.pos ?? raw?.pos_revenue ?? 0),
-        locker: Number(revObj.locker ?? raw?.locker_revenue ?? 0),
-        day_pass: Number(revObj.day_pass ?? 0),
-        other: Number(revObj.other ?? 0),
-      },
-      total_revenue: totalRevenue,
-      pos_cogs: posCogs,
-      gross_profit: Number(raw?.gross_profit ?? totalRevenue - posCogs),
-      operating_expenses: operatingExpenses,
-      payroll_cost: payrollCost,
+      from: raw?.from ?? params.from ?? '',
+      to: raw?.to ?? params.to ?? '',
+      membership_revenue: num(raw?.membership_revenue),
+      pt_revenue: num(raw?.pt_revenue),
+      pos_revenue: num(raw?.pos_revenue),
+      locker_revenue: num(raw?.locker_revenue),
+      other_revenue: num(raw?.other_revenue),
+      gross_revenue: num(raw?.gross_revenue),
+      refunds: num(raw?.refunds),
+      net_revenue: netRevenue,
+      pos_cost: posCost,
+      operating_expenses: num(raw?.operating_expenses),
+      payroll_expenses: num(raw?.payroll_expenses),
+      total_expenses: num(raw?.total_expenses),
       net_profit: netProfit,
-      margin_pct:
-        totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 1000) / 10 : 0,
+      expenses_by_category: (raw?.expenses_by_category ?? []).map((c) => ({
+        ...c,
+        amount: num(c.amount),
+      })),
+      gross_profit: netRevenue - posCost,
+      margin_pct: netRevenue > 0 ? Math.round((netProfit / netRevenue) * 1000) / 10 : 0,
     };
   }
 
@@ -469,12 +454,13 @@ class FinanceExtApi {
     return http.delete(`/admin/expenses/${id}`);
   }
 
+  /** Duyệt / từ chối dùng chung POST /admin/expenses/{id}/approve (API ghi nhận người duyệt). */
   approveExpense(id: number) {
-    return http.post<Expense>(`/admin/expenses/${id}/approve`);
+    return http.post<Expense>(`/admin/expenses/${id}/approve`, { status: 'APPROVED' });
   }
 
   rejectExpense(id: number) {
-    return http.post<Expense>(`/admin/expenses/${id}/reject`);
+    return http.post<Expense>(`/admin/expenses/${id}/approve`, { status: 'REJECTED' });
   }
 
   async listCashSessions(
@@ -511,10 +497,10 @@ class FinanceExtApi {
     return http.post<InstallmentPlan>(`/admin/invoices/${invoiceId}/installments`, data);
   }
 
-  payInstallment(scheduleId: number, data: { amount?: number; payment_method?: string; note?: string } = {}) {
+  /** Thu đủ số tiền còn lại của kỳ; method ∈ CASH | TRANSFER | CARD. */
+  payInstallment(scheduleId: number, data: { method?: string; note?: string } = {}) {
     return http.post<InstallmentSchedule>(`/admin/installments/${scheduleId}/pay`, {
-      payment_method: data.payment_method ?? 'CASH',
-      amount: data.amount,
+      method: data.method ?? 'CASH',
       note: data.note ?? '',
     });
   }

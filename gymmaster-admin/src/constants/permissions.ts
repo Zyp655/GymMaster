@@ -84,6 +84,7 @@ export const PERM = {
   AUDIT_VIEW: 'audit.view',
 
   JOB_VIEW: 'job.view',
+  JOB_MANAGE: 'job.manage',
 
   WORKOUT_VIEW: 'workout.view',
   WORKOUT_MANAGE: 'workout.manage',

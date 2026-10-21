@@ -1,0 +1,56 @@
+{
+  "nav": {
+    "trainers": "Đội ngũ HLV",
+    "blog": "Blog & Kiến thức",
+    "openMenu": "Mở menu điều hướng",
+    "closeMenu": "Đóng menu",
+    "menuTitle": "Menu"
+  },
+  "community": {
+    "trainersEyebrow": "Đội ngũ chuyên gia",
+    "trainersTitle": "Huấn luyện viên cá nhân đạt chuẩn quốc tế",
+    "trainersSubtitle": "Đồng hành 1-1 xây dựng giáo án tập luyện và thực đơn dinh dưỡng cá nhân hóa.",
+    "allTrainers": "Xem tất cả HLV",
+    "trainersEmpty": "Danh sách huấn luyện viên đang được cập nhật.",
+    "noRating": "Chưa có đánh giá",
+    "specialties": "Chuyên môn: {value}",
+    "experience": "Kinh nghiệm: {years} năm",
+    "testimonialsEyebrow": "Câu chuyện thành công",
+    "testimonialsTitle": "Cảm nhận từ Hội viên GymMaster",
+    "postsEyebrow": "Kiến thức & Tin tức",
+    "postsTitle": "Cẩm nang Tập luyện & Dinh dưỡng",
+    "morePosts": "Đọc thêm bài viết",
+    "postsEmpty": "Chưa có bài viết công khai nào.",
+    "readMore": "Xem chi tiết"
+  },
+  "trainers": {
+    "metaTitle": "Đội ngũ Huấn luyện viên cá nhân (PT)",
+    "metaDescription": "Khám phá đội ngũ Huấn luyện viên cá nhân giàu kinh nghiệm, chứng chỉ quốc tế tại hệ thống phòng tập GymMaster.",
+    "eyebrow": "Huấn luyện viên cá nhân",
+    "title": "Đội ngũ HLV Chuyên nghiệp",
+    "subtitle": "Mỗi huấn luyện viên tại GymMaster đều được tuyển chọn khắt khe về chuyên môn, chứng chỉ quốc tế và tận tâm đồng hành cùng mục tiêu hình thể của bạn.",
+    "trialCta": "Đăng ký tập thử cùng PT",
+    "empty": "Danh sách hồ sơ huấn luyện viên đang được cập nhật.",
+    "loadError": "Không tải được danh sách huấn luyện viên. Vui lòng thử lại sau.",
+    "specialtiesLabel": "Chuyên môn:",
+    "certificationsLabel": "Chứng chỉ:",
+    "experienceLabel": "Kinh nghiệm:",
+    "experienceValue": "{years} năm huấn luyện",
+    "notUpdated": "Đang cập nhật"
+  },
+  "blog": {
+    "metaTitle": "Blog Kiến thức Tập luyện & Dinh dưỡng",
+    "metaDescription": "Cẩm nang tập luyện khoa học, thực đơn dinh dưỡng chuẩn BMR/TDEE và tin tức sự kiện từ hệ thống GymMaster.",
+    "eyebrow": "Blog & Kiến thức",
+    "title": "Cẩm nang Tập luyện, Dinh dưỡng & Sự kiện",
+    "subtitle": "Tổng hợp kiến thức thể hình, thực đơn lành mạnh và kinh nghiệm tập luyện từ đội ngũ chuyên gia của GymMaster.",
+    "backHome": "Về trang chủ",
+    "backToBlog": "Tất cả bài viết",
+    "empty": "Chưa có bài viết nào được xuất bản.",
+    "loadError": "Không tải được danh sách bài viết. Vui lòng thử lại sau.",
+    "readMore": "Đọc bài viết",
+    "publishedAt": "Đăng ngày {date}",
+    "relatedCta": "Đăng ký tập thử miễn phí",
+    "relatedCtaDesc": "Áp dụng kiến thức cùng huấn luyện viên GymMaster – buổi tập thử đầu tiên miễn phí."
+  }
+}

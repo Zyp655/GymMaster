@@ -23,14 +23,15 @@ type (
 		entity.Product
 		CategoryName string
 		TotalStock   int
-		Stock        int // tồn tại ProductFilter.BranchID (0 nếu không lọc)
+		Stock        int  // tồn tại ProductFilter.BranchID (0 nếu không lọc)
+		LowStock     bool // tồn thấp tại ProductFilter.BranchID theo LowStockCond (false nếu không lọc)
 	}
 
 	ProductFilter struct {
 		CategoryID uint
 		Status     string
 		BranchID   uint // > 0 → tính Stock tại chi nhánh
-		LowStock   bool // cần BranchID: stock < min_stock
+		LowStock   bool // cần BranchID: tồn thấp theo LowStockCond
 		InStock    bool // cần BranchID: stock > 0
 	}
 
@@ -39,6 +40,7 @@ type (
 		BranchName string
 		Quantity   int
 		MinStock   int
+		LowStock   bool // theo LowStockCond
 	}
 
 	ProductRepository interface {
@@ -185,10 +187,11 @@ func (r *productRepository) productQuery(ctx context.Context, branchID uint) (*g
 	sel := `p.*, COALESCE(c.name, '') AS category_name,
 		COALESCE((SELECT SUM(sl.quantity) FROM stock_levels sl WHERE sl.product_id = p.id), 0) AS total_stock`
 	if branchID > 0 {
-		tx = tx.Joins("LEFT JOIN stock_levels st ON st.product_id = p.id AND st.branch_id = ?", branchID)
-		sel += ", COALESCE(st.quantity, 0) AS stock"
+		tx = tx.Joins("LEFT JOIN stock_levels st ON st.product_id = p.id AND st.branch_id = ?", branchID).
+			Joins("LEFT JOIN branches sb ON sb.id = ?", branchID)
+		sel += ", COALESCE(st.quantity, 0) AS stock, COALESCE(" + LowStockCond("p", "st", "sb") + ", false) AS low_stock"
 	} else {
-		sel += ", 0 AS stock"
+		sel += ", 0 AS stock, false AS low_stock"
 	}
 	return tx, sel
 }
@@ -202,7 +205,7 @@ func (r *productRepository) ListProducts(ctx context.Context, q dto.Query, f Pro
 		tx = tx.Where("p.status = ?", f.Status)
 	}
 	if f.BranchID > 0 && f.LowStock {
-		tx = tx.Where("p.min_stock > 0 AND COALESCE(st.quantity, 0) < p.min_stock")
+		tx = tx.Where(LowStockCond("p", "st", "sb"))
 	}
 	if f.BranchID > 0 && f.InStock {
 		tx = tx.Where("COALESCE(st.quantity, 0) > 0")
@@ -276,7 +279,8 @@ func (r *productRepository) CreateProduct(ctx context.Context, p *entity.Product
 
 func (r *productRepository) UpdateProduct(ctx context.Context, p *entity.Product) error {
 	return postgres.Conn(ctx, r.db).Model(p).
-		Select("sku", "barcode", "name", "category_id", "unit", "cost_price", "sell_price", "member_price",
+		// cost_price cố ý không có: giá vốn bình quân chỉ đổi qua UpdateProductCost (phiếu nhập kho).
+		Select("sku", "barcode", "name", "category_id", "unit", "sell_price", "member_price",
 			"image_url", "min_stock", "status", "updated_by").
 		Updates(p).Error
 }
@@ -291,7 +295,7 @@ func (r *productRepository) DeleteProduct(ctx context.Context, id uint, deletedB
 
 func (r *productRepository) ProductStocks(ctx context.Context, productID uint, branchIDs []uint) ([]ProductStockRow, error) {
 	tx := postgres.Conn(ctx, r.db).Table("stock_levels sl").
-		Select("sl.branch_id, b.name AS branch_name, sl.quantity, p.min_stock").
+		Select("sl.branch_id, b.name AS branch_name, sl.quantity, p.min_stock, "+lowStockSQL+" AS low_stock").
 		Joins("JOIN branches b ON b.id = sl.branch_id").
 		Joins("JOIN products p ON p.id = sl.product_id").
 		Where("sl.product_id = ?", productID)

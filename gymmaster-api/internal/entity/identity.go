@@ -4,11 +4,11 @@ import "time"
 
 type User struct {
 	BaseEntity
-	Email        string `gorm:"type:varchar(150);not null"`
-	Phone        string `gorm:"type:varchar(20);not null;default:''"`
-	PasswordHash string `gorm:"type:varchar(100);not null"`
-	FullName     string `gorm:"type:varchar(150);not null"`
-	AvatarURL    string `gorm:"column:avatar_url;type:varchar(500);not null;default:''"`
+	Email         string  `gorm:"type:varchar(150);not null"`
+	Phone         string  `gorm:"type:varchar(20);not null;default:''"`
+	PasswordHash  string  `gorm:"type:varchar(100);not null"`
+	FullName      string  `gorm:"type:varchar(150);not null"`
+	AvatarURL     string  `gorm:"column:avatar_url;type:varchar(500);not null;default:''"`
 	Status        string  `gorm:"type:varchar(20);not null;default:'ACTIVE'"`
 	CalendarToken *string `gorm:"column:calendar_token;type:varchar(80);unique"`
 	LastLoginAt   *time.Time
@@ -97,10 +97,10 @@ type MemberRegisterOTP struct {
 	Email        string    `gorm:"type:varchar(150);not null"`
 	PasswordHash string    `gorm:"type:varchar(100);not null"`
 	OTPHash      string    `gorm:"column:otp_hash;type:char(64);not null"`
+	Attempts     int       `gorm:"not null;default:0"` // số lần nhập sai; đủ ngưỡng thì OTP bị vô hiệu
 	ExpiresAt    time.Time `gorm:"not null"`
 	UsedAt       *time.Time
 	CreatedAt    time.Time
 }
 
 func (MemberRegisterOTP) TableName() string { return "member_register_otps" }
-

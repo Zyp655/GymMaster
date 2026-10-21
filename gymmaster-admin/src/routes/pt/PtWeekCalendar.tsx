@@ -224,7 +224,7 @@ export default function PtWeekCalendar<T extends CalendarEvent>({
                   borderLeftColor: e.color,
                   cursor: clickable ? 'pointer' : 'default',
                   ...(e.readOnly
-                    ? { background: withAlpha(e.color, 0.15), color: '#1f2937' }
+                    ? { background: withAlpha(e.color, 0.15), color: 'var(--gm-ink)' }
                     : { background: withAlpha(e.color, 0.9), color: readableTextColor(e.color) }),
                 };
                 const lines = e.lines ?? [];

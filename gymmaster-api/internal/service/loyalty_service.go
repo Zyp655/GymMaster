@@ -68,6 +68,7 @@ type (
 		DeleteChallenge(ctx context.Context, id uint) error
 
 		AdjustMemberPoints(ctx context.Context, req *v1.AdjustMemberPointsReq) (*v1.AdjustMemberPointsRes, error)
+		ListLedgers(ctx context.Context, req *v1.ListLoyaltyLedgersReq) (*v1.ListLoyaltyLedgersRes, error)
 
 		MemberLoyalty(ctx context.Context) (*v1.MemberLoyaltyRes, error)
 		RedeemReward(ctx context.Context, req *v1.RedeemRewardReq) (*v1.RedeemRewardRes, error)
@@ -396,6 +397,11 @@ func (s *loyaltyService) DeleteChallenge(ctx context.Context, id uint) error {
 	return nil
 }
 
+// challengeEnded: ngày kết thúc (theo ngày lịch) đã qua so với hôm nay – thử thách hết hạn từ 00:00 ngày kế tiếp.
+func challengeEnded(endDate, now time.Time) bool {
+	return endDate.Format(consts.DateLayout) < now.Format(consts.DateLayout)
+}
+
 func (s *loyaltyService) parseChallengeInput(in v1.ChallengeInput) (*entity.Challenge, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -426,6 +432,9 @@ func (s *loyaltyService) parseChallengeInput(in v1.ChallengeInput) (*entity.Chal
 	if status == "" {
 		status = consts.StatusActive
 	}
+	if status == consts.StatusActive && challengeEnded(endDate, s.now()) {
+		return nil, rescode.New(rescode.BadRequest, "Không thể mở thử thách có ngày kết thúc trong quá khứ – hãy chọn ngày kết thúc từ hôm nay trở đi hoặc chuyển trạng thái sang Đã kết thúc")
+	}
 	rewardPts := in.RewardPoints
 	if rewardPts < 0 {
 		rewardPts = 0
@@ -455,6 +464,9 @@ func (s *loyaltyService) AdjustMemberPoints(ctx context.Context, req *v1.AdjustM
 			return nil, rescode.New(rescode.NotFound, "Không tìm thấy hội viên")
 		}
 		return nil, err
+	}
+	if !reqctx.CanAccessBranch(ctx, m.HomeBranchID) {
+		return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền điều chỉnh điểm của hội viên chi nhánh khác")
 	}
 	if m.LoyaltyPoints+req.Points < 0 {
 		return nil, rescode.New(rescode.InsufficientPoints, "Số điểm thưởng của hội viên không đủ để trừ")
@@ -495,6 +507,32 @@ func (s *loyaltyService) AdjustMemberPoints(ctx context.Context, req *v1.AdjustM
 		Points:   newPoints,
 		Ledger:   toLoyaltyLedgerItem(*ledger),
 	}, nil
+}
+
+var ledgerOrderable = []string{"id", "created_at", "points"}
+
+// ListLedgers: lịch sử biến động điểm cho admin, giới hạn trong chi nhánh được phân quyền.
+func (s *loyaltyService) ListLedgers(ctx context.Context, req *v1.ListLoyaltyLedgersReq) (*v1.ListLoyaltyLedgersRes, error) {
+	branchIDs, ok := reqctx.ResolveBranchFilter(ctx, req.BranchID)
+	if !ok {
+		return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền xem dữ liệu của chi nhánh này")
+	}
+	q := req.PageReq.ToQuery(ledgerOrderable, "id")
+	q.OrderBy = "l." + q.OrderBy
+	rows, total, err := s.repo.ListLedgers(ctx, q, branchIDs, req.MemberID, strings.ToUpper(strings.TrimSpace(req.Reason)))
+	if err != nil {
+		return nil, err
+	}
+	return dto.NewPageRes(dto.Map(rows, func(r repository.LoyaltyLedgerRow) *v1.AdminLoyaltyLedgerItem {
+		return &v1.AdminLoyaltyLedgerItem{
+			LoyaltyLedgerItem: *toLoyaltyLedgerItem(r.LoyaltyLedger),
+			MemberCode:        r.MemberCode,
+			MemberName:        r.MemberName,
+			BranchID:          r.BranchID,
+			BranchName:        r.BranchName,
+			CreatedByName:     r.CreatedByName,
+		}
+	}), total, q), nil
 }
 
 // ---- Member Endpoints -----------------------------------------------------------
@@ -730,8 +768,14 @@ func (s *loyaltyService) JoinChallenge(ctx context.Context, req *v1.JoinChalleng
 	if chRow.Status != consts.StatusActive {
 		return nil, rescode.New(rescode.BadRequest, "Thử thách này không còn mở đăng ký")
 	}
-
 	now := s.now()
+	if challengeEnded(chRow.EndDate, now) {
+		return nil, rescode.New(rescode.BadRequest, "Thử thách đã kết thúc, không thể tham gia")
+	}
+	if chRow.BranchID != nil && *chRow.BranchID != m.HomeBranchID {
+		return nil, rescode.New(rescode.PermissionDenied, "Thử thách này chỉ dành cho hội viên của chi nhánh khác")
+	}
+
 	var cp *entity.ChallengeParticipant
 	err = s.runTx(ctx, func(txCtx context.Context) error {
 		existing, err := s.repo.FindChallengeParticipant(txCtx, chRow.ID, m.ID)

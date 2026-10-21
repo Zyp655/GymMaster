@@ -18,7 +18,6 @@ import (
 	"gymmaster-api/internal/pkg/hash"
 	"gymmaster-api/internal/pkg/reqctx"
 	"gymmaster-api/internal/pkg/rescode"
-	"gymmaster-api/internal/pkg/token"
 	"gymmaster-api/internal/repository"
 	"gymmaster-api/internal/storage/postgres"
 )
@@ -292,23 +291,11 @@ func (s *deviceService) DeviceCheckin(ctx context.Context, req *v1.DeviceCheckin
 		return nil, rescode.New(rescode.Internal, "Chưa cấu hình dịch vụ check-in")
 	}
 
-	authCtx := reqctx.WithAuth(ctx, &token.Payload{
-		UserID:    0,
-		Roles:     []string{consts.RoleOwner},
-		BranchIDs: []uint{dev.BranchID},
-	})
-	// Nếu chạy trên Postgres thực (reqctx.UserID=0 gây lỗi FK checkins.staff_id), dùng context không gắn UserID=0
-	// nhưng vẫn được phép truy cập mọi chi nhánh (AllowedBranches(nil) == nil).
-	scanRes, err := s.checkinSvc.Scan(authCtx, req.QRToken, dev.BranchID)
-	if err != nil && strings.Contains(err.Error(), "checkins_staff_id_fkey") {
-		scanRes, err = s.checkinSvc.Scan(reqctx.WithAuth(ctx, nil), req.QRToken, dev.BranchID)
-	}
+	// Thiết bị đã xác thực bằng device key: lượt check-in được ghi trực tiếp với method DEVICE + device_id
+	// ngay trong transaction quyết định (không cập nhật lại bản ghi sau khi quét, tránh ghi đè nhầm lượt khác).
+	scanRes, err := s.checkinSvc.ScanDevice(ctx, req.QRToken, dev.BranchID, dev.ID)
 	if err != nil {
 		return nil, err
-	}
-
-	if scanRes.Checkin != nil && scanRes.Checkin.ID > 0 {
-		_ = s.repo.AttachDeviceToCheckin(ctx, scanRes.Checkin.ID, dev.ID)
 	}
 
 	allow := scanRes.Result == entity.CheckinAllowed

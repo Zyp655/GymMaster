@@ -115,3 +115,38 @@ func TestCheckinRules_AllScenarios(t *testing.T) {
 		assert.Equal(t, entity.CheckinDenyDuplicate, v.DenyReason)
 	})
 }
+
+func TestOffPeakHoursRule_AccessHoursJSON(t *testing.T) {
+	ctx := context.Background()
+	vn := time.FixedZone("ICT", 7*3600)
+	weekdayMorning := time.Date(2026, 10, 21, 10, 0, 0, 0, vn) // Thứ 4
+	weekdayEvening := time.Date(2026, 10, 21, 19, 0, 0, 0, vn)
+	sunday := time.Date(2026, 10, 25, 10, 0, 0, 0, vn)
+	slots := `[{"dow":[1,2,3,4,5],"from":"09:00","to":"16:00"}]`
+
+	cases := []struct {
+		name string
+		now  time.Time
+		raw  string
+		deny bool
+	}{
+		{"không cấu hình", weekdayEvening, `[]`, false},
+		{"trong khung ngày thường", weekdayMorning, slots, false},
+		{"ngoài giờ ngày thường", weekdayEvening, slots, true},
+		{"chủ nhật không thuộc dow", sunday, slots, true},
+		{"dạng chuỗi HH:MM-HH:MM", weekdayEvening, `["09:00-16:00"]`, true},
+		{"dạng chuỗi trong khung", weekdayMorning, `["09:00-16:00"]`, false},
+		{"JSON lỗi → không chặn", weekdayEvening, `{bad`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			v := EvaluateCheckinRules(ctx, &CheckinRuleInput{Now: c.now, AccessHoursJSON: c.raw}, OffPeakHoursRule{})
+			if c.deny {
+				require.NotNil(t, v)
+				assert.Equal(t, entity.CheckinDenyOutsideAccessHours, v.DenyReason)
+			} else {
+				assert.Nil(t, v)
+			}
+		})
+	}
+}

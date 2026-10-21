@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/form';
 import { useToastApiError } from '@/hooks/use-api-error';
 import { looseT } from '@/lib/utils';
-import { ApiCode } from '@/types/api';
+import { ApiCode, isApiError } from '@/types/api';
 import { useChangePassword } from '../queries';
 import { createChangePasswordSchema, type ChangePasswordFormValues } from '../schema';
 import { PasswordInput } from './PasswordInput';
@@ -70,6 +70,15 @@ function ChangePasswordContent({ onDone }: { onDone: () => void }) {
       // Backend đã thu hồi mọi refresh token → đăng nhập lại bằng mật khẩu mới.
       await signOut({ callbackUrl: '/login' });
     } catch (error) {
+      // Backend dùng 40000 cho cả "mật khẩu hiện tại không đúng" lẫn chính sách mật khẩu mới.
+      if (
+        isApiError(error) &&
+        error.code === ApiCode.BAD_REQUEST &&
+        error.message === ta('passwordPolicy')
+      ) {
+        form.setError('new_password', { message: error.message });
+        return;
+      }
       if (
         error &&
         typeof error === 'object' &&

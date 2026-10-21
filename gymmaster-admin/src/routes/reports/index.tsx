@@ -1,12 +1,12 @@
-import { Button, Card, Col, DatePicker, Row, Segmented, Space, Tabs } from 'antd';
+import { Button, Card, Col, DatePicker, Row, Segmented, Select, Space, Tabs } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import reportApi from '@/api/report';
 import type { ReportExportType, ReportGroupBy } from '@/api/report';
-import BranchSelect from '@/components/BranchSelect';
 import PageTitle from '@/components/PageTitle';
+import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
 import { API_DATE_FORMAT, DATE_FORMAT, formatDate } from '@/utils/format';
@@ -73,6 +73,7 @@ export default function ReportsPage() {
   const qc = useQueryClient();
   const fetching = useIsFetching({ queryKey: [reportApi.key] });
   const { branchId: workingBranch } = useWorkingBranch();
+  const { branches, isGlobal } = useBranchOptions();
 
   const tab = (TABS.find((t) => t.key === url.get('tab'))?.key ?? 'revenue') as TabKey;
   const from = url.get('from') || today().startOf('month').format(API_DATE_FORMAT);
@@ -116,11 +117,18 @@ export default function ReportsPage() {
       <div className="rp-filter">
         <Row gutter={[12, 12]} align="middle">
           <Col xs={24} sm={12} md={7} lg={6}>
-            <BranchSelect
-              allowAll
-              value={branchId ?? null}
-              onChange={(v) => url.set({ branch_id: v === null ? 'all' : (v as number) })}
+            {/* "Tất cả chi nhánh" dùng value 0 (antd cảnh báo khi option có value null). */}
+            <Select<number>
+              showSearch
+              optionFilterProp="label"
+              style={{ width: '100%' }}
               placeholder="Chi nhánh"
+              value={branchId ?? (isGlobal ? 0 : undefined)}
+              onChange={(v) => url.set({ branch_id: v === 0 ? 'all' : v })}
+              options={[
+                ...(isGlobal ? [{ label: 'Tất cả chi nhánh', value: 0 }] : []),
+                ...branches.map((b) => ({ label: b.name, value: b.id })),
+              ]}
             />
           </Col>
           <Col xs={24} sm={12} md={9} lg={7}>

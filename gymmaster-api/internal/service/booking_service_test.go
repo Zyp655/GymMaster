@@ -383,6 +383,35 @@ func TestBookingAttendance_InvalidBookings(t *testing.T) {
 	assert.Contains(t, err.Error(), "đã bị hủy")
 }
 
+func TestBookingAttendance_ManualNoShowBlocksAndRemovesReview(t *testing.T) {
+	f := newBookingFixture()
+	f.addMember(1)
+	// Hai lần no-show trong 30 ngày.
+	for i := 0; i < 2; i++ {
+		old := f.addSchedule(f.now.AddDate(0, 0, -(i+3)), 5)
+		_ = bookingFakeRepo{f.store}.Create(context.Background(), &entity.ClassBooking{ScheduleID: old.ID, MemberID: 1, Status: entity.BookingStatusNoShow})
+	}
+	sc := f.addSchedule(f.now.Add(10*time.Minute), 5)
+	bk, err := f.svc.Book(classStaffCtx(), sc.ID, 1, "")
+	require.NoError(t, err)
+	_, err = f.svc.MarkAttendance(classStaffCtx(), sc.ID, []BookingAttendance{{BookingID: bk.ID, Status: "ATTENDED"}})
+	require.NoError(t, err)
+	assert.Nil(t, f.store.members[1].BookingBlockedUntil)
+	assert.Empty(t, f.store.removedReviews)
+
+	// Sửa ATTENDED → NO_SHOW: lần vắng thứ 3 → khóa đặt lớp như cron; đánh giá lớp bị gỡ.
+	_, err = f.svc.MarkAttendance(classStaffCtx(), sc.ID, []BookingAttendance{{BookingID: bk.ID, Status: "NO_SHOW"}})
+	require.NoError(t, err)
+	require.NotNil(t, f.store.members[1].BookingBlockedUntil, "NO_SHOW điểm danh tay phải tính vào hạn mức khóa")
+	assert.True(t, f.store.members[1].BookingBlockedUntil.Equal(f.now.AddDate(0, 0, 7)))
+	assert.Equal(t, [][2]uint{{1, sc.ID}}, f.store.removedReviews)
+
+	// Đánh dấu NO_SHOW lại lần nữa không gỡ/khóa lặp.
+	_, err = f.svc.MarkAttendance(classStaffCtx(), sc.ID, []BookingAttendance{{BookingID: bk.ID, Status: "NO_SHOW"}})
+	require.NoError(t, err)
+	assert.Len(t, f.store.removedReviews, 1)
+}
+
 // ---- MarkNoShows ---------------------------------------------------------------
 
 func TestBookingMarkNoShows(t *testing.T) {

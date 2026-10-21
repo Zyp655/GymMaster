@@ -2,3 +2,8 @@
 .idea/
 .vscode/
 CLAUDE.local.md
+
+# Playwright E2E (cài đặt & kết quả chạy)
+e2e/node_modules/
+e2e/playwright-report/
+e2e/test-results/

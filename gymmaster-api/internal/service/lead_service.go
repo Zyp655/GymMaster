@@ -45,6 +45,8 @@ type (
 		GetLead(ctx context.Context, id uint) (*v1.Lead, error)
 		CreateLead(ctx context.Context, req *v1.CreateLeadReq) (*v1.Lead, error)
 		UpdateLead(ctx context.Context, req *v1.UpdateLeadReq) (*v1.Lead, error)
+		// UpdateLeadStatus chỉ đổi trạng thái (Kanban) – kiểm tra luật chuyển trạng thái.
+		UpdateLeadStatus(ctx context.Context, id uint, status string) (*v1.Lead, error)
 		DeleteLead(ctx context.Context, id uint) error
 
 		ListActivities(ctx context.Context, leadID uint) (v1.ListLeadActivitiesRes, error)
@@ -109,6 +111,46 @@ func leadParseDateOpt(raw string) (*time.Time, error) {
 	return &t, nil
 }
 
+// leadNormalizePhone chuẩn hóa + kiểm tra SĐT theo đúng quy tắc của module hội viên (NormalizeVNPhone).
+// leadEmail chuẩn hóa + kiểm tra email (rỗng = không có).
+func leadEmail(raw string) (string, error) {
+	email := strings.ToLower(strings.TrimSpace(raw))
+	if !validEmailStrict(email) {
+		return "", rescode.New(rescode.BadRequest, "Email không hợp lệ")
+	}
+	return email, nil
+}
+
+func leadNormalizePhone(raw string) (string, error) {
+	phone, ok := NormalizeVNPhone(raw)
+	if !ok {
+		return "", rescode.New(rescode.BadRequest, "Số điện thoại không hợp lệ")
+	}
+	return phone, nil
+}
+
+// leadCheckStatusChange kiểm tra luật chuyển trạng thái khách tiềm năng:
+//   - CONVERTED chỉ đạt được qua chức năng chuyển đổi thành hội viên (có member_id);
+//   - CONVERTED là trạng thái cuối, không chuyển sang trạng thái khác.
+func leadCheckStatusChange(from, to string) error {
+	if to == "" || to == from {
+		return nil
+	}
+	if from == entity.LeadStatusConverted {
+		return rescode.New(rescode.BadRequest, "Khách đã chuyển đổi thành hội viên, không thể đổi sang trạng thái khác")
+	}
+	if to == entity.LeadStatusConverted {
+		return rescode.New(rescode.BadRequest, "Vui lòng dùng chức năng \"Chuyển đổi thành hội viên\" để chuyển sang trạng thái Đã chuyển đổi")
+	}
+	return nil
+}
+
+// leadToday: ngày hôm nay theo giờ Việt Nam (00:00).
+func leadToday(now time.Time) time.Time {
+	t := now.In(memberVNLoc)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, memberVNLoc)
+}
+
 func (s *leadService) checkIPRateLimit(ip string, now time.Time) bool {
 	key := strings.TrimSpace(ip)
 	if key == "" {
@@ -145,12 +187,20 @@ func (s *leadService) PublicCreateLead(ctx context.Context, req *v1.PublicCreate
 		}
 		return nil, err
 	}
+	phone, err := leadNormalizePhone(req.Phone)
+	if err != nil {
+		return nil, err
+	}
+	email, err := leadEmail(req.Email)
+	if err != nil {
+		return nil, err
+	}
 
 	lead := &entity.Lead{
 		BranchID:       req.BranchID,
 		FullName:       strings.TrimSpace(req.FullName),
-		Phone:          strings.TrimSpace(req.Phone),
-		Email:          strings.TrimSpace(req.Email),
+		Phone:          phone,
+		Email:          email,
 		Source:         entity.LeadSourceWebsite,
 		InterestPlanID: req.InterestPlanID,
 		Status:         entity.LeadStatusNew,
@@ -188,6 +238,14 @@ func (s *leadService) PublicCreateLead(ctx context.Context, req *v1.PublicCreate
 		}, nil
 	}
 	return toLeadDTO(row, nil, nil), nil
+}
+
+// publicAvailableSlots tính số chỗ còn trống của lớp, không bao giờ âm.
+func publicAvailableSlots(capacity, booked int) int {
+	if capacity-booked < 0 {
+		return 0
+	}
+	return capacity - booked
 }
 
 func (s *leadService) PublicClassSchedules(ctx context.Context, req *v1.PublicClassSchedulesReq) (v1.PublicClassSchedulesRes, error) {
@@ -230,6 +288,7 @@ func (s *leadService) PublicClassSchedules(ctx context.Context, req *v1.PublicCl
 			EndAt:          r.EndAt,
 			Capacity:       r.Capacity,
 			BookedCount:    r.BookedCount,
+			AvailableSlots: publicAvailableSlots(r.Capacity, r.BookedCount),
 			Status:         r.Status,
 		})
 	}
@@ -305,14 +364,25 @@ func (s *leadService) CreateLead(ctx context.Context, req *v1.CreateLeadReq) (*v
 	if status == "" {
 		status = entity.LeadStatusNew
 	}
+	if err := leadCheckStatusChange(entity.LeadStatusNew, status); err != nil {
+		return nil, err
+	}
+	phone, err := leadNormalizePhone(req.Phone)
+	if err != nil {
+		return nil, err
+	}
+	email, err := leadEmail(req.Email)
+	if err != nil {
+		return nil, err
+	}
 	actorID := reqctx.UserID(ctx)
 
 	lead := &entity.Lead{
 		BaseEntity:     entity.BaseEntity{CreatedBy: actorID, UpdatedBy: actorID},
 		BranchID:       req.BranchID,
 		FullName:       strings.TrimSpace(req.FullName),
-		Phone:          strings.TrimSpace(req.Phone),
-		Email:          strings.TrimSpace(req.Email),
+		Phone:          phone,
+		Email:          email,
 		Source:         source,
 		InterestPlanID: req.InterestPlanID,
 		Status:         status,
@@ -355,11 +425,22 @@ func (s *leadService) UpdateLead(ctx context.Context, req *v1.UpdateLeadReq) (*v
 	if err != nil {
 		return nil, err
 	}
+	phone, err := leadNormalizePhone(req.Phone)
+	if err != nil {
+		return nil, err
+	}
+	email, err := leadEmail(req.Email)
+	if err != nil {
+		return nil, err
+	}
+	if err := leadCheckStatusChange(row.Status, strings.TrimSpace(req.Status)); err != nil {
+		return nil, err
+	}
 
 	before := toLeadDTO(row, nil, nil)
 	row.FullName = strings.TrimSpace(req.FullName)
-	row.Phone = strings.TrimSpace(req.Phone)
-	row.Email = strings.TrimSpace(req.Email)
+	row.Phone = phone
+	row.Email = email
 	if strings.TrimSpace(req.Source) != "" {
 		row.Source = strings.TrimSpace(req.Source)
 	}
@@ -374,6 +455,40 @@ func (s *leadService) UpdateLead(ctx context.Context, req *v1.UpdateLeadReq) (*v
 	row.Note = strings.TrimSpace(req.Note)
 	row.UpdatedBy = reqctx.UserID(ctx)
 
+	if err := s.repo.UpdateLead(ctx, &row.Lead); err != nil {
+		return nil, err
+	}
+	res, err := s.GetLead(ctx, row.ID)
+	if err != nil {
+		return nil, err
+	}
+	if s.audit != nil {
+		s.audit.Log(ctx, AuditUpdate, auditEntityLead, row.ID, before, res)
+	}
+	return res, nil
+}
+
+func (s *leadService) UpdateLeadStatus(ctx context.Context, id uint, status string) (*v1.Lead, error) {
+	status = strings.TrimSpace(status)
+	row, err := s.repo.FindLeadByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, rescode.New(rescode.NotFound, "Không tìm thấy khách tiềm năng")
+		}
+		return nil, err
+	}
+	if !reqctx.CanAccessBranch(ctx, row.BranchID) {
+		return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền cập nhật khách tiềm năng của chi nhánh này")
+	}
+	if err := leadCheckStatusChange(row.Status, status); err != nil {
+		return nil, err
+	}
+	if row.Status == status {
+		return s.GetLead(ctx, row.ID)
+	}
+	before := toLeadDTO(row, nil, nil)
+	row.Status = status
+	row.UpdatedBy = reqctx.UserID(ctx)
 	if err := s.repo.UpdateLead(ctx, &row.Lead); err != nil {
 		return nil, err
 	}
@@ -490,14 +605,35 @@ func (s *leadService) IssueTrialPass(ctx context.Context, req *v1.IssueTrialPass
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền cấp vé tập thử cho chi nhánh này")
 	}
 
+	if row.Status == entity.LeadStatusConverted {
+		return nil, rescode.New(rescode.BadRequest, "Khách đã chuyển đổi thành hội viên, không cần cấp vé tập thử")
+	}
 	now := s.now()
-	validDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := leadToday(now)
+	validDate := today
 	if strings.TrimSpace(req.ValidDate) != "" {
-		t, err := time.ParseInLocation(consts.DateLayout, strings.TrimSpace(req.ValidDate), now.Location())
+		t, err := time.ParseInLocation(consts.DateLayout, strings.TrimSpace(req.ValidDate), memberVNLoc)
 		if err != nil {
 			return nil, rescode.New(rescode.BadRequest, "Ngày tập thử phải có dạng YYYY-MM-DD")
 		}
+		if t.Before(today) {
+			return nil, rescode.New(rescode.BadRequest, "Ngày tập thử không được ở quá khứ")
+		}
 		validDate = t
+	}
+	if err := checkPassDayOpen(ctx, row.BranchID, validDate, "cấp vé tập thử"); err != nil {
+		return nil, err
+	}
+	// Mỗi khách chỉ có tối đa 1 vé tập thử còn hiệu lực (chưa dùng và chưa quá ngày).
+	passes, err := s.repo.ListTrialPasses(ctx, row.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range passes {
+		vd := time.Date(p.ValidDate.Year(), p.ValidDate.Month(), p.ValidDate.Day(), 0, 0, 0, 0, memberVNLoc)
+		if p.UsedAt == nil && !vd.Before(today) {
+			return nil, rescode.New(rescode.Conflict, "Khách đã có vé tập thử còn hiệu lực (ngày "+vd.Format("02/01/2006")+"), không thể cấp thêm")
+		}
 	}
 
 	rawBytes := make([]byte, 8)
@@ -568,11 +704,17 @@ func (s *leadService) ConvertLead(ctx context.Context, req *v1.ConvertLeadReq) (
 	if gender == "" {
 		gender = "OTHER"
 	}
+	// Chuẩn hóa SĐT (lead cũ có thể lưu dạng chưa chuẩn) để khớp đúng hội viên đã có, tránh tạo trùng.
+	phone, err := leadNormalizePhone(row.Phone)
+	if err != nil {
+		return nil, rescode.New(rescode.BadRequest, "Số điện thoại của khách tiềm năng không hợp lệ, vui lòng cập nhật trước khi chuyển đổi")
+	}
+	row.Phone = phone
 	actorID := reqctx.UserID(ctx)
 	before := toLeadDTO(row, nil, nil)
 
 	err = s.withinTx(ctx, func(txCtx context.Context) error {
-		mem, findErr := s.repo.FindMemberByPhone(txCtx, row.Phone)
+		mem, findErr := s.repo.FindMemberByPhone(txCtx, phone)
 		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
 			return findErr
 		}

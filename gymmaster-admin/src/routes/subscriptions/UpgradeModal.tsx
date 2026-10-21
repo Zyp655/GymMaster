@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   Alert,
@@ -65,6 +65,23 @@ export default function UpgradeModal({ open, sub, onClose }: UpgradeModalProps) 
   });
   const quote = quoteQuery.isError || !planId ? undefined : quoteQuery.data;
 
+  // Không cho "nâng cấp" sang gói rẻ hơn gói hiện tại (API từ chối vì giá trị còn lại sẽ bị mất).
+  const cheaperReasons = useMemo(() => {
+    const list = plans.data ?? [];
+    const currentPrice = list.find((p) => p.id === sub?.plan_id)?.price ?? sub?.price ?? 0;
+    const out: Record<number, { tag: string; tooltip: string }> = {};
+    for (const p of list) {
+      if (p.id !== sub?.plan_id && p.price < currentPrice) {
+        out[p.id] = {
+          tag: 'Rẻ hơn gói hiện tại',
+          tooltip:
+            'Chỉ nâng cấp lên gói có giá cao hơn hoặc bằng gói hiện tại – giá trị còn lại của gói cũ sẽ bị mất nếu chuyển sang gói rẻ hơn.',
+        };
+      }
+    }
+    return out;
+  }, [plans.data, sub?.plan_id, sub?.price]);
+
   useEffect(() => {
     if (quote) form.setFieldValue(['payment', 'amount'], quote.amount_due);
   }, [quote, form]);
@@ -129,6 +146,7 @@ export default function UpgradeModal({ open, sub, onClose }: UpgradeModalProps) 
             value={planId}
             onChange={(p) => setPlanId(p.id)}
             disabledIds={sub ? [sub.plan_id] : []}
+            disabledReasons={cheaperReasons}
           />
           {planId && (
             <Spin spinning={quoteQuery.isFetching}>

@@ -5,6 +5,7 @@ import {
   App,
   Badge,
   Button,
+  Card,
   Col,
   Form,
   Input,
@@ -275,8 +276,12 @@ function DeviceKeyModal({
             message="Hướng dẫn kích hoạt màn hình Kiosk tự Check-in"
             description={
               <div style={{ fontSize: 13 }}>
-                1. Mở đường dẫn <Tag className="code-text">/kiosk</Tag> trên trình duyệt của thiết bị tại quầy cửa.<br />
-                2. Dán mã <strong>raw_api_key</strong> ở trên vào ô xác thực thiết bị (Header <Tag className="code-text">X-Device-Key</Tag>).<br />
+                1. Mở đường dẫn <Tag className="code-text">/kiosk</Tag> trên trình duyệt của thiết
+                bị tại quầy cửa.
+                <br />
+                2. Dán mã <strong>raw_api_key</strong> ở trên vào ô xác thực thiết bị (Header{' '}
+                <Tag className="code-text">X-Device-Key</Tag>).
+                <br />
                 3. Thiết bị sẽ tự động gửi tín hiệu Heartbeat định kỳ và sẵn sàng quét QR hội viên.
               </div>
             }
@@ -369,12 +374,16 @@ export default function AccessDevicesPage() {
       {
         title: 'Tên thiết bị / Vị trí',
         dataIndex: 'name',
-        render: (name: string) => <Typography.Text strong>{name}</Typography.Text>,
+        render: (name: string) => (
+          <Typography.Text strong ellipsis={{ tooltip: name }} style={{ maxWidth: 200 }}>
+            {name}
+          </Typography.Text>
+        ),
       },
       {
         title: 'Loại thiết bị',
         dataIndex: 'type',
-        width: 190,
+        width: 170,
         render: (t: AccessDeviceType) => (
           <Tag color={DEVICE_TYPE_COLORS[t] ?? 'default'}>{DEVICE_TYPE_LABELS[t] ?? t}</Tag>
         ),
@@ -407,26 +416,28 @@ export default function AccessDevicesPage() {
       {
         title: 'Trạng thái',
         dataIndex: 'status',
-        width: 170,
+        width: 130,
         render: (s: AccessDeviceStatus) => <StatusTag status={s} map={ACCESS_DEVICE_STATUS_MAP} />,
       },
       {
         title: '',
         key: 'actions',
         fixed: 'right',
-        width: 220,
+        width: 112,
         render: (_, r) => (
-          <Space size={4}>
+          // Nút gọn (biểu tượng + tooltip) để cột cố định bên phải không che các cột khác ở 1440px.
+          <Space size={4} wrap={false}>
             {canManage && (
               <ConfirmButton
                 perm={PERM.DEVICE_MANAGE}
+                type="text"
                 size="small"
                 icon={<KeyOutlined />}
+                title="Cấp lại Device Key"
+                aria-label="Cấp lại Device Key"
                 confirmTitle={`Cấp lại Device Key mới cho thiết bị ${r.code}? Khóa cũ sẽ lập tức hết hiệu lực.`}
                 onConfirm={() => rotateKeyMut.mutateAsync(r)}
-              >
-                Cấp lại Device Key
-              </ConfirmButton>
+              />
             )}
             {canManage && (
               <Tooltip title="Sửa">
@@ -457,104 +468,106 @@ export default function AccessDevicesPage() {
   );
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Row justify="space-between" align="middle" gutter={[12, 12]}>
-        <Col>
-          <PageTitle
-            title="Thiết bị kiểm soát ra vào & Kiosk"
-            subtitle="Quản lý cổng xoay Turnstile, cửa từ và màn hình Kiosk tự động quét QR Check-in"
-          />
-        </Col>
-        <Col>
-          <ActionBar
-            onAdd={() => setModal({ open: true, record: null })}
-            addPerm={PERM.DEVICE_MANAGE}
-            addText="Thêm thiết bị mới"
-            onRefresh={() => table.refetch()}
-            refreshing={table.isFetching}
-          />
-        </Col>
-      </Row>
+    <Card variant="borderless" className="page-card">
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Row justify="space-between" align="middle" gutter={[12, 12]}>
+          <Col>
+            <PageTitle
+              title="Thiết bị kiểm soát ra vào & Kiosk"
+              subtitle="Quản lý cổng xoay Turnstile, cửa từ và màn hình Kiosk tự động quét QR Check-in"
+            />
+          </Col>
+          <Col>
+            <ActionBar
+              onAdd={() => setModal({ open: true, record: null })}
+              addPerm={PERM.DEVICE_MANAGE}
+              addText="Thêm thiết bị mới"
+              onRefresh={() => table.refetch()}
+              refreshing={table.isFetching}
+            />
+          </Col>
+        </Row>
 
-      <Row gutter={[12, 12]}>
-        <Col xs={12} md={6}>
-          <StatCard
-            label="Tổng thiết bị"
-            value={stats.total}
-            icon={<LaptopOutlined />}
-            loading={table.isLoading}
-          />
-        </Col>
-        <Col xs={12} md={6}>
-          <StatCard
-            label="Đang trực tuyến (Active)"
-            value={stats.active}
-            icon={<CheckCircleOutlined />}
-            loading={table.isLoading}
-          />
-        </Col>
-        <Col xs={12} md={6}>
-          <StatCard
-            label="Mất kết nối (Offline)"
-            value={stats.offline}
-            icon={<DisconnectOutlined />}
-            loading={table.isLoading}
-          />
-        </Col>
-        <Col xs={12} md={6}>
-          <StatCard
-            label="Vô hiệu hóa (Disabled)"
-            value={stats.disabled}
-            icon={<StopOutlined />}
-            loading={table.isLoading}
-          />
-        </Col>
-      </Row>
+        <Row gutter={[12, 12]}>
+          <Col xs={12} md={6}>
+            <StatCard
+              label="Tổng thiết bị"
+              value={stats.total}
+              icon={<LaptopOutlined />}
+              loading={table.isLoading}
+            />
+          </Col>
+          <Col xs={12} md={6}>
+            <StatCard
+              label="Đang trực tuyến (Active)"
+              value={stats.active}
+              icon={<CheckCircleOutlined />}
+              loading={table.isLoading}
+            />
+          </Col>
+          <Col xs={12} md={6}>
+            <StatCard
+              label="Mất kết nối (Offline)"
+              value={stats.offline}
+              icon={<DisconnectOutlined />}
+              loading={table.isLoading}
+            />
+          </Col>
+          <Col xs={12} md={6}>
+            <StatCard
+              label="Vô hiệu hóa (Disabled)"
+              value={stats.disabled}
+              icon={<StopOutlined />}
+              loading={table.isLoading}
+            />
+          </Col>
+        </Row>
 
-      <FilterBar
-        searchPlaceholder="Tìm theo mã hoặc tên thiết bị..."
-        colTextSearch={6}
-        filters={[
-          ...(branchId
-            ? []
-            : [
-                {
-                  name: 'branch_id',
-                  placeholder: 'Chi nhánh',
-                  options: branches.map((b) => ({ label: b.name, value: b.id })),
-                  col: 4,
-                },
-              ]),
-          {
-            name: 'type',
-            placeholder: 'Loại thiết bị',
-            options: DEVICE_TYPE_OPTIONS,
-            col: 5,
-          },
-          {
-            name: 'status',
-            placeholder: 'Trạng thái',
-            options: ACCESS_DEVICE_STATUS_OPTIONS,
-            col: 5,
-          },
-        ]}
-      />
+        <FilterBar
+          searchPlaceholder="Tìm theo mã hoặc tên thiết bị..."
+          colTextSearch={6}
+          filters={[
+            ...(branchId
+              ? []
+              : [
+                  {
+                    name: 'branch_id',
+                    placeholder: 'Chi nhánh',
+                    options: branches.map((b) => ({ label: b.name, value: b.id })),
+                    col: 4,
+                  },
+                ]),
+            {
+              name: 'type',
+              placeholder: 'Loại thiết bị',
+              options: DEVICE_TYPE_OPTIONS,
+              col: 5,
+            },
+            {
+              name: 'status',
+              placeholder: 'Trạng thái',
+              options: ACCESS_DEVICE_STATUS_OPTIONS,
+              col: 5,
+            },
+          ]}
+        />
 
-      <DataTable<AccessDevice>
-        table={table}
-        columns={columns}
-        emptyText="Chưa có thiết bị kiểm soát ra vào hoặc Kiosk nào"
-      />
+        <DataTable<AccessDevice>
+          table={table}
+          columns={columns}
+          emptyText="Chưa có thiết bị kiểm soát ra vào hoặc Kiosk nào"
+        />
 
-      <DeviceFormModal
-        open={modal.open}
-        record={modal.record}
-        readOnly={!canManage}
-        onClose={() => setModal({ open: false, record: null })}
-        onKeyIssued={(name, code, raw_api_key) => setKeyInfo({ name, code, raw_api_key })}
-      />
+        <DeviceFormModal
+          open={modal.open}
+          record={modal.record}
+          readOnly={!canManage}
+          onClose={() => setModal({ open: false, record: null })}
+          onKeyIssued={(name, code, raw_api_key) => setKeyInfo({ name, code, raw_api_key })}
+        />
 
-      <DeviceKeyModal info={keyInfo} onClose={() => setKeyInfo(null)} />
-    </Space>
+        <DeviceKeyModal info={keyInfo} onClose={() => setKeyInfo(null)} />
+      </Space>
+    </Card>
   );
 }

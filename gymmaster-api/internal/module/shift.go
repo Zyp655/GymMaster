@@ -9,6 +9,6 @@ import (
 )
 
 func RegisterShift(d *Deps, admin *ghttp.RouterGroup) {
-	svc := service.NewShiftService(repository.NewShiftRepository(d.DB), d.Tx)
+	svc := service.NewShiftService(repository.NewShiftRepository(d.DB), d.Tx, d.Audit)
 	admin.Bind(shiftctrl.NewV1(svc))
 }

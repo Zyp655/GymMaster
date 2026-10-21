@@ -10,6 +10,7 @@ import {
   KeyIcon,
   QrCodeIcon,
   SignalIcon,
+  SignalSlashIcon,
   VideoCameraIcon,
   XCircleIcon,
 } from '@heroicons/react/24/outline';
@@ -26,9 +27,16 @@ import { Input } from '@/components/ui/input';
 import { deviceCheckin, deviceHeartbeat } from '@/features/portal/api';
 import type { DeviceCheckinRes } from '@/features/portal/types';
 import { ApiError } from '@/types/api';
+import {
+  DEFAULT_DEMO_KEY,
+  DEV_QUICK_CODES,
+  DEVICE_KEY_STORAGE,
+  maskDeviceKey,
+  readStoredDeviceKey,
+} from './kiosk-utils';
 
-const DEVICE_KEY_STORAGE = 'gymmaster:kiosk_device_key';
-const DEFAULT_DEMO_KEY = 'GMD-demo-kiosk-cg01';
+const SHOW_DEV_QUICK_CODES = process.env.NODE_ENV === 'development';
+
 const HEARTBEAT_INTERVAL_MS = 60_000;
 const RESULT_RESET_MS = 3_000;
 
@@ -45,11 +53,17 @@ export function KioskView() {
   const t = useTranslations('portal.kiosk');
   const tc = useTranslations('common');
 
-  const [deviceKey, setDeviceKey] = useState<string>(DEFAULT_DEMO_KEY);
-  const [draftKey, setDraftKey] = useState<string>(DEFAULT_DEMO_KEY);
+  // Khóa thiết bị đọc từ localStorage SAU khi mount (useEffect): khởi tạo useState từ localStorage làm HTML
+  // render phía server (khóa mặc định) lệch với lần render đầu phía client → lỗi hydrate.
+  const [deviceKey, setDeviceKey] = useState<string>('');
+  const [draftKey, setDraftKey] = useState<string>('');
+  const [keyLoaded, setKeyLoaded] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState<{ name?: string; branchName?: string } | null>(null);
-  const [heartbeatOk, setHeartbeatOk] = useState<boolean>(false);
+  // Kết quả heartbeat gần nhất gắn với khóa thiết bị đã gửi → đổi khóa thì tự về trạng thái "đang kiểm tra".
+  const [heartbeat, setHeartbeat] = useState<{ key: string; ok: boolean } | null>(null);
+  const heartbeatStatus: 'checking' | 'ok' | 'error' =
+    heartbeat && heartbeat.key === deviceKey ? (heartbeat.ok ? 'ok' : 'error') : 'checking';
 
   const [codeInput, setCodeInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -59,15 +73,27 @@ export function KioskView() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const submittingRef = useRef(false);
+
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const saved = window.localStorage.getItem(DEVICE_KEY_STORAGE);
-    if (saved && saved.trim()) {
-      setDeviceKey(saved.trim());
-      setDraftKey(saved.trim());
-    } else {
-      window.localStorage.setItem(DEVICE_KEY_STORAGE, DEFAULT_DEMO_KEY);
+    let storage: Storage | null = null;
+    try {
+      storage = window.localStorage;
+    } catch {
+      storage = null;
     }
+    const key = readStoredDeviceKey(storage);
+    try {
+      const saved = storage?.getItem(DEVICE_KEY_STORAGE);
+      if (key && (!saved || !saved.trim())) storage?.setItem(DEVICE_KEY_STORAGE, key);
+    } catch {
+      // ignore storage errors
+    }
+    /* eslint-disable react-hooks/set-state-in-effect -- đồng bộ một lần từ localStorage sau khi hydrate */
+    setDeviceKey(key);
+    setDraftKey(key);
+    setKeyLoaded(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   const focusInput = useCallback(() => {
@@ -87,7 +113,7 @@ export function KioskView() {
     const sendBeat = async () => {
       try {
         const res = await deviceHeartbeat(deviceKey);
-        setHeartbeatOk(true);
+        setHeartbeat({ key: deviceKey, ok: true });
         if (res?.device) {
           setDeviceInfo({
             name: res.device.name,
@@ -95,7 +121,7 @@ export function KioskView() {
           });
         }
       } catch {
-        setHeartbeatOk(false);
+        setHeartbeat({ key: deviceKey, ok: false });
       }
     };
 
@@ -131,8 +157,9 @@ export function KioskView() {
   const handleCheckinToken = useCallback(
     async (rawToken: string) => {
       const token = rawToken.trim();
-      if (!token || submitting) return;
+      if (!token || submittingRef.current || !deviceKey) return;
 
+      submittingRef.current = true;
       setSubmitting(true);
       try {
         const res: DeviceCheckinRes = await deviceCheckin(token, deviceKey);
@@ -146,7 +173,9 @@ export function KioskView() {
           message:
             res.message ||
             res.deny_message ||
-            (allowed ? 'Check-in hợp lệ. Chúc bạn buổi tập hiệu quả!' : 'Không đủ điều kiện vào cửa.'),
+            (allowed
+              ? 'Check-in hợp lệ. Chúc bạn buổi tập hiệu quả!'
+              : 'Không đủ điều kiện vào cửa.'),
         });
       } catch (err) {
         const errMsg =
@@ -164,24 +193,25 @@ export function KioskView() {
           message: errMsg,
         });
       } finally {
+        submittingRef.current = false;
         setSubmitting(false);
         setCodeInput('');
         scheduleAutoReset();
       }
     },
-    [deviceKey, scheduleAutoReset, submitting],
+    [deviceKey, scheduleAutoReset],
   );
 
-  // Tích hợp quét camera QR nếu bật
+  // Tích hợp quét camera QR nếu bật (tạm dừng khi đang hiển thị kết quả quét vì #kiosk-qr-reader bị ẩn)
   useEffect(() => {
-    if (!cameraActive) return;
+    if (!cameraActive || scanResult) return;
     let scannerCleanup: (() => Promise<void>) | null = null;
     let mounted = true;
 
     const startCamera = async () => {
       try {
         const { Html5Qrcode } = await import('html5-qrcode');
-        if (!mounted) return;
+        if (!mounted || !document.getElementById('kiosk-qr-reader')) return;
         const qr = new Html5Qrcode('kiosk-qr-reader');
         scannerCleanup = async () => {
           try {
@@ -202,7 +232,10 @@ export function KioskView() {
           },
         );
       } catch {
-        toast.error('Không thể truy cập camera trên thiết bị này. Vui lòng dùng máy quét USB hoặc nhập mã.');
+        if (!mounted) return;
+        toast.error(
+          'Không thể truy cập camera trên thiết bị này. Vui lòng dùng máy quét USB hoặc nhập mã.',
+        );
         setCameraActive(false);
       }
     };
@@ -214,14 +247,16 @@ export function KioskView() {
         void scannerCleanup();
       }
     };
-  }, [cameraActive, handleCheckinToken]);
+  }, [cameraActive, scanResult, handleCheckinToken]);
 
   const handleSaveDeviceKey = () => {
     const clean = draftKey.trim();
     if (!clean) return;
     setDeviceKey(clean);
-    if (typeof window !== 'undefined') {
+    try {
       window.localStorage.setItem(DEVICE_KEY_STORAGE, clean);
+    } catch {
+      // ignore storage errors
     }
     setConfigOpen(false);
     toast.success('Đã lưu cấu hình Device Key cho Kiosk');
@@ -243,23 +278,36 @@ export function KioskView() {
               <span className="text-h4 font-bold tracking-tight text-white">GYMMASTER KIOSK</span>
               <span
                 className={`inline-flex items-center gap-1.5 rounded-full px-3 py-0.5 text-caption font-semibold ${
-                  deviceKey
-                    ? heartbeatOk
+                  keyLoaded && !deviceKey
+                    ? 'bg-amber-500/20 text-amber-300'
+                    : heartbeatStatus === 'ok'
                       ? 'bg-emerald-500/20 text-emerald-300'
-                      : 'bg-sky-500/20 text-sky-300'
-                    : 'bg-amber-500/20 text-amber-300'
+                      : heartbeatStatus === 'error'
+                        ? 'bg-rose-500/20 text-rose-300'
+                        : 'bg-sky-500/20 text-sky-300'
                 }`}
               >
-                <SignalIcon className="size-3.5" />
-                {deviceKey
-                  ? deviceInfo?.name
-                    ? `${deviceInfo.name}${deviceInfo.branchName ? ` · ${deviceInfo.branchName}` : ''}`
-                    : t('deviceConnected')
-                  : t('deviceUnconfigured')}
+                {heartbeatStatus === 'error' && deviceKey ? (
+                  <SignalSlashIcon className="size-3.5" />
+                ) : (
+                  <SignalIcon className="size-3.5" />
+                )}
+                {keyLoaded && !deviceKey
+                  ? t('deviceUnconfigured')
+                  : heartbeatStatus === 'error'
+                    ? t('deviceOffline')
+                    : heartbeatStatus === 'checking'
+                      ? t('deviceChecking')
+                      : deviceInfo?.name
+                        ? `${deviceInfo.name}${deviceInfo.branchName ? ` · ${deviceInfo.branchName}` : ''}`
+                        : t('deviceConnected')}
               </span>
             </div>
             <p className="text-caption text-slate-400">
-              Device Key: <code className="text-slate-300">{deviceKey || '—'}</code>
+              Device Key:{' '}
+              <code className="text-slate-300" title="Khóa thiết bị được che một phần">
+                {keyLoaded ? maskDeviceKey(deviceKey) || '—' : '…'}
+              </code>
             </p>
           </div>
         </div>
@@ -399,23 +447,21 @@ export function KioskView() {
                   {submitting ? t('checkingIn') : t('checkInBtn')}
                 </Button>
               </div>
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-caption text-slate-400">
-                <span>Hỗ trợ mã nhanh:</span>
-                <button
-                  type="button"
-                  onClick={() => void handleCheckinToken('GM000001')}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 font-mono text-slate-200 hover:bg-slate-700"
-                >
-                  GM000001
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleCheckinToken('DP-DEMO202601')}
-                  className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 font-mono text-slate-200 hover:bg-slate-700"
-                >
-                  DP-DEMO202601
-                </button>
-              </div>
+              {SHOW_DEV_QUICK_CODES ? (
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-caption text-slate-400">
+                  <span>Mã thử nhanh (chỉ môi trường dev):</span>
+                  {DEV_QUICK_CODES.map(code => (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => void handleCheckinToken(code)}
+                      className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 font-mono text-slate-200 hover:bg-slate-700"
+                    >
+                      {code}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </form>
           </div>
         )}

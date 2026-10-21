@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -22,6 +23,7 @@ import (
 	"gymmaster-api/internal/service"
 	"gymmaster-api/internal/storage/postgres"
 	"gymmaster-api/migrations"
+	"gymmaster-api/resource/i18n"
 )
 
 var (
@@ -122,6 +124,11 @@ func printVersion(ctx context.Context, dsn string) error {
 func serve(ctx context.Context, parser *gcmd.Parser) error {
 	cfg := config.GetConfig()
 
+	// Thông báo lỗi validate mặc định (gvalid) bằng tiếng Việt – file ngôn ngữ nhúng từ resource/i18n.
+	if err := i18n.Init(); err != nil {
+		g.Log().Warningf(ctx, "i18n: không nạp được thông báo tiếng Việt: %v", err)
+	}
+
 	db, err := postgres.Open(cfg.DB)
 	if err != nil {
 		return fmt.Errorf("kết nối database: %w", err)
@@ -130,16 +137,33 @@ func serve(ctx context.Context, parser *gcmd.Parser) error {
 	if err != nil {
 		return err
 	}
-	mw := middleware.New(tokenMaker, cfg.Server.CorsOrigins)
+	// CORS so khớp chính xác origin (scheme + host + cổng) → đọc nguyên chuỗi CORS_ORIGINS (config chỉ giữ host).
+	corsOrigins := middleware.ParseCORSOrigins(os.Getenv("CORS_ORIGINS"))
+	if len(corsOrigins) == 0 {
+		corsOrigins = cfg.Server.CorsOrigins
+	}
+	mw := middleware.New(tokenMaker, corsOrigins)
 
+	// Môi trường production không công khai tài liệu API (/swagger, /api.json).
+	production := cfg.IsProduction() || strings.EqualFold(strings.TrimSpace(cfg.Env), "prod")
 	s := g.Server()
 	s.SetPort(cfg.Server.Port)
-	s.SetDumpRouterMap(!cfg.IsProduction())
-	s.SetOpenApiPath("/api.json")
-	s.SetSwaggerPath("/swagger")
-	enhanceOpenAPI(s)
+	s.SetDumpRouterMap(!production)
+	if !production {
+		s.SetOpenApiPath("/api.json")
+		s.SetSwaggerPath("/swagger")
+		enhanceOpenAPI(s)
+		// Swagger UI do GoFrame phục vụ bằng hook HookBeforeServe (chạy trước middleware) nên không nhận
+		// SecurityHeaders → gắn nosniff + Referrer-Policy ở hook riêng (đăng ký trước hook của GoFrame).
+		// Không đặt X-Frame-Options/CSP vì UI cần script/CSS từ CDN.
+		s.BindHookHandler("/swagger/*", ghttp.HookBeforeServe, func(r *ghttp.Request) {
+			h := r.Response.Header()
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		})
+	}
 
-	s.Use(mw.CORS(), mw.RequestLog(), mw.Response())
+	s.Use(mw.CORS(), mw.SecurityHeaders(), mw.RequestLog(), mw.Response())
 	// File tải lên (ảnh hội viên, sản phẩm...) – module upload ghi vào thư mục này.
 	if err := os.MkdirAll(cfg.Upload.Dir, 0o755); err != nil {
 		return fmt.Errorf("tạo thư mục upload: %w", err)

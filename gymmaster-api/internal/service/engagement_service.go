@@ -65,6 +65,7 @@ type (
 		MemberFoodLogs(ctx context.Context, req *v1.MemberFoodLogsReq) (*v1.MemberFoodLogsRes, error)
 		CreateFoodLog(ctx context.Context, req *v1.CreateFoodLogReq) (*v1.FoodLogItem, error)
 		DeleteFoodLog(ctx context.Context, id uint) error
+		UpdateFoodLog(ctx context.Context, req *v1.UpdateFoodLogReq) (*v1.FoodLogItem, error)
 		MemberAnnouncements(ctx context.Context) (v1.MemberAnnouncementsRes, error)
 		MemberSurveys(ctx context.Context) (v1.MemberSurveysRes, error)
 		SubmitSurveyResponse(ctx context.Context, req *v1.SubmitSurveyResponseReq) (*v1.SurveyResponseItem, error)
@@ -815,9 +816,9 @@ func (s *engagementService) CreateFoodLog(ctx context.Context, req *v1.CreateFoo
 		}
 		return nil, err
 	}
-	qty := req.Qty
-	if qty <= 0 {
-		qty = 1
+	qty, err := normalizeFoodLogQty(req.Qty)
+	if err != nil {
+		return nil, err
 	}
 	meal := strings.ToUpper(strings.TrimSpace(req.Meal))
 	if meal == "" {
@@ -842,6 +843,72 @@ func (s *engagementService) CreateFoodLog(ctx context.Context, req *v1.CreateFoo
 		EatenAt:  eatenAt,
 	}
 	if err := s.repo.CreateFoodLog(ctx, log); err != nil {
+		return nil, err
+	}
+	return toFoodLogItem(repository.FoodLogRow{
+		FoodLog:  *log,
+		FoodName: food.Name,
+		Unit:     food.Unit,
+		Calories: food.Calories,
+		Protein:  food.Protein,
+		Carbs:    food.Carbs,
+		Fat:      food.Fat,
+	}), nil
+}
+
+// foodLogMaxQty: tối đa 100 khẩu phần mỗi bản ghi (món "100g" → 10 kg) – chặn số vô lý/tràn cột.
+const foodLogMaxQty = 100
+
+// normalizeFoodLogQty kiểm tra 0 < qty ≤ 100 và làm tròn 4 chữ số (cột numeric(10,4)).
+func normalizeFoodLogQty(qty float64) (float64, error) {
+	if math.IsNaN(qty) || math.IsInf(qty, 0) || qty <= 0 {
+		return 0, rescode.New(rescode.BadRequest, "Khẩu phần phải lớn hơn 0")
+	}
+	if qty > foodLogMaxQty {
+		return 0, rescode.New(rescode.BadRequest, "Khẩu phần tối đa 100 (VD: món 100g tối đa 10.000g)")
+	}
+	rounded := math.Round(qty*10000) / 10000
+	if rounded <= 0 {
+		return 0, rescode.New(rescode.BadRequest, "Khẩu phần phải lớn hơn 0")
+	}
+	return rounded, nil
+}
+
+// UpdateFoodLog sửa món/khẩu phần/bữa của bản ghi ăn uống do chính hội viên tạo.
+func (s *engagementService) UpdateFoodLog(ctx context.Context, req *v1.UpdateFoodLogReq) (*v1.FoodLogItem, error) {
+	m, err := s.currentMember(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log, err := s.repo.FindFoodLogByID(ctx, req.ID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, rescode.New(rescode.NotFound, "Không tìm thấy bản ghi bữa ăn")
+		}
+		return nil, err
+	}
+	if log.MemberID != m.ID {
+		return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền sửa bản ghi này")
+	}
+	food, err := s.repo.FindFoodByID(ctx, req.FoodID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, rescode.New(rescode.NotFound, "Không tìm thấy thực phẩm")
+		}
+		return nil, err
+	}
+	qty, err := normalizeFoodLogQty(req.Qty)
+	if err != nil {
+		return nil, err
+	}
+	meal := strings.ToUpper(strings.TrimSpace(req.Meal))
+	if !slices.Contains(validMeals, meal) {
+		return nil, rescode.New(rescode.BadRequest, "Bữa ăn không hợp lệ")
+	}
+	log.FoodID = food.ID
+	log.Qty = qty
+	log.Meal = meal
+	if err := s.repo.UpdateFoodLog(ctx, log); err != nil {
 		return nil, err
 	}
 	return toFoodLogItem(repository.FoodLogRow{

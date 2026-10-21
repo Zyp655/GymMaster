@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Drawer,
@@ -22,13 +22,24 @@ import {
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useThemeMode } from '@/App';
-import { cmsSystemApi } from '@/api/cms-system';
+import type { InputRef } from 'antd';
+import { useThemeMode } from '@/theme';
+import { usePermission } from '@/hooks/usePermission';
+import { routePerm } from '@/routes';
 import AppDrawer from './AppDrawer';
 import BranchSwitcher from './BranchSwitcher';
 import NotificationBell from './NotificationBell';
 import UserMenu from './UserMenu';
+import { globalSearch, GLOBAL_SEARCH_DEBOUNCE_MS, searchTerm } from './globalSearch';
 import QuickSellButton from '@/routes/subscriptions/QuickSellButton';
+
+/** Nhãn tiếng Việt cho loại kết quả tìm kiếm nhanh. */
+const SEARCH_CATEGORY_LABEL: Record<string, string> = {
+  MEMBER: 'Hội viên',
+  INVOICE: 'Hóa đơn',
+  PRODUCT: 'Sản phẩm',
+  PLAN: 'Gói tập',
+};
 
 export interface AppHeaderProps {
   collapsed: boolean;
@@ -47,22 +58,52 @@ export function AppHeader({ collapsed, onToggle }: AppHeaderProps) {
   const [searchText, setSearchText] = useState('');
   const [helpOpen, setHelpOpen] = useState(false);
   const desktop = !!screens.lg;
+  const searchInputRef = useRef<InputRef>(null);
+  const { can } = usePermission();
+  // Liên kết "Thiết lập & Chuyển đổi" trong trợ giúp chỉ hiện khi có quyền vào route đó.
+  const canSystemTools = can(routePerm('system-tools'));
+
+  // Debounce từ khóa: chỉ gọi API khi ngừng gõ ~250ms.
+  const [debouncedText, setDebouncedText] = useState('');
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedText(searchText), GLOBAL_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [searchText]);
+  const term = searchTerm(debouncedText);
+  const typingPending = searchTerm(searchText) !== term;
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchOpen((v) => !v);
+        return;
+      }
+      // "?" mở trợ giúp – bỏ qua khi đang gõ trong ô nhập/vùng soạn thảo.
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const el = e.target as HTMLElement | null;
+        const typing =
+          !!el &&
+          (el.isContentEditable ||
+            ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ||
+            !!el.closest('[contenteditable="true"], [role="combobox"], [role="textbox"]'));
+        if (typing) return;
+        e.preventDefault();
+        setHelpOpen((v) => !v);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // Mỗi từ khóa một query key → kết quả cũ về muộn không đè kết quả mới; `signal` hủy request
+  // của từ khóa cũ khi đổi từ khóa / đóng modal.
   const searchQuery = useQuery({
-    queryKey: ['admin-global-search', searchText],
-    queryFn: () => cmsSystemApi.globalSearch(searchText.trim()),
-    enabled: searchOpen && searchText.trim().length >= 1,
+    queryKey: ['admin-global-search', term],
+    queryFn: ({ signal }) => globalSearch(term!, signal),
+    enabled: searchOpen && !!term,
+    staleTime: 30_000,
+    retry: false,
   });
 
   return (
@@ -101,7 +142,7 @@ export function AppHeader({ collapsed, onToggle }: AppHeaderProps) {
             aria-label="Đổi chế độ Sáng/Tối"
           />
         </Tooltip>
-        <Tooltip title="Hướng dẫn sử dụng màn hình này">
+        <Tooltip title="Hướng dẫn sử dụng màn hình này (phím ?)">
           <Button
             type="text"
             icon={<QuestionCircleOutlined />}
@@ -119,9 +160,14 @@ export function AppHeader({ collapsed, onToggle }: AppHeaderProps) {
         title="Tìm kiếm nhanh toàn hệ thống (Ctrl + K)"
         open={searchOpen}
         onCancel={() => setSearchOpen(false)}
+        afterOpenChange={(opened) => {
+          // `autoFocus` chỉ có tác dụng lần mount đầu → focus lại mỗi lần mở modal.
+          if (opened) searchInputRef.current?.focus({ cursor: 'all' });
+        }}
         footer={null}
       >
         <Input
+          ref={searchInputRef}
           autoFocus
           prefix={<SearchOutlined />}
           placeholder="Nhập tên hội viên, SĐT, mã GMxxxxxx, số hóa đơn HD..., hoặc tên sản phẩm..."
@@ -131,9 +177,24 @@ export function AppHeader({ collapsed, onToggle }: AppHeaderProps) {
         />
         <List
           style={{ marginTop: 12, maxHeight: 360, overflowY: 'auto' }}
-          loading={searchQuery.isFetching}
-          dataSource={searchQuery.data?.items ?? []}
-          locale={{ emptyText: searchText ? 'Không tìm thấy kết quả phù hợp' : 'Nhập từ khóa để tra cứu' }}
+          loading={!!term && (searchQuery.isFetching || typingPending)}
+          dataSource={!term || searchQuery.isError ? [] : (searchQuery.data?.items ?? [])}
+          locale={{
+            emptyText: searchQuery.isError ? (
+              <Space direction="vertical" size={4}>
+                <Typography.Text type="danger">
+                  Không thể tìm kiếm lúc này. Vui lòng thử lại.
+                </Typography.Text>
+                <Button size="small" onClick={() => searchQuery.refetch()}>
+                  Thử lại
+                </Button>
+              </Space>
+            ) : term ? (
+              'Không tìm thấy kết quả phù hợp'
+            ) : (
+              'Nhập từ khóa để tra cứu'
+            ),
+          }}
           renderItem={(hit) => (
             <List.Item
               style={{ cursor: 'pointer' }}
@@ -145,7 +206,7 @@ export function AppHeader({ collapsed, onToggle }: AppHeaderProps) {
               <List.Item.Meta
                 title={
                   <Space>
-                    <Tag color="blue">{hit.category}</Tag>
+                    <Tag color="blue">{SEARCH_CATEGORY_LABEL[hit.category] ?? hit.category}</Tag>
                     <Typography.Text strong>{hit.title}</Typography.Text>
                   </Space>
                 }
@@ -169,29 +230,36 @@ export function AppHeader({ collapsed, onToggle }: AppHeaderProps) {
           <Typography.Title level={5}>Mẹo thao tác nhanh tại quầy</Typography.Title>
           <ul>
             <li>
+              Nhấn <strong>?</strong> (khi không gõ trong ô nhập) để mở/đóng bảng hướng dẫn này.
+            </li>
+            <li>
               Nhấn <strong>Ctrl + K</strong> ở bất kỳ đâu để tìm nhanh hồ sơ hội viên theo SĐT, mã
               hội viên <code>GMxxxxxx</code> hoặc mã hóa đơn.
             </li>
             <li>
-              Tại màn hình <strong>Check-in (/app/checkin)</strong> hoặc <strong>Kiosk (/kiosk)</strong>:
-              hỗ trợ quét QR động 60s, vé tập thử <code>TP-...</code> và vé ngày/vé khách{' '}
-              <code>DP-...</code>.
+              Tại màn hình <strong>Check-in (/app/checkin)</strong> hoặc{' '}
+              <strong>Kiosk (/kiosk)</strong>: hỗ trợ quét QR động 60s, vé tập thử{' '}
+              <code>TP-...</code> và vé ngày/vé khách <code>DP-...</code>.
             </li>
-            <li>
-              Để chuyển đổi dữ liệu từ phần mềm cũ hoặc chạy <strong>Setup Wizard</strong>, truy
-              cập mục <strong>Hệ thống → Thiết lập &amp; Chuyển đổi (/app/system-tools)</strong>.
-            </li>
+            {canSystemTools && (
+              <li>
+                Để chuyển đổi dữ liệu từ phần mềm cũ hoặc chạy <strong>Setup Wizard</strong>, truy
+                cập mục <strong>Hệ thống → Thiết lập &amp; Chuyển đổi (/app/system-tools)</strong>.
+              </li>
+            )}
           </ul>
-          <Button
-            type="primary"
-            block
-            onClick={() => {
-              setHelpOpen(false);
-              navigate('/app/system-tools');
-            }}
-          >
-            Mở Trung tâm Thiết lập &amp; Hướng dẫn Chi tiết
-          </Button>
+          {canSystemTools && (
+            <Button
+              type="primary"
+              block
+              onClick={() => {
+                setHelpOpen(false);
+                navigate('/app/system-tools');
+              }}
+            >
+              Mở Trung tâm Thiết lập &amp; Hướng dẫn Chi tiết
+            </Button>
+          )}
         </Space>
       </Drawer>
     </Layout.Header>

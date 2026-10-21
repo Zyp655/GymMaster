@@ -585,6 +585,9 @@ export interface BranchHoliday {
   close_time?: string | null;
   extend_subs: boolean;
   created_at?: string;
+  /** Chỉ có trong phản hồi thêm/sửa: lớp / buổi PT đã xếp rơi vào ngày nghỉ (hoặc ngoài giờ đặc biệt) – KHÔNG tự hủy. */
+  affected_class_schedules?: LeaveImpactClass[];
+  affected_pt_sessions?: LeaveImpactPTSession[];
 }
 
 export interface BranchHolidayInput {
@@ -612,15 +615,15 @@ class TrainerSchedulesApi {
     return res?.slots ?? res?.items ?? [];
   }
 
+  /** Thay toàn bộ lịch rảnh của HLV tại MỘT chi nhánh (branchId bắt buộc). Danh sách rỗng = không giới hạn giờ nhận PT. */
   updateAvailability(
     trainerId: number,
     slots: Omit<TrainerAvailabilitySlot, 'id' | 'trainer_id'>[],
-    branchId?: number | null,
+    branchId: number,
   ) {
     return http.put(`/admin/trainers/${trainerId}/availability`, {
-      branch_id: branchId ?? undefined,
+      branch_id: branchId,
       slots,
-      items: slots,
     });
   }
 
@@ -730,14 +733,10 @@ export interface BranchOccupancyItem {
   branch_id: number;
   branch_name: string;
   branch_code?: string;
-  present: number;
-  current_count?: number;
+  present_count: number;
   capacity: number;
-  pct?: number;
-  occupancy_pct?: number;
+  occupancy_pct: number;
   level: OccupancyLevel;
-  peak_hours?: number[];
-  by_hour?: number[];
 }
 
 export interface SalesTarget {
@@ -749,8 +748,6 @@ export interface SalesTarget {
   period: string;
   metric: KPIMetric;
   target_value: number;
-  actual_value?: number;
-  pct?: number;
   created_at?: string;
 }
 
@@ -762,39 +759,32 @@ export interface SalesTargetInput {
   target_value: number;
 }
 
+/** Một chỉ số trong GET /admin/reports/kpi: thực đạt vs chỉ tiêu cấp chi nhánh (staff_id trống). */
 export interface KPIReportItem {
-  id?: number;
-  target_id?: number;
-  branch_id: number;
-  branch_name?: string;
-  staff_id?: number | null;
-  staff_name?: string;
-  period: string;
   metric: KPIMetric;
+  label: string;
+  actual: number;
   target_value: number;
-  actual_value: number;
-  achievement_pct?: number;
-  pct?: number;
+  achievement_pct: number;
+  /** false → chưa đặt chỉ tiêu (hiện "Chưa đặt chỉ tiêu", không hiện 0%). */
+  has_target?: boolean;
+  /** Số chi nhánh có chỉ tiêu; xem toàn hệ thống thì `actual` chỉ cộng các chi nhánh này. */
+  target_branch_count?: number;
 }
 
 export interface KPIReportData {
   period: string;
+  /** 0 = toàn hệ thống */
+  branch_id: number;
   items: KPIReportItem[];
 }
 
-export interface CohortMonthCell {
-  month_index: number;
-  active_count: number;
-  pct: number;
-}
-
+/** Một dòng cohort: size = số HV gia nhập trong tháng; retention_by_month[i] = % còn hoạt động ở tháng +i. */
 export interface CohortRow {
   cohort_month: string;
-  label?: string;
-  cohort_size: number;
-  initial_members?: number;
-  retention_pct?: number[];
-  months?: CohortMonthCell[];
+  size: number;
+  retention_by_month: number[];
+  active_counts: number[];
 }
 
 export interface CohortReportData {
@@ -809,17 +799,13 @@ class KpiAnalyticsApi {
   readonly cohortKey = 'cohort-report';
 
   async occupancy(branchId?: number | null): Promise<BranchOccupancyItem[]> {
-    const res = await http.get<
-      BranchOccupancyItem[] | { items?: BranchOccupancyItem[]; branches?: BranchOccupancyItem[] }
-    >('/public/branches/occupancy', {
-      params: branchId ? { branch_id: branchId } : {},
-    });
-    if (Array.isArray(res)) return res;
-    return res?.items ?? res?.branches ?? [];
+    const res = await http.get<BranchOccupancyItem[]>('/public/branches/occupancy');
+    const rows = Array.isArray(res) ? res : [];
+    return branchId ? rows.filter((r) => r.branch_id === branchId) : rows;
   }
 
   async listTargets(
-    params: ListParams & { branch_id?: number; staff_id?: number; period?: string; metric?: KPIMetric } = {},
+    params: ListParams & { branch_id?: number; period?: string; metric?: KPIMetric } = {},
   ): Promise<Page<SalesTarget>> {
     const res = await http.get<Page<SalesTarget> | SalesTarget[]>('/admin/sales-targets', {
       params,
@@ -827,12 +813,9 @@ class KpiAnalyticsApi {
     return normalizePage(res);
   }
 
+  /** POST /admin/sales-targets là upsert theo (chi nhánh, nhân sự, kỳ, chỉ số). */
   createTarget(data: SalesTargetInput) {
     return http.post<SalesTarget>('/admin/sales-targets', data);
-  }
-
-  updateTarget(id: number, data: Partial<SalesTargetInput>) {
-    return http.put<SalesTarget>(`/admin/sales-targets/${id}`, data);
   }
 
   deleteTarget(id: number) {
@@ -840,38 +823,27 @@ class KpiAnalyticsApi {
   }
 
   async kpiReport(params: { branch_id?: number; period?: string } = {}): Promise<KPIReportData> {
-    const res = await http.get<
-      | KPIReportItem[]
-      | { period?: string; items?: KPIReportItem[]; targets?: KPIReportItem[] }
-    >('/admin/reports/kpi', { params });
-
-    if (Array.isArray(res)) {
-      return { period: params.period ?? '', items: res };
-    }
+    const res = await http.get<{
+      period?: string;
+      branch_id?: number;
+      metrics?: KPIReportItem[];
+      items?: KPIReportItem[];
+    }>('/admin/reports/kpi', { params });
     return {
       period: res?.period ?? params.period ?? '',
-      items: res?.items ?? res?.targets ?? [],
+      branch_id: Number(res?.branch_id ?? 0),
+      items: res?.metrics ?? res?.items ?? [],
     };
   }
 
-  async cohortReport(
-    params: { branch_id?: number; from?: string; to?: string } = {},
-  ): Promise<CohortReportData> {
-    const res = await http.get<
-      | CohortRow[]
-      | { cohorts?: CohortRow[]; items?: CohortRow[]; matrix?: CohortRow[]; max_months?: number }
-    >('/admin/reports/cohort', { params });
-
-    const rows = Array.isArray(res)
-      ? res
-      : (res?.cohorts ?? res?.items ?? res?.matrix ?? []);
+  async cohortReport(params: { branch_id?: number; months?: number } = {}): Promise<CohortReportData> {
+    const res = await http.get<{ months?: number; cohorts?: CohortRow[]; items?: CohortRow[] }>(
+      '/admin/reports/cohort',
+      { params },
+    );
+    const rows = res?.cohorts ?? res?.items ?? [];
     const maxMonths =
-      (!Array.isArray(res) && res?.max_months) ||
-      rows.reduce((max, r) => {
-        const len = r.months?.length ?? r.retention_pct?.length ?? 0;
-        return Math.max(max, len);
-      }, 6);
-
+      res?.months ?? rows.reduce((max, r) => Math.max(max, r.retention_by_month?.length ?? 0), 0);
     return { cohorts: rows, max_months: maxMonths || 6 };
   }
 }

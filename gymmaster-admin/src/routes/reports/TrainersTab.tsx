@@ -175,7 +175,8 @@ export default function TrainersTab(f: ReportFilters) {
                 <Table.Summary.Cell index={2} align="right">
                   {t.rating_count && t.rating_count > 0 ? (
                     <b>
-                      {Number(t.rating_avg ?? 0).toFixed(1)} ⭐ ({formatNumber(t.rating_count)} lượt)
+                      {Number(t.rating_avg ?? 0).toFixed(1)} ⭐ ({formatNumber(t.rating_count)}{' '}
+                      lượt)
                     </b>
                   ) : (
                     '—'

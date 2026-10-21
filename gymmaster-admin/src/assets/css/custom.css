@@ -7,6 +7,51 @@
   --gm-bg: #f3f5f8;
   --gm-border: #eceff3;
   --gm-text-secondary: #6b7280;
+  --gm-surface: #ffffff;
+  --gm-hover: #f5f6f8;
+  --gm-unread: #fff7ed;
+  --gm-text-muted: #666666;
+  --gm-ink: #111827;
+  --gm-tone-navy-fg: #0a3150;
+  --gm-tone-navy-bg: #e9eff5;
+  --gm-tone-slate-fg: #4b5563;
+  --gm-tone-slate-bg: #f1f3f6;
+  --gm-tone-green-fg: #12805c;
+  --gm-tone-green-bg: #e5f6f0;
+  --gm-tone-orange-fg: #c2410c;
+  --gm-tone-orange-bg: #fff1e6;
+}
+
+/* Chế độ tối – App.tsx đặt data-theme trên <html>. */
+:root[data-theme='dark'] {
+  --gm-primary: #5b9bd5;
+  --gm-bg: #000000;
+  --gm-border: #303030;
+  --gm-text-secondary: rgba(255, 255, 255, 0.55);
+  --gm-surface: #141414;
+  --gm-hover: rgba(255, 255, 255, 0.08);
+  --gm-unread: rgba(249, 115, 22, 0.14);
+  --gm-text-muted: rgba(255, 255, 255, 0.55);
+  --gm-ink: rgba(255, 255, 255, 0.88);
+  --gm-tone-navy-fg: #7cb3e6;
+  --gm-tone-navy-bg: rgba(91, 155, 213, 0.18);
+  --gm-tone-slate-fg: rgba(255, 255, 255, 0.65);
+  --gm-tone-slate-bg: rgba(255, 255, 255, 0.1);
+  --gm-tone-green-fg: #4ade80;
+  --gm-tone-green-bg: rgba(74, 222, 128, 0.14);
+  --gm-tone-orange-fg: #fb923c;
+  --gm-tone-orange-bg: rgba(249, 115, 22, 0.16);
+}
+
+/* Logo: chữ "Gym" navy → trắng trong chế độ tối (logo-dark.svg). */
+.app-logo__img--dark {
+  display: none;
+}
+:root[data-theme='dark'] .app-logo__img--light {
+  display: none;
+}
+:root[data-theme='dark'] .app-logo__img--dark {
+  display: inline;
 }
 
 html,
@@ -60,7 +105,7 @@ body {
 }
 
 .mobile-branch-bar {
-  background: #fff;
+  background: var(--gm-surface);
   padding: 8px 16px;
   border-bottom: 1px solid var(--gm-border);
 }
@@ -75,7 +120,7 @@ body {
 }
 
 .site-layout-background {
-  background: #fff;
+  background: var(--gm-surface);
   border-radius: 12px;
   min-height: 480px;
 }
@@ -95,6 +140,7 @@ body {
 /* ------------------------------------------------------------------ header */
 
 .user-trigger {
+  color: inherit;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -107,7 +153,7 @@ body {
 }
 
 .user-trigger:hover {
-  background: #f5f6f8;
+  background: var(--gm-hover);
 }
 
 .user-trigger__name {
@@ -146,11 +192,11 @@ body {
 }
 
 .notif-item:hover {
-  background: #f5f7fa;
+  background: var(--gm-hover);
 }
 
 .notif-item--unread {
-  background: #fff7ed;
+  background: var(--gm-unread);
 }
 
 /* ------------------------------------------------------------- page parts */
@@ -167,6 +213,27 @@ body {
 @media (max-width: 575px) {
   .page-card > .ant-card-body {
     padding: 12px;
+  }
+}
+
+/* Card có tiêu đề dài + nút ở "extra": cho xuống dòng thay vì chồng lên nhau trên điện thoại. */
+.gm-card-wrap-head > .ant-card-head {
+  padding-block: 10px;
+}
+.gm-card-wrap-head > .ant-card-head .ant-card-head-wrapper {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gm-card-wrap-head > .ant-card-head .ant-card-head-title {
+  white-space: normal;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+/* StatCard: thẻ hẹp → ẩn icon để số tiền dài (kèm "₫") không bị cắt/xuống dòng. */
+@container (max-width: 160px) {
+  .gm-stat-card__icon {
+    display: none !important;
   }
 }
 
@@ -210,7 +277,7 @@ body {
 }
 
 .dates-updated {
-  color: #666;
+  color: var(--gm-text-muted);
   font-size: 12px;
 }
 

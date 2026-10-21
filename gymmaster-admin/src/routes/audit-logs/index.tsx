@@ -23,7 +23,13 @@ import type { ColumnsType } from 'antd/es/table';
 import { EyeOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import auditApi, { auditActionLabel, auditEntityLabel } from '@/api/audit';
+import auditApi, {
+  AUDIT_ACTION_LABEL,
+  AUDIT_ENTITY_LABEL,
+  auditActionLabel,
+  auditEntityLabel,
+  buildAuditOptions,
+} from '@/api/audit';
 import type { AuditChange, AuditLog, AuditLogListParams } from '@/api/audit';
 import ActionBar from '@/components/ActionBar';
 import DataTable from '@/components/DataTable';
@@ -57,6 +63,10 @@ const ACTION_COLOR: Record<string, string> = {
   ADJUST: 'gold',
   LOCK: 'red',
   UNLOCK: 'green',
+  LOGIN: 'blue',
+  LOGIN_FAILED: 'red',
+  RESET_PASSWORD: 'orange',
+  CHANGE_PASSWORD: 'orange',
 };
 
 function formatDiffValue(val: unknown): string {
@@ -119,7 +129,7 @@ function AuditDetailDrawer({ logId, onClose }: { logId: number | null; onClose: 
                 label: 'Hành động',
                 children: (
                   <Tag color={ACTION_COLOR[d.action] ?? 'default'}>
-                    {auditActionLabel(d.action)} ({d.action})
+                    {auditActionLabel(d.action, d.entity)} ({d.action})
                   </Tag>
                 ),
               },
@@ -226,12 +236,12 @@ function useAuditFilterOptions() {
   });
 
   const entityOptions = useMemo(
-    () => (q.data?.entities ?? []).map((e) => ({ value: e, label: `${auditEntityLabel(e)} (${e})` })),
+    () => buildAuditOptions(q.data?.entities, AUDIT_ENTITY_LABEL, auditEntityLabel),
     [q.data?.entities],
   );
 
   const actionOptions = useMemo(
-    () => (q.data?.actions ?? []).map((a) => ({ value: a, label: `${auditActionLabel(a)} (${a})` })),
+    () => buildAuditOptions(q.data?.actions, AUDIT_ACTION_LABEL, (a) => auditActionLabel(a)),
     [q.data?.actions],
   );
 
@@ -293,8 +303,8 @@ function AuditLogsDesktop() {
       {
         title: 'Hành động',
         dataIndex: 'action',
-        render: (v: string) => (
-          <Tag color={ACTION_COLOR[v] ?? 'default'}>{auditActionLabel(v)}</Tag>
+        render: (v: string, r) => (
+          <Tag color={ACTION_COLOR[v] ?? 'default'}>{auditActionLabel(v, r.entity)}</Tag>
         ),
       },
       {
@@ -428,13 +438,13 @@ function AuditLogsMobile() {
           { name: 'range', label: 'Khoảng ngày', type: 'daterange' },
         ]}
         row={{
-          title: (r) =>
-            `${auditEntityLabel(r.entity)}${r.entity_id ? ` #${r.entity_id}` : ''}`,
-          subtitle: (r) => `${r.actor_name || 'Hệ thống'}${r.actor_email ? ` · ${r.actor_email}` : ''}`,
+          title: (r) => `${auditEntityLabel(r.entity)}${r.entity_id ? ` #${r.entity_id}` : ''}`,
+          subtitle: (r) =>
+            `${r.actor_name || 'Hệ thống'}${r.actor_email ? ` · ${r.actor_email}` : ''}`,
           meta: (r) => [formatDateTime(r.created_at), r.ip],
           tags: (r) => [
             {
-              label: auditActionLabel(r.action),
+              label: auditActionLabel(r.action, r.entity),
               color: ACTION_COLOR[r.action] ?? 'default',
             },
           ],

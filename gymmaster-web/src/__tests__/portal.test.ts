@@ -23,6 +23,13 @@ import {
   createSurveyResponseSchema,
   createWorkoutLogSchema,
 } from '@/features/portal/schema';
+import {
+  DEFAULT_DEMO_KEY,
+  DEVICE_KEY_STORAGE,
+  DEV_QUICK_CODES,
+  maskDeviceKey,
+  readStoredDeviceKey,
+} from '@/features/kiosk/kiosk-utils';
 import { formatCurrency, formatDate, formatDateTime, initials } from '@/lib/format';
 import { buildUrl, sendRequest } from '@/lib/http.core';
 import { ApiCode, ApiError } from '@/types/api';
@@ -253,7 +260,7 @@ describe('gymmaster-web: features/portal/schema & features/auth/schema', () => {
         exercise_id: 1,
         sets: 4,
         reps: 10,
-        weight_kg: 60,
+        weight: 60,
         note: 'Tốt',
       }).success,
       true,
@@ -263,7 +270,7 @@ describe('gymmaster-web: features/portal/schema & features/auth/schema', () => {
         exercise_id: 0,
         sets: 0,
         reps: 0,
-        weight_kg: -5,
+        weight: -5,
         note: '',
       }).success,
       false,
@@ -375,5 +382,40 @@ describe('gymmaster-web: messages/vi translations completeness', () => {
     ]) {
       assert.ok(portal.status[statusGroup], `portal.status phải có nhóm ${statusGroup}`);
     }
+  });
+});
+
+describe('gymmaster-web: features/kiosk/kiosk-utils', () => {
+  it('maskDeviceKey che phần giữa, không lộ khóa đầy đủ', () => {
+    assert.equal(maskDeviceKey('GMD-demo-kiosk-cg01'), 'GMD-••••cg01');
+    assert.equal(maskDeviceKey('GMD-0123456789abcdef0123456789abcdef'), 'GMD-••••cdef');
+    assert.equal(maskDeviceKey('abcdefghijkl'), '••••ijkl');
+    assert.equal(maskDeviceKey('short'), '••••');
+    assert.equal(maskDeviceKey(''), '');
+    assert.equal(maskDeviceKey(null), '');
+    assert.ok(!maskDeviceKey('GMD-demo-kiosk-cg01').includes('demo-kiosk'));
+  });
+
+  it('readStoredDeviceKey: dùng khóa đã lưu, rỗng/lỗi → khóa demo ở dev, rỗng ở prod', () => {
+    const store = (v: string | null) => ({ getItem: (k: string) => (k === DEVICE_KEY_STORAGE ? v : null) });
+    assert.equal(readStoredDeviceKey(store('  GMD-abc  ')), 'GMD-abc');
+    assert.equal(readStoredDeviceKey(store('  GMD-abc  '), true), 'GMD-abc');
+    assert.equal(readStoredDeviceKey(store('   ')), DEFAULT_DEMO_KEY);
+    assert.equal(readStoredDeviceKey(store(null)), DEFAULT_DEMO_KEY);
+    assert.equal(readStoredDeviceKey(null), DEFAULT_DEMO_KEY);
+    assert.equal(readStoredDeviceKey(store('   '), true), '');
+    assert.equal(readStoredDeviceKey(store(null), true), '');
+    assert.equal(readStoredDeviceKey(null, true), '');
+    const throwing = {
+      getItem: () => {
+        throw new Error('blocked');
+      },
+    };
+    assert.equal(readStoredDeviceKey(throwing), DEFAULT_DEMO_KEY);
+    assert.equal(readStoredDeviceKey(throwing, true), '');
+  });
+
+  it('mã thử nhanh chỉ gồm vé DP-/TP- (máy chủ không nhận mã hội viên dạng GMxxxx)', () => {
+    for (const code of DEV_QUICK_CODES) assert.match(code, /^(DP|TP)-/);
   });
 });

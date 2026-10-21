@@ -20,6 +20,15 @@ type (
 		Delete(ctx context.Context, id uint, deletedBy *uint) error
 		// CountStaff đếm số tài khoản đang được gán role tại chi nhánh.
 		CountStaff(ctx context.Context, id uint) (int64, error)
+		// Dependencies đếm dữ liệu nghiệp vụ còn gắn với chi nhánh (chặn xóa chi nhánh).
+		Dependencies(ctx context.Context, id uint) (BranchDependencies, error)
+	}
+
+	// BranchDependencies: hội viên (chi nhánh gốc), gói tập chưa kết thúc, hóa đơn thuộc chi nhánh.
+	BranchDependencies struct {
+		Members    int64
+		ActiveSubs int64
+		Invoices   int64
 	}
 
 	branchRepository struct {
@@ -91,4 +100,13 @@ func (r *branchRepository) CountStaff(ctx context.Context, id uint) (int64, erro
 	var n int64
 	err := postgres.Conn(ctx, r.db).Model(&entity.UserRole{}).Where("branch_id = ?", id).Count(&n).Error
 	return n, err
+}
+
+func (r *branchRepository) Dependencies(ctx context.Context, id uint) (BranchDependencies, error) {
+	var d BranchDependencies
+	err := postgres.Conn(ctx, r.db).Raw(`SELECT
+		(SELECT COUNT(*) FROM members WHERE home_branch_id = ? AND deleted_at IS NULL) AS members,
+		(SELECT COUNT(*) FROM subscriptions WHERE branch_id = ? AND status IN ('PENDING', 'ACTIVE', 'FROZEN')) AS active_subs,
+		(SELECT COUNT(*) FROM invoices WHERE branch_id = ?) AS invoices`, id, id, id).Scan(&d).Error
+	return d, err
 }

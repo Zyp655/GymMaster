@@ -271,6 +271,8 @@ export default function PromotionForm({ open, record, onClose }: PromotionFormPr
                 format={DATETIME_FORMAT}
                 style={{ width: '100%' }}
                 placeholder={['Bắt đầu', 'Kết thúc']}
+                // Form bị disabled khi chỉ có quyền xem; antd cảnh báo nếu RangePicker disabled mà rỗng.
+                allowEmpty={readOnly ? [true, true] : undefined}
               />
             </Form.Item>
           </Col>

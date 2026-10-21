@@ -4,6 +4,8 @@ import type { JWT } from 'next-auth/jwt';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { getServerEnv } from '@/env';
 import { loginRequest, logoutRequest, refreshRequest } from '@/features/auth/server';
+import { clientInfoHeaders } from '@/lib/client-info';
+import { resolveAuthRedirect } from '@/lib/safe-return-url';
 import { ApiCode, isApiError } from '@/types/api';
 import type { LoginResponse } from '@/types/auth';
 
@@ -62,13 +64,22 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         email: { type: 'email' },
         password: { type: 'password' },
+        mfa_code: { type: 'text' },
       },
-      async authorize(credentials): Promise<User> {
+      async authorize(credentials, req): Promise<User> {
         if (!credentials?.email || !credentials.password) {
           throw new Error(String(ApiCode.INVALID_CREDENTIALS));
         }
         try {
-          const data = await loginRequest(credentials.email, credentials.password);
+          const mfaCode = credentials.mfa_code?.trim() || undefined;
+          // Đăng nhập chạy trên server Next → chuyển tiếp UA/IP thật của trình duyệt cho API
+          // (danh sách phiên hiển thị đúng thiết bị thay vì "node" / ::1).
+          const data = await loginRequest(
+            credentials.email,
+            credentials.password,
+            mfaCode,
+            clientInfoHeaders(req?.headers),
+          );
           const token = tokenFromLogin(data);
           return {
             id: String(data.user.id),
@@ -85,6 +96,10 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
+    /** Chống open-redirect: chỉ cho về đường dẫn nội bộ ("/x", không "//" hay "/\"). */
+    async redirect({ url, baseUrl }) {
+      return resolveAuthRedirect(url, baseUrl);
+    },
     async jwt({ token, user, trigger, session }) {
       if (user) {
         return {

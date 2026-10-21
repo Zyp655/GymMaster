@@ -23,6 +23,9 @@ type Payload struct {
 	Roles       []string `json:"roles"`
 	Permissions []string `json:"perms"`
 	BranchIDs   []uint   `json:"branches"`
+	// SessionID = id refresh token (phiên đăng nhập) cấp cùng access token này; 0 với token cũ.
+	// Dùng để nhận biết "phiên hiện tại" (danh sách phiên, đăng xuất thiết bị khác).
+	SessionID uint `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -37,6 +40,8 @@ func (p *Payload) HasPermission(perm string) bool {
 // Maker tạo và kiểm tra access token.
 type Maker interface {
 	CreateToken(userID uint, roles, permissions []string, branchIDs []uint) (string, *Payload, error)
+	// CreateSessionToken giống CreateToken nhưng gắn id phiên (refresh token) vào claim "sid".
+	CreateSessionToken(userID, sessionID uint, roles, permissions []string, branchIDs []uint) (string, *Payload, error)
 	VerifyToken(token string) (*Payload, error)
 }
 
@@ -56,9 +61,14 @@ func NewJWTMaker(secret, issuer string, ttl time.Duration) (Maker, error) {
 }
 
 func (m *jwtMaker) CreateToken(userID uint, roles, permissions []string, branchIDs []uint) (string, *Payload, error) {
+	return m.CreateSessionToken(userID, 0, roles, permissions, branchIDs)
+}
+
+func (m *jwtMaker) CreateSessionToken(userID, sessionID uint, roles, permissions []string, branchIDs []uint) (string, *Payload, error) {
 	now := time.Now()
 	p := &Payload{
 		UserID:      userID,
+		SessionID:   sessionID,
 		Roles:       roles,
 		Permissions: permissions,
 		BranchIDs:   branchIDs,

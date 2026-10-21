@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -30,11 +32,15 @@ type (
 	roleService struct {
 		roleRepo repository.RoleRepository
 		tx       postgres.TxManager
+		audit    AuditService
 	}
 )
 
-func NewRoleService(roleRepo repository.RoleRepository, tx postgres.TxManager) RoleService {
-	return &roleService{roleRepo: roleRepo, tx: tx}
+const auditEntityRole = "role"
+
+// NewRoleService: audit tùy chọn (test đơn vị có thể bỏ qua).
+func NewRoleService(roleRepo repository.RoleRepository, tx postgres.TxManager, audit ...AuditService) RoleService {
+	return &roleService{roleRepo: roleRepo, tx: tx, audit: optionalAudit(audit)}
 }
 
 func (s *roleService) ListPermissions(ctx context.Context) ([]*v1.Permission, error) {
@@ -73,6 +79,9 @@ func (s *roleService) Create(ctx context.Context, req *v1.CreateReq) (*v1.Role, 
 	if err != nil {
 		return nil, err
 	}
+	if err := ensureCanGrantPermissions(ctx, perms); err != nil {
+		return nil, err
+	}
 
 	role := &entity.Role{Code: req.Code, Name: req.Name, Description: req.Description}
 	role.CreatedBy = reqctx.UserID(ctx)
@@ -86,7 +95,12 @@ func (s *roleService) Create(ctx context.Context, req *v1.CreateReq) (*v1.Role, 
 	if err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, role.ID)
+	res, err := s.Get(ctx, role.ID)
+	if err != nil {
+		return nil, err
+	}
+	auditLogSafe(s.audit, ctx, AuditCreate, auditEntityRole, role.ID, nil, res)
+	return res, nil
 }
 
 func (s *roleService) Update(ctx context.Context, req *v1.UpdateReq) (*v1.Role, error) {
@@ -94,10 +108,17 @@ func (s *roleService) Update(ctx context.Context, req *v1.UpdateReq) (*v1.Role, 
 	if err != nil {
 		return nil, err
 	}
+	if err := ensureCanManageRole(ctx, role); err != nil {
+		return nil, err
+	}
 	perms, err := s.resolvePermissions(ctx, req.Permissions)
 	if err != nil {
 		return nil, err
 	}
+	if err := ensureCanGrantPermissions(ctx, perms); err != nil {
+		return nil, err
+	}
+	before := toRoleRes(*role)
 	// OWNER luôn giữ toàn quyền để không thể tự khóa mình khỏi hệ thống.
 	if role.Code == consts.RoleOwner {
 		if perms, err = s.roleRepo.ListPermissions(ctx); err != nil {
@@ -117,7 +138,12 @@ func (s *roleService) Update(ctx context.Context, req *v1.UpdateReq) (*v1.Role, 
 	if err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, role.ID)
+	after, err := s.Get(ctx, role.ID)
+	if err != nil {
+		return nil, err
+	}
+	auditLogSafe(s.audit, ctx, AuditUpdate, auditEntityRole, role.ID, before, after)
+	return after, nil
 }
 
 func (s *roleService) Delete(ctx context.Context, id uint) error {
@@ -128,6 +154,9 @@ func (s *roleService) Delete(ctx context.Context, id uint) error {
 	if role.IsSystem {
 		return rescode.New(rescode.Conflict, "Không thể xóa vai trò hệ thống")
 	}
+	if err := ensureCanManageRole(ctx, role); err != nil {
+		return err
+	}
 	n, err := s.roleRepo.CountUsers(ctx, id)
 	if err != nil {
 		return err
@@ -135,7 +164,55 @@ func (s *roleService) Delete(ctx context.Context, id uint) error {
 	if n > 0 {
 		return rescode.New(rescode.Conflict, "Không thể xóa vai trò đang được gán cho người dùng")
 	}
-	return s.roleRepo.Delete(ctx, id)
+	if err := s.roleRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	auditLogSafe(s.audit, ctx, AuditDelete, auditEntityRole, id, toRoleRes(*role), nil)
+	return nil
+}
+
+// ---- chống leo thang đặc quyền ------------------------------------------------
+
+// missingPermissions trả các mã quyền trong perms mà người thao tác hiện tại KHÔNG có.
+// OWNER có mọi quyền nên luôn trả rỗng.
+func missingPermissions(ctx context.Context, perms []entity.Permission) []string {
+	if reqctx.HasRole(ctx, consts.RoleOwner) {
+		return nil
+	}
+	var missing []string
+	for _, p := range perms {
+		if !reqctx.HasPermission(ctx, p.Code) {
+			missing = append(missing, p.Code)
+		}
+	}
+	return missing
+}
+
+// ensureCanGrantPermissions: người không phải OWNER chỉ được cấp các quyền mà chính mình đang có.
+func ensureCanGrantPermissions(ctx context.Context, perms []entity.Permission) error {
+	if missing := missingPermissions(ctx, perms); len(missing) > 0 {
+		return rescode.New(rescode.PermissionDenied, fmt.Sprintf(
+			"Bạn không thể cấp quyền mà chính mình không có: %s", strings.Join(missing, ", ")))
+	}
+	return nil
+}
+
+// ensureCanManageRole: người không phải OWNER không được sửa/xóa vai trò OWNER, vai trò mình đang giữ
+// (tránh tự nâng quyền) và vai trò có quyền vượt ngoài quyền của mình.
+func ensureCanManageRole(ctx context.Context, role *entity.Role) error {
+	if reqctx.HasRole(ctx, consts.RoleOwner) {
+		return nil
+	}
+	if role.Code == consts.RoleOwner {
+		return rescode.New(rescode.PermissionDenied, "Chỉ chủ trung tâm mới được thay đổi vai trò chủ trung tâm")
+	}
+	if reqctx.HasRole(ctx, role.Code) {
+		return rescode.New(rescode.PermissionDenied, "Không thể tự thay đổi vai trò mà chính mình đang giữ")
+	}
+	if len(missingPermissions(ctx, role.Permissions)) > 0 {
+		return rescode.New(rescode.PermissionDenied, "Không thể thay đổi vai trò có quyền cao hơn quyền của bạn")
+	}
+	return nil
 }
 
 func (s *roleService) find(ctx context.Context, id uint) (*entity.Role, error) {

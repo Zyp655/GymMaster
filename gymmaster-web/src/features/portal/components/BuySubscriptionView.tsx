@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -59,22 +59,11 @@ export function BuySubscriptionView() {
   const plans = plansQuery.data?.membership_plans ?? [];
   const branches = branchesQuery.data ?? [];
 
-  useEffect(() => {
-    if (plans.length > 0 && selectedPlanId === null) {
-      setSelectedPlanId(plans[0].id);
-    }
-  }, [plans, selectedPlanId]);
+  const effectivePlanId = selectedPlanId ?? plans[0]?.id ?? null;
+  const effectiveBranchId =
+    selectedBranchId ?? profileQuery.data?.branch?.id ?? branches[0]?.id ?? null;
 
-  useEffect(() => {
-    if (selectedBranchId !== null) return;
-    if (profileQuery.data?.branch?.id) {
-      setSelectedBranchId(profileQuery.data.branch.id);
-    } else if (branches.length > 0) {
-      setSelectedBranchId(branches[0].id);
-    }
-  }, [branches, profileQuery.data?.branch?.id, selectedBranchId]);
-
-  const selectedPlan = plans.find(p => p.id === selectedPlanId) ?? null;
+  const selectedPlan = plans.find(p => p.id === effectivePlanId) ?? null;
 
   const handleSelectPlan = (planId: number) => {
     setSelectedPlanId(planId);
@@ -108,7 +97,7 @@ export function BuySubscriptionView() {
     try {
       const res = await checkoutMutation.mutateAsync({
         plan_id: selectedPlan.id,
-        branch_id: selectedBranchId ?? undefined,
+        branch_id: effectiveBranchId ?? undefined,
         promotion_code: appliedPromo?.code ?? undefined,
       });
       if (res.payment_url) {
@@ -167,7 +156,7 @@ export function BuySubscriptionView() {
               <h2 className="text-h3 font-semibold text-primary">{t('stepPlan')}</h2>
               <div className="grid gap-4 sm:grid-cols-2">
                 {plans.map(plan => {
-                  const isSelected = plan.id === selectedPlanId;
+                  const isSelected = plan.id === effectivePlanId;
                   return (
                     <button
                       key={plan.id}
@@ -235,7 +224,7 @@ export function BuySubscriptionView() {
               <div className="grid gap-2">
                 <Label className="text-h4 font-semibold text-primary">{t('stepBranch')}</Label>
                 <Select
-                  value={selectedBranchId ? String(selectedBranchId) : undefined}
+                  value={effectiveBranchId ? String(effectiveBranchId) : ''}
                   onValueChange={v => setSelectedBranchId(Number(v))}
                 >
                   <SelectTrigger>

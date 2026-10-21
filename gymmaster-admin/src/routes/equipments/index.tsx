@@ -365,7 +365,7 @@ function MaintenanceModal({
 
   const equipmentsQuery = useQuery({
     queryKey: [equipmentApi.key, 'options'],
-    queryFn: () => equipmentApi.list({ limit: 200 }),
+    queryFn: () => equipmentApi.list({ limit: 100 }),
     enabled: open && !isEdit,
   });
 
@@ -488,6 +488,8 @@ function EquipmentsTab() {
   const { branchId } = useWorkingBranch();
   const { branches } = useBranchOptions();
   const canManage = can(PERM.EQUIPMENT_MANAGE);
+  // Báo hỏng: backend cho phép equipment.view hoặc equipment.manage (POST /equipments/{id}/report-issue).
+  const canReport = can([PERM.EQUIPMENT_VIEW, PERM.EQUIPMENT_MANAGE]);
 
   const [modal, setModal] = useState<{ open: boolean; record: Equipment | null }>({
     open: false,
@@ -535,11 +537,20 @@ function EquipmentsTab() {
         title: 'Tên thiết bị',
         dataIndex: 'name',
         render: (name: string, r) => (
-          <Space direction="vertical" size={0}>
-            <Typography.Text strong>{name}</Typography.Text>
-            {r.room_name && (
+          <Space direction="vertical" size={0} style={{ maxWidth: 220 }}>
+            <Typography.Text strong ellipsis={{ tooltip: name }} style={{ maxWidth: 220 }}>
+              {name}
+            </Typography.Text>
+            {/* Chi nhánh / phòng gộp vào dòng phụ (bỏ cột Chi nhánh) để bảng vừa màn 1440px,
+                cột thao tác cố định bên phải không che cột Trạng thái. */}
+            {(!branchId || r.room_name) && (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                Phòng: {r.room_name}
+                {[
+                  branchId ? null : r.branch_name || `CN #${r.branch_id}`,
+                  r.room_name ? `Phòng: ${r.room_name}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </Typography.Text>
             )}
           </Space>
@@ -548,12 +559,14 @@ function EquipmentsTab() {
       {
         title: 'Danh mục',
         dataIndex: 'category',
-        render: (c: EquipmentCategory) => EQUIPMENT_CATEGORY_LABELS[c] ?? c,
-      },
-      {
-        title: 'Chi nhánh',
-        dataIndex: 'branch_name',
-        render: (v: string | undefined, r) => v || `CN #${r.branch_id}`,
+        render: (c: EquipmentCategory) => {
+          const label = EQUIPMENT_CATEGORY_LABELS[c] ?? c;
+          return (
+            <Typography.Text ellipsis={{ tooltip: label }} style={{ maxWidth: 150 }}>
+              {label}
+            </Typography.Text>
+          );
+        },
       },
       {
         title: 'Giá mua',
@@ -584,19 +597,20 @@ function EquipmentsTab() {
         title: '',
         key: 'actions',
         fixed: 'right',
-        width: 140,
+        width: 104,
         render: (_, r) => (
-          <Space size={4}>
-            {canManage && r.status === 'ACTIVE' && (
+          // Nút gọn (chỉ biểu tượng + tooltip) để cột cố định bên phải không che các cột khác ở 1440px.
+          <Space size={4} wrap={false}>
+            {canReport && r.status === 'ACTIVE' && (
               <Tooltip title="Báo hỏng thiết bị">
                 <Button
+                  type="text"
                   size="small"
                   danger
                   icon={<AlertOutlined />}
+                  aria-label="Báo hỏng"
                   onClick={() => setIssueTarget(r)}
-                >
-                  Báo hỏng
-                </Button>
+                />
               </Tooltip>
             )}
             {canManage && (
@@ -624,7 +638,7 @@ function EquipmentsTab() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canManage],
+    [canManage, canReport, branchId],
   );
 
   return (
@@ -773,6 +787,11 @@ function MaintenanceLogsTab() {
       {
         title: 'Mô tả công việc / sự cố',
         dataIndex: 'description',
+        render: (v: string) => (
+          <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth: 260 }}>
+            {v}
+          </Typography.Text>
+        ),
       },
       {
         title: 'Chi phí',

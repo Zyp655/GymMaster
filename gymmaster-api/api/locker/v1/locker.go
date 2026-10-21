@@ -71,13 +71,13 @@ type ListLockersRes []*LockerItem
 
 type CreateLockerReq struct {
 	g.Meta     `path:"/lockers" method:"post" tags:"Tủ đồ" summary:"Tạo tủ đồ mới" perm:"locker.manage"`
-	BranchID   uint    `json:"branch_id"   v:"required|min:1"`
-	Code       string  `json:"code"        v:"required"`
-	Zone       string  `json:"zone"        d:"Khu A"`
-	Size       string  `json:"size"        d:"STANDARD" v:"in:SMALL,STANDARD,LARGE"`
-	MonthlyFee float64 `json:"monthly_fee" d:"150000"   v:"min:0"`
-	Status     string  `json:"status"      d:"AVAILABLE" v:"in:AVAILABLE,OCCUPIED,RENTED,BROKEN"`
-	Note       string  `json:"note"`
+	BranchID   uint     `json:"branch_id"   v:"required|min:1"`
+	Code       string   `json:"code"        v:"required"`
+	Zone       string   `json:"zone"        d:"Khu A"`
+	Size       string   `json:"size"        d:"STANDARD" v:"in:SMALL,STANDARD,LARGE"`
+	MonthlyFee *float64 `json:"monthly_fee" v:"min:0" dc:"Bỏ trống = 150.000đ; 0 = tủ miễn phí"`
+	Status     string   `json:"status"      d:"AVAILABLE" v:"in:AVAILABLE,OCCUPIED,RENTED,BROKEN"`
+	Note       string   `json:"note"`
 }
 type CreateLockerRes = LockerItem
 

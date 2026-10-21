@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"gorm.io/gorm"
 
@@ -95,6 +96,30 @@ func NewBookingService(
 	}
 }
 
+// bookingCheckScheduleGuard: không nhận đặt chỗ khi buổi lớp rơi vào ngày lễ đóng cửa / ngoài giờ đặc biệt, hoặc HLV
+// thực dạy (dạy thay nếu có) đang nghỉ phép đã duyệt (chờ quản lý phân công dạy thay hoặc hủy buổi).
+func bookingCheckScheduleGuard(ctx context.Context, sch *entity.ClassSchedule) error {
+	guard := currentScheduleGuard()
+	h, err := guard.HolidayOn(ctx, sch.BranchID, sch.StartAt)
+	if err != nil {
+		return err
+	}
+	if msg := holidaySlotViolation(h, sch.StartAt, sch.EndAt); msg != "" {
+		return rescode.New(rescode.BranchHolidayClosed, msg+", không thể đặt chỗ")
+	}
+	teacher := sch.TrainerID
+	if sch.SubstituteTrainerID != nil {
+		teacher = *sch.SubstituteTrainerID
+	}
+	if err := guard.CheckTrainerLeave(ctx, teacher, sch.StartAt, sch.EndAt); err != nil {
+		if gerror.Code(err) == rescode.TrainerOnLeave {
+			return rescode.New(rescode.TrainerOnLeave, "HLV của buổi lớp đang nghỉ phép, chưa thể đặt chỗ (chờ phân công HLV dạy thay)")
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *bookingService) Book(ctx context.Context, scheduleID, memberID uint, source string) (*entity.ClassBooking, error) {
 	if source == "" {
 		source = entity.BookingSourceCounter
@@ -124,6 +149,9 @@ func (s *bookingService) Book(ctx context.Context, scheduleID, memberID uint, so
 		lastDay := now.In(s.loc).AddDate(0, 0, advanceDays).Format(consts.DateLayout)
 		if classDay > lastDay {
 			return rescode.New(rescode.BadRequest, fmt.Sprintf("Chỉ được đặt lớp trước tối đa %d ngày", advanceDays))
+		}
+		if err := bookingCheckScheduleGuard(ctx, sch); err != nil {
+			return err
 		}
 
 		m, err := s.bookingRepo.FindMember(ctx, memberID)
@@ -286,6 +314,7 @@ func (s *bookingService) MarkAttendance(ctx context.Context, scheduleID uint, it
 	now := s.now()
 	updated := 0
 	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
+		var noShowMembers []uint
 		sch, err := s.lockSchedule(ctx, scheduleID)
 		if err != nil {
 			return err
@@ -322,6 +351,7 @@ func (s *bookingService) MarkAttendance(ctx context.Context, scheduleID uint, it
 				return rescode.New(rescode.BadRequest,
 					fmt.Sprintf("Lượt đặt chỗ #%d đang ở trạng thái %s, không thể điểm danh", it.BookingID, b.Status))
 			}
+			prevStatus := b.Status
 			b.Status = it.Status
 			if it.Status == entity.BookingStatusAttended {
 				t := now
@@ -332,9 +362,21 @@ func (s *bookingService) MarkAttendance(ctx context.Context, scheduleID uint, it
 			if err := s.bookingRepo.UpdateStatus(ctx, b); err != nil {
 				return err
 			}
+			if it.Status == entity.BookingStatusNoShow && prevStatus != entity.BookingStatusNoShow {
+				noShowMembers = append(noShowMembers, b.MemberID)
+				// Sửa ATTENDED → NO_SHOW: đánh giá lớp hội viên đã gửi (chỉ được gửi khi đã tham gia) bị gỡ.
+				if prevStatus == entity.BookingStatusAttended {
+					if rr, ok := s.bookingRepo.(bookingReviewRemover); ok {
+						if err := rr.DeleteClassReview(ctx, b.MemberID, sch.ID); err != nil {
+							return err
+						}
+					}
+				}
+			}
 			updated++
 		}
-		return nil
+		// Vắng mặt điểm danh tay được tính vào hạn mức khóa đặt lớp giống cron MarkNoShows.
+		return s.applyNoShowBlocks(ctx, noShowMembers, now)
 	})
 	if err != nil {
 		return 0, err
@@ -343,8 +385,6 @@ func (s *bookingService) MarkAttendance(ctx context.Context, scheduleID uint, it
 }
 
 func (s *bookingService) MarkNoShows(ctx context.Context, now time.Time) (int, error) {
-	limit := s.settings.Int(ctx, SettingBookingNoShowLimit, bookingDefaultNoShowLimit)
-	blockDays := s.settings.Int(ctx, SettingBookingBlockDays, bookingDefaultBlockDays)
 	marked := 0
 	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
 		memberIDs, err := s.bookingRepo.MarkNoShows(ctx, now.Add(-bookingNoShowGrace))
@@ -355,44 +395,60 @@ func (s *bookingService) MarkNoShows(ctx context.Context, now time.Time) (int, e
 		if _, err := s.scheduleRepo.CompleteEnded(ctx, now); err != nil {
 			return err
 		}
-		if limit <= 0 {
-			return nil
-		}
-		since := now.AddDate(0, 0, -bookingNoShowWindowDays)
-		until := now.AddDate(0, 0, blockDays)
-		seen := map[uint]bool{}
-		for _, id := range memberIDs {
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			n, err := s.bookingRepo.CountNoShows(ctx, id, since)
-			if err != nil {
-				return err
-			}
-			if n < int64(limit) {
-				continue
-			}
-			m, err := s.bookingRepo.FindMember(ctx, id)
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					continue
-				}
-				return err
-			}
-			if m.BookingBlockedUntil != nil && !m.BookingBlockedUntil.Before(until) {
-				continue
-			}
-			if err := s.bookingRepo.SetMemberBlockedUntil(ctx, id, until); err != nil {
-				return err
-			}
-		}
-		return nil
+		return s.applyNoShowBlocks(ctx, memberIDs, now)
 	})
 	if err != nil {
 		return 0, err
 	}
 	return marked, nil
+}
+
+// bookingReviewRemover: repo gỡ đánh giá lớp của hội viên (repo thật cài; repo giả trong test có thể không).
+type bookingReviewRemover interface {
+	DeleteClassReview(ctx context.Context, memberID, scheduleID uint) error
+}
+
+// applyNoShowBlocks khóa đặt lớp (booking.block_days) các hội viên có số lần NO_SHOW trong 30 ngày ≥ booking.no_show_limit.
+// Dùng chung cho cron MarkNoShows và điểm danh tay NO_SHOW. Chạy trong transaction của người gọi.
+func (s *bookingService) applyNoShowBlocks(ctx context.Context, memberIDs []uint, now time.Time) error {
+	if len(memberIDs) == 0 {
+		return nil
+	}
+	limit := s.settings.Int(ctx, SettingBookingNoShowLimit, bookingDefaultNoShowLimit)
+	blockDays := s.settings.Int(ctx, SettingBookingBlockDays, bookingDefaultBlockDays)
+	if limit <= 0 {
+		return nil
+	}
+	since := now.AddDate(0, 0, -bookingNoShowWindowDays)
+	until := now.AddDate(0, 0, blockDays)
+	seen := map[uint]bool{}
+	for _, id := range memberIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		n, err := s.bookingRepo.CountNoShows(ctx, id, since)
+		if err != nil {
+			return err
+		}
+		if n < int64(limit) {
+			continue
+		}
+		m, err := s.bookingRepo.FindMember(ctx, id)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return err
+		}
+		if m.BookingBlockedUntil != nil && !m.BookingBlockedUntil.Before(until) {
+			continue
+		}
+		if err := s.bookingRepo.SetMemberBlockedUntil(ctx, id, until); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---- helpers ----------------------------------------------------------------

@@ -13,6 +13,7 @@ import (
 	v1 "gymmaster-api/api/kpi/v1"
 	"gymmaster-api/internal/dto"
 	"gymmaster-api/internal/entity"
+	"gymmaster-api/internal/pkg/reqctx"
 	"gymmaster-api/internal/pkg/rescode"
 	"gymmaster-api/internal/repository"
 )
@@ -58,6 +59,35 @@ func NewKPIService(repo repository.KPIRepository, audit AuditService) KPIService
 	return &kpiService{repo: repo, audit: audit, now: time.Now}
 }
 
+func resolveKPIBranchScope(ctx context.Context, requested uint) (uint, error) {
+	if requested > 0 {
+		if !reqctx.CanAccessBranch(ctx, requested) {
+			return 0, rescode.New(rescode.PermissionDenied, "Bạn không có quyền truy cập dữ liệu KPI của chi nhánh này")
+		}
+		return requested, nil
+	}
+	if allowed := reqctx.AllowedBranches(ctx); len(allowed) > 0 {
+		return allowed[0], nil
+	}
+	return 0, nil
+}
+
+// resolveKPIBranch = resolveKPIBranchScope + chi nhánh được yêu cầu phải tồn tại (chưa xóa) → 404 thay vì báo cáo rỗng.
+func (s *kpiService) resolveKPIBranch(ctx context.Context, requested uint) (uint, error) {
+	branchID, err := resolveKPIBranchScope(ctx, requested)
+	if err != nil || requested == 0 {
+		return branchID, err
+	}
+	ok, err := s.repo.BranchExists(ctx, requested)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, rescode.New(rescode.NotFound, "Không tìm thấy chi nhánh")
+	}
+	return branchID, nil
+}
+
 func classifyOccupancyLevel(pct float64) string {
 	switch {
 	case pct >= 90:
@@ -101,9 +131,13 @@ func (s *kpiService) BranchOccupancy(ctx context.Context) ([]*v1.BranchOccupancy
 }
 
 func (s *kpiService) ListSalesTargets(ctx context.Context, req *v1.ListSalesTargetsReq) (*v1.ListSalesTargetsRes, error) {
+	branchID, err := s.resolveKPIBranch(ctx, req.BranchID)
+	if err != nil {
+		return nil, err
+	}
 	q := req.PageReq.ToQuery(salesTargetOrderable, "id")
 	q.OrderBy = "st." + q.OrderBy
-	rows, total, err := s.repo.ListSalesTargets(ctx, q, req.BranchID, strings.TrimSpace(req.Period), strings.TrimSpace(req.Metric))
+	rows, total, err := s.repo.ListSalesTargets(ctx, q, branchID, strings.TrimSpace(req.Period), strings.TrimSpace(req.Metric))
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +145,13 @@ func (s *kpiService) ListSalesTargets(ctx context.Context, req *v1.ListSalesTarg
 }
 
 func (s *kpiService) CreateSalesTarget(ctx context.Context, req *v1.CreateSalesTargetReq) (*v1.SalesTargetItem, error) {
+	if req.BranchID > 0 {
+		if !reqctx.CanAccessBranch(ctx, req.BranchID) {
+			return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền đặt chỉ tiêu cho chi nhánh này")
+		}
+	} else if allowed := reqctx.AllowedBranches(ctx); len(allowed) > 0 {
+		return nil, rescode.New(rescode.PermissionDenied, "Bạn chỉ được đặt chỉ tiêu trong phạm vi chi nhánh được phân công")
+	}
 	period := strings.TrimSpace(req.Period)
 	if _, err := time.Parse("2006-01", period); err != nil {
 		return nil, rescode.New(rescode.BadRequest, "Kỳ KPI phải có định dạng YYYY-MM")
@@ -122,14 +163,48 @@ func (s *kpiService) CreateSalesTarget(ctx context.Context, req *v1.CreateSalesT
 	if req.TargetValue < 0 {
 		return nil, rescode.New(rescode.BadRequest, "Giá trị mục tiêu không được âm")
 	}
+	if req.TargetValue > financeMaxAmount {
+		return nil, rescode.New(rescode.BadRequest, "Giá trị mục tiêu vượt quá giới hạn cho phép")
+	}
+	staffID := req.StaffID
+	if staffID != nil && *staffID == 0 {
+		staffID = nil
+	}
+	if req.BranchID == 0 {
+		return nil, rescode.New(rescode.BadRequest, "Vui lòng chọn chi nhánh")
+	}
+	if ok, err := s.repo.BranchExists(ctx, req.BranchID); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, rescode.New(rescode.BadRequest, "Chi nhánh không tồn tại hoặc đã bị xóa")
+	}
+	if staffID != nil {
+		exists, inBranch, err := s.repo.StaffBranchStatus(ctx, *staffID, req.BranchID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, rescode.New(rescode.BadRequest, "Nhân viên không tồn tại, đã nghỉ hoặc không phải tài khoản nhân viên")
+		}
+		if !inBranch {
+			return nil, rescode.New(rescode.BadRequest, "Nhân viên không thuộc chi nhánh được đặt chỉ tiêu")
+		}
+	}
 	st := &entity.SalesTarget{
 		BranchID:    req.BranchID,
-		StaffID:     req.StaffID,
+		StaffID:     staffID,
 		Period:      period,
 		Metric:      metric,
 		TargetValue: req.TargetValue,
 	}
 	if err := s.repo.UpsertSalesTarget(ctx, st); err != nil {
+		// branch_id / staff_id tham chiếu bản ghi không tồn tại → lỗi khóa ngoại → 400 thay vì 500.
+		if errors.Is(err, gorm.ErrForeignKeyViolated) {
+			if staffID != nil {
+				return nil, rescode.New(rescode.BadRequest, "Nhân viên hoặc chi nhánh không tồn tại")
+			}
+			return nil, rescode.New(rescode.BadRequest, "Chi nhánh không tồn tại")
+		}
 		return nil, err
 	}
 	row, err := s.repo.FindSalesTargetByID(ctx, st.ID)
@@ -151,6 +226,13 @@ func (s *kpiService) DeleteSalesTarget(ctx context.Context, id uint) error {
 		}
 		return err
 	}
+	if existing.BranchID > 0 {
+		if !reqctx.CanAccessBranch(ctx, existing.BranchID) {
+			return rescode.New(rescode.PermissionDenied, "Bạn không có quyền xóa chỉ tiêu của chi nhánh này")
+		}
+	} else if allowed := reqctx.AllowedBranches(ctx); len(allowed) > 0 {
+		return rescode.New(rescode.PermissionDenied, "Bạn không có quyền xóa chỉ tiêu cấp toàn hệ thống")
+	}
 	if err := s.repo.DeleteSalesTarget(ctx, id); err != nil {
 		return err
 	}
@@ -161,6 +243,10 @@ func (s *kpiService) DeleteSalesTarget(ctx context.Context, id uint) error {
 }
 
 func (s *kpiService) KPIReport(ctx context.Context, req *v1.KPIReportReq) (*v1.KPIReportRes, error) {
+	branchID, err := s.resolveKPIBranch(ctx, req.BranchID)
+	if err != nil {
+		return nil, err
+	}
 	now := s.now().In(memberVNLoc)
 	period := strings.TrimSpace(req.Period)
 	if period == "" {
@@ -172,58 +258,109 @@ func (s *kpiService) KPIReport(ctx context.Context, req *v1.KPIReportReq) (*v1.K
 	}
 	monthEnd := monthStart.AddDate(0, 1, 0)
 
-	targets, err := s.repo.ListTargetsForPeriod(ctx, req.BranchID, period)
+	targets, err := s.repo.ListTargetsForPeriod(ctx, branchID, period)
 	if err != nil {
 		return nil, err
 	}
-	targetMap := map[string]float64{}
+	// Chỉ tiêu cấp chi nhánh = tổng các chỉ tiêu KHÔNG gắn nhân viên (staff_id IS NULL);
+	// chỉ tiêu cá nhân là phần chia nhỏ của chỉ tiêu chi nhánh nên không cộng dồn thêm.
+	// targetByBranch[metric][branch] – để khi xem toàn hệ thống chỉ so thực tế của các chi nhánh CÓ chỉ tiêu.
+	targetByBranch := map[string]map[uint]float64{}
 	for _, t := range targets {
-		targetMap[t.Metric] += t.TargetValue
+		if t.StaffID != nil {
+			continue
+		}
+		if targetByBranch[t.Metric] == nil {
+			targetByBranch[t.Metric] = map[uint]float64{}
+		}
+		targetByBranch[t.Metric][t.BranchID] += t.TargetValue
 	}
 
-	actuals, err := s.repo.ComputeKPIActuals(ctx, req.BranchID, monthStart, monthEnd)
-	if err != nil {
-		return nil, err
+	actualCache := map[uint]repository.KPIActuals{}
+	actualsOf := func(b uint) (repository.KPIActuals, error) {
+		if a, ok := actualCache[b]; ok {
+			return a, nil
+		}
+		a, err := s.repo.ComputeKPIActuals(ctx, b, monthStart, monthEnd)
+		if err != nil {
+			return a, err
+		}
+		actualCache[b] = a
+		return a, nil
 	}
-
-	ptActual := actuals.PTSalesAmount
-	if tVal := targetMap[entity.KPIMetricPTSales]; tVal > 0 && tVal < 1000 {
-		ptActual = actuals.PTSalesCount
-	}
-
-	actualMap := map[string]float64{
-		entity.KPIMetricRevenue:    actuals.Revenue,
-		entity.KPIMetricNewMembers: actuals.NewMembers,
-		entity.KPIMetricRenewals:   actuals.Renewals,
-		entity.KPIMetricPTSales:    ptActual,
+	// kpiActualOf: thực tế của một chỉ số tại phạm vi b. PT_SALES: chỉ tiêu < 1000 được hiểu là số hợp đồng,
+	// ngược lại là doanh số (đ) – xét theo chỉ tiêu của chính phạm vi đó.
+	kpiActualOf := func(a repository.KPIActuals, metric string, tgt float64) float64 {
+		switch metric {
+		case entity.KPIMetricRevenue:
+			return a.Revenue
+		case entity.KPIMetricNewMembers:
+			return a.NewMembers
+		case entity.KPIMetricRenewals:
+			return a.Renewals
+		case entity.KPIMetricPTSales:
+			if tgt > 0 && tgt < 1000 {
+				return a.PTSalesCount
+			}
+			return a.PTSalesAmount
+		}
+		return 0
 	}
 
 	metrics := make([]*v1.KPIMetricComparison, 0, len(validKPIMetrics))
 	for _, m := range validKPIMetrics {
-		act := actualMap[m]
-		tgt := targetMap[m]
+		perBranch := targetByBranch[m]
+		var act, tgt float64
+		if len(perBranch) == 0 {
+			// Chưa đặt chỉ tiêu: vẫn hiện thực tế của cả phạm vi xem, không tính % hoàn thành.
+			a, err := actualsOf(branchID)
+			if err != nil {
+				return nil, err
+			}
+			act = kpiActualOf(a, m, 0)
+		} else {
+			branchIDs := make([]uint, 0, len(perBranch))
+			for b := range perBranch {
+				branchIDs = append(branchIDs, b)
+			}
+			slices.Sort(branchIDs)
+			for _, b := range branchIDs {
+				a, err := actualsOf(b)
+				if err != nil {
+					return nil, err
+				}
+				act += kpiActualOf(a, m, perBranch[b])
+				tgt += perBranch[b]
+			}
+		}
 		var pct float64
 		if tgt > 0 {
 			pct = math.Round((act/tgt)*1000) / 10
 		}
 		metrics = append(metrics, &v1.KPIMetricComparison{
-			Metric:         m,
-			Label:          kpiMetricLabels[m],
-			Actual:         act,
-			TargetValue:    tgt,
-			AchievementPct: pct,
+			Metric:            m,
+			Label:             kpiMetricLabels[m],
+			Actual:            act,
+			TargetValue:       tgt,
+			AchievementPct:    pct,
+			HasTarget:         len(perBranch) > 0,
+			TargetBranchCount: len(perBranch),
 		})
 	}
 
 	return &v1.KPIReportRes{
 		Period:   period,
-		BranchID: req.BranchID,
+		BranchID: branchID,
 		Metrics:  metrics,
 		Items:    metrics,
 	}, nil
 }
 
 func (s *kpiService) CohortReport(ctx context.Context, req *v1.CohortReportReq) (*v1.CohortReportRes, error) {
+	branchID, err := s.resolveKPIBranch(ctx, req.BranchID)
+	if err != nil {
+		return nil, err
+	}
 	months := req.Months
 	if months <= 0 {
 		months = 6
@@ -234,7 +371,7 @@ func (s *kpiService) CohortReport(ctx context.Context, req *v1.CohortReportReq) 
 	curMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, memberVNLoc)
 	startMonth := curMonth.AddDate(0, -(months - 1), 0)
 
-	members, err := s.repo.ListCohortMembers(ctx, req.BranchID, startMonth)
+	members, err := s.repo.ListCohortMembers(ctx, branchID, startMonth)
 	if err != nil {
 		return nil, err
 	}

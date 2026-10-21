@@ -57,6 +57,13 @@ export const PT_SESSION_STATUS_OPTIONS = toOptions(PT_SESSION_STATUS_MAP).filter
 );
 export const COMMISSION_STATUS_OPTIONS = toOptions(COMMISSION_STATUS_MAP);
 
+/**
+ * Các trạng thái hiện trên chú thích lịch (luôn đủ, kể cả Vắng mặt).
+ * Lịch HLV (`/trainers/{id}/schedule`) không có cờ `counted` → không có "Quá giờ chưa xác nhận".
+ */
+export const legendStatusKeys = (mode: 'pt' | 'trainer'): string[] =>
+  Object.keys(PT_SESSION_STATUS_MAP).filter((k) => mode === 'pt' || k !== 'NO_SHOW_PENDING');
+
 /** Khóa trạng thái hiển thị của buổi (tách NO_SHOW chưa chốt). */
 export const sessionStatusKey = (s: Pick<PtSession, 'status' | 'counted'>) =>
   s.status === 'NO_SHOW' && !s.counted ? 'NO_SHOW_PENDING' : s.status;

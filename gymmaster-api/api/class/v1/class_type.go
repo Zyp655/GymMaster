@@ -26,7 +26,7 @@ type ClassTypeInput struct {
 	Code               string `json:"code"                 v:"required|max-length:30|regex:^[A-Za-z0-9_-]+$#Vui lòng nhập mã loại lớp|Mã tối đa 30 ký tự|Mã chỉ gồm chữ, số, '-' và '_'"`
 	Name               string `json:"name"                 v:"required|max-length:100#Vui lòng nhập tên loại lớp|Tên tối đa 100 ký tự"`
 	Description        string `json:"description"`
-	Color              string `json:"color"                v:"regex:^#[0-9A-Fa-f]{6}$#Màu phải có dạng #RRGGBB" dc:"Mặc định #F97316"`
+	Color              string `json:"color"                v:"max-length:50#Mã màu không hợp lệ (dạng #RRGGBB)" dc:"Dạng #RRGGBB, mặc định #F97316 (service bỏ khoảng trắng rồi mới kiểm tra định dạng/độ dài)"`
 	DefaultDurationMin int    `json:"default_duration_min" v:"between:15,240#Thời lượng mặc định từ 15 đến 240 phút" dc:"Mặc định 60"`
 	DefaultCapacity    int    `json:"default_capacity"     v:"between:1,500#Sức chứa mặc định từ 1 đến 500" dc:"Mặc định 20"`
 	Level              string `json:"level"                v:"in:ALL,BEGINNER,INTERMEDIATE,ADVANCED#Cấp độ không hợp lệ" dc:"ALL | BEGINNER | INTERMEDIATE | ADVANCED (mặc định ALL)"`

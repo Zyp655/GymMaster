@@ -204,6 +204,27 @@ func (s *equipmentService) prepareEquipment(ctx context.Context, eq *entity.Equi
 	if err != nil {
 		return err
 	}
+	today := equipmentStartOfDay(s.now())
+	if purchaseDate != nil && purchaseDate.After(today) {
+		return rescode.New(rescode.BadRequest, "Ngày mua không được ở tương lai")
+	}
+	if purchaseDate != nil && warrantyUntil != nil && warrantyUntil.Before(*purchaseDate) {
+		return rescode.New(rescode.BadRequest, "Ngày hết bảo hành phải sau hoặc bằng ngày mua")
+	}
+	if in.RoomID != nil && *in.RoomID > 0 {
+		if lk, ok := s.repo.(repository.EquipmentRoomLookup); ok {
+			roomBranch, err := lk.RoomBranchID(ctx, *in.RoomID)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return rescode.New(rescode.BadRequest, "Phòng tập không tồn tại")
+				}
+				return err
+			}
+			if roomBranch != in.BranchID {
+				return rescode.New(rescode.BadRequest, "Phòng tập không thuộc chi nhánh của thiết bị")
+			}
+		}
+	}
 	if nextMaintDate == nil && excludeID == 0 && in.MaintenanceIntervalDays > 0 {
 		base := equipmentStartOfDay(s.now())
 		if purchaseDate != nil {
@@ -432,6 +453,10 @@ func (s *equipmentService) CreateMaintenanceLog(ctx context.Context, in v1.Maint
 	if status == entity.MaintenanceStatusDone && finishedAt == nil {
 		finishedAt = &now
 	}
+	// Kiểm tra SAU khi gán mặc định (DONE + bắt đầu ở tương lai + bỏ trống giờ xong → giờ xong = now < giờ bắt đầu).
+	if err := equipmentCheckLogTimes(startedAt, finishedAt, status, now); err != nil {
+		return nil, err
+	}
 
 	log := &entity.MaintenanceLog{
 		EquipmentID: in.EquipmentID,
@@ -527,6 +552,9 @@ func (s *equipmentService) UpdateMaintenanceLog(ctx context.Context, id uint, in
 	now := s.now()
 	if log.Status == entity.MaintenanceStatusDone && log.FinishedAt == nil {
 		log.FinishedAt = &now
+	}
+	if err := equipmentCheckLogTimes(log.StartedAt, log.FinishedAt, log.Status, now); err != nil {
+		return nil, err
 	}
 
 	eq := eqRow.Equipment
@@ -707,4 +735,20 @@ func toMaintenanceLogRes(r repository.MaintenanceLogRow) *v1.MaintenanceLog {
 		CreatedAt:     r.CreatedAt,
 		UpdatedAt:     r.UpdatedAt,
 	}
+}
+
+// equipmentCheckLogTimes: thời gian hoàn thành phiếu bảo trì không được trước thời gian bắt đầu.
+// equipmentCheckLogTimes: giờ hoàn thành ≥ giờ bắt đầu; phiếu DONE không được bắt đầu/hoàn thành ở tương lai
+// (cho phép lệch đồng hồ 5 phút).
+func equipmentCheckLogTimes(startedAt, finishedAt *time.Time, status string, now time.Time) error {
+	if startedAt != nil && finishedAt != nil && finishedAt.Before(*startedAt) {
+		return rescode.New(rescode.BadRequest, "Thời gian hoàn thành phải sau thời gian bắt đầu bảo trì")
+	}
+	if status == entity.MaintenanceStatusDone {
+		limit := now.Add(5 * time.Minute)
+		if (startedAt != nil && startedAt.After(limit)) || (finishedAt != nil && finishedAt.After(limit)) {
+			return rescode.New(rescode.BadRequest, "Phiếu đã hoàn thành không được có thời gian bắt đầu/hoàn thành ở tương lai")
+		}
+	}
+	return nil
 }

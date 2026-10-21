@@ -77,7 +77,8 @@ import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useTableQuery } from '@/hooks/useTableQuery';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
-import { showError } from '@/utils/errors';
+import { setFormError, showError } from '@/utils/errors';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { DATE_FORMAT, formatDate, formatDateTime, formatNumber, formatPhone, toApiDate } from '@/utils/format';
 
 interface LeadFormValues {
@@ -91,6 +92,17 @@ interface LeadFormValues {
   assigned_to?: number;
   trial_date?: Dayjs | null;
   note?: string;
+}
+
+/**
+ * Tùy chọn trạng thái theo luật nghiệp vụ: "Đã chuyển đổi" chỉ đạt được qua nút chuyển đổi thành hội viên,
+ * và khách đã chuyển đổi không thể đổi sang trạng thái khác.
+ */
+function leadStatusOptions(current?: LeadStatus) {
+  return LEAD_STATUS_OPTIONS.map((o) => ({
+    ...o,
+    disabled: current === 'CONVERTED' ? o.value !== 'CONVERTED' : o.value === 'CONVERTED',
+  }));
 }
 
 function LeadFormModal({
@@ -166,7 +178,16 @@ function LeadFormModal({
       void qc.invalidateQueries({ queryKey: [leadsApi.key] });
       onClose();
     },
-    onError: (err) => showError(err, 'Không thể lưu khách tiềm năng'),
+    onError: (err) => {
+      if (
+        !setFormError(form, err, {
+          email: /email/i,
+          phone: /điện thoại/i,
+          full_name: /họ tên/i,
+        })
+      )
+        showError(err, 'Không thể lưu khách tiềm năng');
+    },
   });
 
   return (
@@ -231,7 +252,7 @@ function LeadFormModal({
           </Col>
           <Col xs={24} sm={12}>
             <Form.Item name="status" label="Trạng thái" rules={[{ required: true }]}>
-              <Select options={LEAD_STATUS_OPTIONS} />
+              <Select options={leadStatusOptions(record?.status)} />
             </Form.Item>
           </Col>
           <Col xs={24} sm={12}>
@@ -288,6 +309,7 @@ function LeadDetailDrawer({
   onClose: () => void;
   onEdit: (lead: Lead) => void;
 }) {
+  const isMobile = useIsMobile();
   const { message } = App.useApp();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -320,7 +342,7 @@ function LeadDetailDrawer({
   const activities = activitiesQuery.data ?? currentLead?.activities ?? [];
 
   const updateStatusMut = useMutation({
-    mutationFn: (status: LeadStatus) => leadsApi.update(currentLead!.id, { status }),
+    mutationFn: (status: LeadStatus) => leadsApi.updateStatus(currentLead!.id, status),
     onSuccess: () => {
       message.success('Đã cập nhật trạng thái khách tiềm năng');
       void qc.invalidateQueries({ queryKey: [leadsApi.key] });
@@ -398,7 +420,7 @@ function LeadDetailDrawer({
                 <Segmented
                   block
                   value={currentLead.status}
-                  options={LEAD_STATUS_OPTIONS}
+                  options={leadStatusOptions(currentLead.status)}
                   disabled={updateStatusMut.isPending}
                   onChange={(st) => updateStatusMut.mutate(st as LeadStatus)}
                 />
@@ -455,7 +477,7 @@ function LeadDetailDrawer({
             />
           )}
 
-          <Descriptions size="small" bordered column={2}>
+          <Descriptions size="small" bordered column={isMobile ? 1 : 2}>
             <Descriptions.Item label="Họ tên">{currentLead.full_name}</Descriptions.Item>
             <Descriptions.Item label="Số điện thoại">
               {formatPhone(currentLead.phone)}
@@ -579,7 +601,7 @@ function LeadsCrmTab() {
 
   const moveStatus = useMutation({
     mutationFn: ({ id, status }: { id: number; status: LeadStatus }) =>
-      leadsApi.update(id, { status }),
+      leadsApi.updateStatus(id, status),
     onSuccess: () => {
       message.success('Đã chuyển trạng thái khách tiềm năng');
       void qc.invalidateQueries({ queryKey: [leadsApi.key] });
@@ -731,7 +753,6 @@ function LeadsCrmTab() {
             const nextStatus: Partial<Record<LeadStatus, LeadStatus>> = {
               NEW: 'CONTACTED',
               CONTACTED: 'TRIAL',
-              TRIAL: 'CONVERTED',
             };
             const next = nextStatus[st];
 

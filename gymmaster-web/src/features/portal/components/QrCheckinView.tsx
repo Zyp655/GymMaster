@@ -44,11 +44,10 @@ export function QrCheckinView() {
   const profileQuery = useProfileQuery();
   const { refetch } = qrQuery;
   const refresh = useCallback(() => void refetch(), [refetch]);
-  const [cachedQr, setCachedQr] = useState<QRToken | null>(() => readCachedQr());
+  const [cachedQr] = useState<QRToken | null>(() => readCachedQr());
 
   useEffect(() => {
     if (qrQuery.data) {
-      setCachedQr(qrQuery.data);
       try {
         window.localStorage.setItem(QR_CACHE_KEY, JSON.stringify(qrQuery.data));
       } catch {

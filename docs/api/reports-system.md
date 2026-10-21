@@ -3,7 +3,7 @@
 Base URL (dev): `http://localhost:8000/v1`. Mọi endpoint cần `Authorization: Bearer <access_token>`.
 Envelope, mã lỗi, phân trang: xem `sprint-01-auth-rbac-branch.md`. Tóm tắt:
 
-- Thành công: `{ "code": 0, "message": "OK", "data": ... }`. Lỗi: `code` 5 chữ số, HTTP = code/100, `message` tiếng Việt.
+- Thành công: `{ "code": 0, "message": "OK", "data": ... }`. Lỗi: `code` 5 chữ số, HTTP status chuẩn theo bảng trong `sprint-01-auth-rbac-branch.md`, `message` tiếng Việt.
   Lỗi validate tag: `code = 51` (HTTP 400). Nghiệp vụ: `40000`, `40300`, `40400`, `40900`.
 - Ngày `"YYYY-MM-DD"` (lịch Việt Nam `Asia/Ho_Chi_Minh`). Thời điểm RFC3339. Tiền là `number` VND đã làm tròn đến đồng.
 - Tỷ lệ/phần trăm (`pct`, `fill_rate`, `change_pct`, …) là số **0–100**, làm tròn 1 chữ số.
@@ -93,7 +93,7 @@ Query: `branch_id`. (Không có `from/to` – luôn tính theo hôm nay / tháng
 - `checkins.today`: lượt `ALLOWED` hôm nay; `present`: đang trong phòng tập (vào hôm nay, chưa checkout).
 - `classes`: buổi lớp không bị hủy bắt đầu hôm nay; `fill_rate = booked / capacity`.
 - `pt`: buổi PT hôm nay (`SCHEDULED` + `COMPLETED`), `completed` = đã hoàn thành.
-- `pending_freezes`: yêu cầu bảo lưu chờ duyệt. `low_stock_*`: sản phẩm `ACTIVE` có `min_stock > 0` và tồn ≤ `min_stock` (tối đa 5 dòng, thiếu nhất trước).
+- `pending_freezes`: yêu cầu bảo lưu chờ duyệt. `low_stock_*`: dòng tồn thấp theo định nghĩa chung (pos-inventory.md – `quantity < min_stock`, sản phẩm & chi nhánh `ACTIVE`; `low_stock_items` tối đa 5 dòng, thiếu nhất trước).
 
 ### GET `/admin/reports/revenue`
 Query: `branch_id`, `from`, `to`, `group_by`.

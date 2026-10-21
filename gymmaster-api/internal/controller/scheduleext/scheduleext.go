@@ -69,6 +69,10 @@ func (c *AdminControllerV1) CreateBranchHoliday(ctx context.Context, req *v1.Cre
 	return c.svc.CreateBranchHoliday(ctx, req)
 }
 
+func (c *AdminControllerV1) UpdateBranchHoliday(ctx context.Context, req *v1.UpdateBranchHolidayReq) (res *v1.UpdateBranchHolidayRes, err error) {
+	return c.svc.UpdateBranchHoliday(ctx, req)
+}
+
 func (c *AdminControllerV1) DeleteBranchHoliday(ctx context.Context, req *v1.DeleteBranchHolidayReq) (res *v1.DeleteScheduleExtRes, err error) {
 	return &v1.DeleteScheduleExtRes{}, c.svc.DeleteBranchHoliday(ctx, req.ID)
 }

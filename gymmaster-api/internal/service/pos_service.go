@@ -191,7 +191,7 @@ func posMergeLines(items []*v1.OrderItem) ([]posLine, error) {
 func toPosProduct(r repository.ProductRow) *v1.PosProduct {
 	return &v1.PosProduct{ID: r.ID, SKU: r.SKU, Barcode: r.Barcode, Name: r.Name, CategoryID: r.CategoryID,
 		CategoryName: r.CategoryName, Unit: r.Unit, SellPrice: r.SellPrice, MemberPrice: r.MemberPrice,
-		ImageURL: r.ImageURL, Stock: r.Stock, MinStock: r.MinStock, LowStock: stockIsLow(r.Stock, r.MinStock)}
+		ImageURL: r.ImageURL, Stock: r.Stock, MinStock: r.MinStock, LowStock: r.LowStock}
 }
 
 func (s *posService) checkBranchScope(ctx context.Context, branchID uint) error {

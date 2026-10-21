@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" role="img" aria-label="GymMaster">
+  <rect x="0" y="0" width="48" height="48" rx="11" fill="#1D4E7A"/>
+  <g fill="#F97316">
+    <rect x="6.5" y="16.5" width="4.5" height="15" rx="1.5"/>
+    <rect x="12" y="13.5" width="5.5" height="21" rx="1.5"/>
+    <rect x="30.5" y="13.5" width="5.5" height="21" rx="1.5"/>
+    <rect x="37" y="16.5" width="4.5" height="15" rx="1.5"/>
+  </g>
+  <rect x="17.5" y="21.75" width="13" height="4.5" rx="1" fill="#ffffff"/>
+  <text x="58" y="32" font-family="'Be Vietnam Pro','Segoe UI',Arial,sans-serif" font-size="24" font-weight="800" fill="#ffffff">Gym<tspan fill="#F97316">Master</tspan></text>
+</svg>

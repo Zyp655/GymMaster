@@ -244,13 +244,13 @@ type AdminListPostsRes []*PostItem
 
 type AdminCreatePostReq struct {
 	g.Meta   `path:"/posts" method:"post" perm:"cms.manage" tags:"Quản trị – Nội dung" summary:"Tạo bài viết Blog mới"`
-	Slug     string `json:"slug" v:"required"`
-	Title    string `json:"title" v:"required"`
+	Slug     string `json:"slug" v:"required|length:3,180|regex:^[a-z0-9]+(-[a-z0-9]+)*$#Vui lòng nhập đường dẫn bài viết|Đường dẫn bài viết phải từ 3 đến 180 ký tự|Đường dẫn bài viết chỉ gồm chữ thường không dấu (a-z), số và dấu gạch ngang '-'"`
+	Title    string `json:"title" v:"required|max-length:255#Vui lòng nhập tiêu đề bài viết|Tiêu đề tối đa 255 ký tự"`
 	Excerpt  string `json:"excerpt"`
-	CoverURL string `json:"cover_url"`
-	Category string `json:"category" d:"TAP_LUYEN"`
-	Content  string `json:"content" v:"required"`
-	Status   string `json:"status" d:"PUBLISHED"`
+	CoverURL string `json:"cover_url" v:"max-length:500#Ảnh bìa tối đa 500 ký tự"`
+	Category string `json:"category" d:"TAP_LUYEN" v:"in:TAP_LUYEN,DINH_DUONG,SU_KIEN#Chuyên mục bài viết không hợp lệ"`
+	Content  string `json:"content" v:"required#Vui lòng nhập nội dung bài viết"`
+	Status   string `json:"status" d:"PUBLISHED" v:"in:DRAFT,PUBLISHED,ARCHIVED#Trạng thái bài viết không hợp lệ"`
 }
 
 type AdminCreatePostRes struct {
@@ -260,13 +260,13 @@ type AdminCreatePostRes struct {
 type AdminUpdatePostReq struct {
 	g.Meta   `path:"/posts/{id}" method:"put" perm:"cms.manage" tags:"Quản trị – Nội dung" summary:"Cập nhật bài viết Blog"`
 	ID       uint   `json:"id" in:"path" v:"required|min:1"`
-	Slug     string `json:"slug"`
-	Title    string `json:"title"`
+	Slug     string `json:"slug" v:"length:3,180|regex:^[a-z0-9]+(-[a-z0-9]+)*$#Đường dẫn bài viết phải từ 3 đến 180 ký tự|Đường dẫn bài viết chỉ gồm chữ thường không dấu (a-z), số và dấu gạch ngang '-'"`
+	Title    string `json:"title" v:"max-length:255#Tiêu đề tối đa 255 ký tự"`
 	Excerpt  string `json:"excerpt"`
-	CoverURL string `json:"cover_url"`
-	Category string `json:"category"`
+	CoverURL string `json:"cover_url" v:"max-length:500#Ảnh bìa tối đa 500 ký tự"`
+	Category string `json:"category" v:"in:TAP_LUYEN,DINH_DUONG,SU_KIEN#Chuyên mục bài viết không hợp lệ"`
 	Content  string `json:"content"`
-	Status   string `json:"status"`
+	Status   string `json:"status" v:"in:DRAFT,PUBLISHED,ARCHIVED#Trạng thái bài viết không hợp lệ"`
 }
 
 type AdminUpdatePostRes struct {
@@ -328,7 +328,9 @@ type MessageItem struct {
 }
 
 type ListConversationsReq struct {
-	g.Meta `path:"/conversations" method:"get" tags:"Tin nhắn PT & Lịch" summary:"Danh sách hội thoại HLV – Hội viên"`
+	g.Meta `path:"/conversations" method:"get" tags:"Tin nhắn PT & Lịch" summary:"Danh sách hội thoại HLV – Hội viên (tin nhắn mới nhất trước)"`
+	Page   int `json:"page"  in:"query" v:"min:0" dc:"Trang (mặc định 1)"`
+	Limit  int `json:"limit" in:"query" v:"min:0|max:100" dc:"Số hội thoại mỗi trang (mặc định 50, tối đa 100)"`
 }
 
 type ListConversationsRes []*ConversationItem
@@ -343,7 +345,7 @@ type ListMessagesRes []*MessageItem
 type SendMessageReq struct {
 	g.Meta        `path:"/conversations/{id}/messages" method:"post" tags:"Tin nhắn PT & Lịch" summary:"Gửi tin nhắn trong hợp đồng PT"`
 	ID            uint   `json:"id" in:"path" v:"required|min:1"`
-	Content       string `json:"content" v:"required|length:1,2000"`
+	Content       string `json:"content" v:"required|length:1,2000#Vui lòng nhập nội dung tin nhắn|Tin nhắn tối đa 2000 ký tự"`
 	AttachmentURL string `json:"attachment_url"`
 }
 

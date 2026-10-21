@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"gymmaster-api/internal/entity"
 	"gymmaster-api/internal/storage/postgres"
@@ -50,6 +51,15 @@ type (
 		POSCost           float64
 		OperatingExpenses float64
 		PayrollExpenses   float64
+		// ExpensesByCategory: chi phí vận hành đã duyệt theo danh mục (giảm dần theo số tiền).
+		ExpensesByCategory []ExpenseCategoryTotal
+	}
+
+	ExpenseCategoryTotal struct {
+		CategoryID   uint
+		CategoryName string
+		CategoryType string
+		Amount       float64
 	}
 
 	InstallmentPlanRow struct {
@@ -92,9 +102,13 @@ type (
 		FindOpenCashSession(ctx context.Context, branchID uint) (*entity.CashSession, error)
 		FindCashSessionByID(ctx context.Context, id uint) (*CashSessionRow, error)
 		CreateCashSession(ctx context.Context, cs *entity.CashSession) error
-		UpdateCashSession(ctx context.Context, cs *entity.CashSession) error
+		// CloseCashSession đóng ca có điều kiện (UPDATE ... WHERE status = 'OPEN'); false = ca đã bị đóng
+		// bởi yêu cầu khác (hai người đóng cùng lúc) → không ghi đè.
+		CloseCashSession(ctx context.Context, cs *entity.CashSession) (bool, error)
 		ListCashSessions(ctx context.Context, filter CashSessionFilter) ([]CashSessionRow, error)
 		SumCashPaymentsBetween(ctx context.Context, branchID uint, from, to time.Time) (float64, error)
+		// SumCashRefundsBetween: tổng tiền mặt đã hoàn (refunds.method = CASH) của chi nhánh trong khoảng thời gian.
+		SumCashRefundsBetween(ctx context.Context, branchID uint, from, to time.Time) (float64, error)
 
 		CalcProfitLoss(ctx context.Context, branchIDs []uint, from, to time.Time) (*ProfitLossData, error)
 
@@ -107,6 +121,8 @@ type (
 		ListInstallmentSchedules(ctx context.Context, filter InstallmentFilter) ([]InstallmentScheduleRow, error)
 		FindInstallmentScheduleByID(ctx context.Context, id uint) (*InstallmentScheduleRow, error)
 		UpdateInstallmentSchedule(ctx context.Context, s *entity.InstallmentSchedule) error
+		// LockInstallmentSchedule khóa (FOR UPDATE) một kỳ trả góp – gọi trong transaction.
+		LockInstallmentSchedule(ctx context.Context, id uint) (*entity.InstallmentSchedule, error)
 	}
 
 	financeRepository struct {
@@ -243,8 +259,22 @@ func (r *financeRepository) CreateCashSession(ctx context.Context, cs *entity.Ca
 	return postgres.Conn(ctx, r.db).Create(cs).Error
 }
 
-func (r *financeRepository) UpdateCashSession(ctx context.Context, cs *entity.CashSession) error {
-	return postgres.Conn(ctx, r.db).Save(cs).Error
+func (r *financeRepository) CloseCashSession(ctx context.Context, cs *entity.CashSession) (bool, error) {
+	res := postgres.Conn(ctx, r.db).Model(&entity.CashSession{}).
+		Where("id = ? AND status = ?", cs.ID, entity.CashSessionOpen).
+		Updates(map[string]any{
+			"closed_at":     cs.ClosedAt,
+			"expected_cash": cs.ExpectedCash,
+			"counted_cash":  cs.CountedCash,
+			"difference":    cs.Difference,
+			"note":          cs.Note,
+			"status":        entity.CashSessionClosed,
+			"updated_at":    cs.UpdatedAt,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
 }
 
 func (r *financeRepository) ListCashSessions(ctx context.Context, f CashSessionFilter) ([]CashSessionRow, error) {
@@ -272,6 +302,18 @@ func (r *financeRepository) SumCashPaymentsBetween(ctx context.Context, branchID
 		Select("COALESCE(SUM(p.amount), 0)").
 		Joins("JOIN invoices i ON i.id = p.invoice_id").
 		Where("i.branch_id = ? AND p.method = ? AND p.paid_at >= ? AND p.paid_at <= ?",
+			branchID, entity.PaymentCash, from, to).
+		Scan(&sum).Error
+	return sum, err
+}
+
+func (r *financeRepository) SumCashRefundsBetween(ctx context.Context, branchID uint, from, to time.Time) (float64, error) {
+	var sum float64
+	err := postgres.Conn(ctx, r.db).
+		Table("refunds rf").
+		Select("COALESCE(SUM(rf.amount), 0)").
+		Joins("JOIN invoices i ON i.id = rf.invoice_id").
+		Where("i.branch_id = ? AND rf.method = ? AND rf.created_at >= ? AND rf.created_at <= ?",
 			branchID, entity.PaymentCash, from, to).
 		Scan(&sum).Error
 	return sum, err
@@ -320,16 +362,21 @@ func (r *financeRepository) CalcProfitLoss(ctx context.Context, branchIDs []uint
 	if branchIDs != nil {
 		rq = rq.Where("i.branch_id IN ?", branchIDs)
 	}
-	_ = rq.Scan(&out.Refunds).Error
+	if err := rq.Scan(&out.Refunds).Error; err != nil {
+		return nil, err
+	}
 
-	// Giá vốn POS (stock_transactions SALE)
+	// Giá vốn POS = giá vốn hàng xuất bán (SALE, quantity âm) − giá vốn hàng khách trả lại (SALE_RETURN, quantity dương).
 	cq := db.Table("stock_transactions st").
-		Select("COALESCE(SUM(ABS(st.quantity) * st.unit_cost), 0)").
-		Where("st.type = ? AND st.created_at >= ? AND st.created_at < ?", entity.StockSale, from, endExclusive)
+		Select("COALESCE(-SUM(st.quantity * st.unit_cost), 0)").
+		Where("st.type IN ? AND st.created_at >= ? AND st.created_at < ?",
+			[]string{entity.StockSale, entity.StockSaleReturn}, from, endExclusive)
 	if branchIDs != nil {
 		cq = cq.Where("st.branch_id IN ?", branchIDs)
 	}
-	_ = cq.Scan(&out.POSCost).Error
+	if err := cq.Scan(&out.POSCost).Error; err != nil {
+		return nil, err
+	}
 
 	// Chi phí vận hành (expenses APPROVED)
 	eq := db.Table("expenses e").
@@ -339,7 +386,24 @@ func (r *financeRepository) CalcProfitLoss(ctx context.Context, branchIDs []uint
 	if branchIDs != nil {
 		eq = eq.Where("e.branch_id IN ?", branchIDs)
 	}
-	_ = eq.Scan(&out.OperatingExpenses).Error
+	if err := eq.Scan(&out.OperatingExpenses).Error; err != nil {
+		return nil, err
+	}
+
+	// Chi phí vận hành theo danh mục
+	ecq := db.Table("expenses e").
+		Select(`e.category_id, COALESCE(ec.name, '') AS category_name, COALESCE(ec.type, '') AS category_type,
+			COALESCE(SUM(e.amount), 0) AS amount`).
+		Joins("LEFT JOIN expense_categories ec ON ec.id = e.category_id").
+		Where("e.status = ? AND e.spent_at >= ? AND e.spent_at <= ?",
+			entity.ExpenseStatusApproved, from.Format("2006-01-02"), to.Format("2006-01-02"))
+	if branchIDs != nil {
+		ecq = ecq.Where("e.branch_id IN ?", branchIDs)
+	}
+	if err := ecq.Group("e.category_id, ec.name, ec.type").Order("amount DESC, e.category_id ASC").
+		Scan(&out.ExpensesByCategory).Error; err != nil {
+		return nil, err
+	}
 
 	// Chi phí lương (payroll_items của payrolls LOCKED/PAID trong khoảng kỳ YYYY-MM)
 	fromPeriod := from.Format("2006-01")
@@ -352,7 +416,9 @@ func (r *financeRepository) CalcProfitLoss(ctx context.Context, branchIDs []uint
 	if branchIDs != nil {
 		pq = pq.Where("p.branch_id IN ?", branchIDs)
 	}
-	_ = pq.Scan(&out.PayrollExpenses).Error
+	if err := pq.Scan(&out.PayrollExpenses).Error; err != nil {
+		return nil, err
+	}
 
 	return out, nil
 }
@@ -469,4 +535,12 @@ func (r *financeRepository) FindInstallmentScheduleByID(ctx context.Context, id 
 
 func (r *financeRepository) UpdateInstallmentSchedule(ctx context.Context, s *entity.InstallmentSchedule) error {
 	return postgres.Conn(ctx, r.db).Save(s).Error
+}
+
+func (r *financeRepository) LockInstallmentSchedule(ctx context.Context, id uint) (*entity.InstallmentSchedule, error) {
+	var sc entity.InstallmentSchedule
+	if err := postgres.Conn(ctx, r.db).Clauses(clause.Locking{Strength: "UPDATE"}).First(&sc, id).Error; err != nil {
+		return nil, err
+	}
+	return &sc, nil
 }

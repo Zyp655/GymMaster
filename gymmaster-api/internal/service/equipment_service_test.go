@@ -281,3 +281,32 @@ func TestEquipmentService_RemindDueMaintenance(t *testing.T) {
 	assert.Equal(t, consts.PermEquipmentManage, notif.permCalls[0].Perm)
 	assert.Equal(t, NotifyMaintenanceDue, notif.permCalls[0].Type)
 }
+
+func TestEquipmentService_DoneMaintenanceTimesValidatedAfterDefaults(t *testing.T) {
+	repo := newFakeEquipmentRepo()
+	svc := NewEquipmentService(repo, nil, nil, &fakeEquipmentNotifier{})
+	fixedNow := time.Date(2026, 10, 14, 10, 0, 0, 0, memberVNLoc)
+	svc.(*equipmentService).now = func() time.Time { return fixedNow }
+	ctx := reqctx.WithAuth(context.Background(), &token.Payload{UserID: 1, Roles: []string{consts.RoleOwner}})
+	eq, err := svc.CreateEquipment(ctx, v1.EquipmentInput{BranchID: 1, Code: "TM-002", Name: "Máy", Category: "CARDIO"})
+	require.NoError(t, err)
+
+	// DONE + bắt đầu ở tương lai + không nhập giờ xong → trước đây lưu finished_at = now < started_at.
+	_, err = svc.CreateMaintenanceLog(ctx, v1.MaintenanceLogInput{EquipmentID: eq.ID, Status: entity.MaintenanceStatusDone,
+		StartedAt: "2026-10-20T08:00:00+07:00"})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+
+	// Phiếu mở bắt đầu ở tương lai vẫn được (lên lịch bảo trì).
+	open, err := svc.CreateMaintenanceLog(ctx, v1.MaintenanceLogInput{EquipmentID: eq.ID, Status: entity.MaintenanceStatusOpen,
+		StartedAt: "2026-10-20T08:00:00+07:00"})
+	require.NoError(t, err)
+	// ...nhưng đóng phiếu (DONE) khi chưa tới giờ bắt đầu thì bị chặn.
+	_, err = svc.UpdateMaintenanceLog(ctx, open.ID, v1.MaintenanceLogInput{Status: entity.MaintenanceStatusDone})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+
+	done, err := svc.CreateMaintenanceLog(ctx, v1.MaintenanceLogInput{EquipmentID: eq.ID, Status: entity.MaintenanceStatusDone,
+		StartedAt: "2026-10-14T08:00:00+07:00"})
+	require.NoError(t, err)
+	require.NotNil(t, done.FinishedAt)
+	assert.True(t, !done.FinishedAt.Before(*done.StartedAt))
+}

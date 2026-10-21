@@ -186,6 +186,12 @@ func (r *classBookingRepository) MarkNoShows(ctx context.Context, endedBefore ti
 	return ids, err
 }
 
+// DeleteClassReview gỡ đánh giá buổi lớp của hội viên (khi điểm danh sửa ATTENDED → NO_SHOW: không còn đủ điều kiện đánh giá).
+func (r *classBookingRepository) DeleteClassReview(ctx context.Context, memberID, scheduleID uint) error {
+	return postgres.Conn(ctx, r.db).Exec(
+		`DELETE FROM reviews WHERE member_id = ? AND target_type = 'CLASS_SCHEDULE' AND target_id = ?`, memberID, scheduleID).Error
+}
+
 func (r *classBookingRepository) CountNoShows(ctx context.Context, memberID uint, since time.Time) (int64, error) {
 	var n int64
 	err := postgres.Conn(ctx, r.db).Table("class_bookings cb").

@@ -78,3 +78,40 @@ export async function sendRequest<T>(
   }
   return envelope.data;
 }
+
+/**
+ * Gọi API trả file thô (VD: tải bản trích xuất dữ liệu) – KHÔNG bóc envelope.
+ * Thành công (2xx) → trả Response để caller đọc blob; lỗi → parse envelope và ném ApiError như sendRequest.
+ */
+export async function sendRawRequest(
+  baseUrl: string,
+  method: HttpMethod,
+  path: string,
+  options: Omit<RequestOptions, 'body'> & { accessToken?: string } = {},
+): Promise<Response> {
+  const headers: Record<string, string> = { Accept: '*/*', ...options.headers };
+  if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(baseUrl, path, options.query), {
+      method,
+      headers,
+      signal: options.signal,
+      cache: 'no-store',
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    throw new ApiError(ApiCode.NETWORK, 0, 'NETWORK_ERROR');
+  }
+  if (response.ok) return response;
+  let envelope: ApiEnvelope<unknown> | null = null;
+  try {
+    envelope = (await response.json()) as ApiEnvelope<unknown>;
+  } catch {
+    envelope = null;
+  }
+  if (envelope && typeof envelope.code === 'number' && envelope.code !== ApiCode.OK) {
+    throw new ApiError(envelope.code, response.status, envelope.message);
+  }
+  throw new ApiError(response.status * 100, response.status, response.statusText);
+}

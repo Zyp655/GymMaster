@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -12,9 +12,11 @@ import {
   Select,
   Skeleton,
   Space,
+  Switch,
   Tag,
   Typography,
 } from 'antd';
+import type { SelectProps } from 'antd';
 import {
   CalendarOutlined,
   IdcardOutlined,
@@ -30,17 +32,9 @@ import type { Setting, SettingValue } from '@/api/setting';
 import DateText from '@/components/DateText';
 import PageTitle from '@/components/PageTitle';
 import { getErrorMessage, showError } from '@/utils/errors';
-
-interface SettingDef {
-  key: string;
-  label: string;
-  help: string;
-  unit: string;
-  min: number;
-  max: number;
-  /** Mảng số nguyên (VD ngày nhắc gia hạn). */
-  list?: { maxItems: number };
-}
+import { normalizeTagValues, rangeHint } from './helpers';
+import './settings.css';
+import type { SettingDef } from './helpers';
 
 interface GroupDef {
   key: string;
@@ -71,6 +65,23 @@ const GROUPS: GroupDef[] = [
         unit: 'giây',
         min: 15,
         max: 600,
+      },
+      {
+        key: 'checkin.require_signed_contract',
+        label: 'Bắt buộc ký hợp đồng điện tử',
+        help: 'Bật: hội viên phải ký hợp đồng điện tử trước khi được check-in.',
+        unit: '',
+        min: 0,
+        max: 1,
+        boolean: true,
+      },
+      {
+        key: 'checkin.installment_grace_days',
+        label: 'Ân hạn kỳ trả góp quá hạn',
+        help: 'Kỳ trả góp chưa thanh toán quá hạn hơn số ngày này sẽ chặn check-in. 0 = chặn ngay khi quá hạn.',
+        unit: 'ngày',
+        min: 0,
+        max: 90,
       },
     ],
   },
@@ -165,6 +176,13 @@ function validate(def: SettingDef, value: SettingValue | null): string | null {
   return null;
 }
 
+const CompactControls = ({ children }: { children: ReactNode }) => (
+  <Space.Compact style={{ width: '100%' }}>{children}</Space.Compact>
+);
+const BooleanControls = ({ children }: { children: ReactNode }) => (
+  <Space size={12}>{children}</Space>
+);
+
 function SettingRow({ def, setting }: { def: SettingDef; setting?: Setting }) {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
@@ -189,24 +207,41 @@ function SettingRow({ def, setting }: { def: SettingDef; setting?: Setting }) {
     onError: (e) => showError(e, 'Không thể lưu cấu hình'),
   });
 
+  // Giữ tham chiếu ổn định cho Select mode="tags": value/tagRender/onChange tạo mới mỗi lần render
+  // khiến rc-overflow đo lại → setState liên tục khi đổi kích thước ("Maximum update depth exceeded").
+  const tagValues = useMemo(() => (Array.isArray(value) ? value : []).map(String), [value]);
+  const unit = def.unit;
+  const tagRender = useCallback<NonNullable<SelectProps['tagRender']>>(
+    ({ label, closable, onClose }) => (
+      <Tag closable={closable} onClose={onClose} style={{ marginInlineEnd: 4 }}>
+        {label} {unit}
+      </Tag>
+    ),
+    [unit],
+  );
+
   const error = value === null ? null : validate(def, value);
+  const Controls = def.boolean ? BooleanControls : CompactControls;
   const dirty = setting && value !== null && !sameValue(value, setting.value);
 
   if (!setting) {
     return (
-      <Row gutter={[16, 8]} className="setting-row">
-        <Col xs={24}>
+      <div className="setting-row">
+        <div>
           <Typography.Text type="secondary">
             {def.label}: chưa có trên máy chủ ({def.key})
           </Typography.Text>
-        </Col>
-      </Row>
+        </div>
+      </div>
     );
   }
 
   return (
-    <Row gutter={[16, 8]} align="middle" className="setting-row" style={{ padding: '12px 0' }}>
-      <Col xs={24} md={12}>
+    // Lưới CSS thay cho Row/Col có gutter: mỗi antd Row đăng ký theo dõi breakpoint (useBreakpoint) và
+    // forceUpdate trong layout effect khi gắn lại; trang có nhiều Row (mỗi mục cấu hình một Row) vượt ngưỡng
+    // cập nhật lồng nhau của React khi đổi kích thước qua mốc điện thoại → "Maximum update depth exceeded".
+    <div className="setting-row">
+      <div>
         <Typography.Text strong>{def.label}</Typography.Text>
         <div>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
@@ -216,31 +251,30 @@ function SettingRow({ def, setting }: { def: SettingDef; setting?: Setting }) {
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           Cập nhật <DateText value={setting.updated_at} withTime />
         </Typography.Text>
-      </Col>
-      <Col xs={24} md={12}>
-        <Space.Compact style={{ width: '100%' }}>
+      </div>
+      <div>
+        {/* Switch không ghép nhóm (Space.Compact) được → dùng Space thường cho cờ bật/tắt. */}
+        <Controls>
           {def.list ? (
             <Select
               mode="tags"
               style={{ width: '100%' }}
               status={error ? 'error' : undefined}
-              value={(Array.isArray(value) ? value : []).map(String)}
+              value={tagValues}
               tokenSeparators={[',', ' ']}
               notFoundContent={null}
+              open={false}
               suffixIcon={null}
               placeholder="VD: 7, 3, 1"
-              onChange={(vals: string[]) =>
-                setValue(
-                  [
-                    ...new Set(vals.map((s) => Number(s.trim())).filter((n) => !Number.isNaN(n))),
-                  ].sort((a, b) => b - a),
-                )
-              }
-              tagRender={({ label, closable, onClose }) => (
-                <Tag closable={closable} onClose={onClose} style={{ marginInlineEnd: 4 }}>
-                  {label} {def.unit}
-                </Tag>
-              )}
+              onChange={(vals: string[]) => setValue(normalizeTagValues(vals))}
+              tagRender={tagRender}
+            />
+          ) : def.boolean ? (
+            <Switch
+              checked={value === 1}
+              checkedChildren="Bật"
+              unCheckedChildren="Tắt"
+              onChange={(on) => setValue(on ? 1 : 0)}
             />
           ) : (
             <InputNumber
@@ -270,12 +304,12 @@ function SettingRow({ def, setting }: { def: SettingDef; setting?: Setting }) {
           >
             Lưu
           </Button>
-        </Space.Compact>
+        </Controls>
         <Typography.Text type={error ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
-          {error ?? `Khoảng hợp lệ: ${def.min} – ${def.max} ${def.unit}`}
+          {error ?? rangeHint(def)}
         </Typography.Text>
-      </Col>
-    </Row>
+      </div>
+    </div>
   );
 }
 

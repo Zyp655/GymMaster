@@ -24,10 +24,12 @@ func LockerServiceOf(d *Deps) service.LockerService {
 	if s, ok := lockerServices[d]; ok {
 		return s
 	}
-	s := service.NewLockerService(
+	s := service.NewLockerServiceWithInvoices(
 		repository.NewLockerRepository(d.DB),
 		d.Tx,
 		d.Audit,
+		d.DB,
+		d.Invoices,
 	)
 	lockerServices[d] = s
 

@@ -33,7 +33,7 @@ import type {
   PtSessionStatus,
   TrainerScheduleItem,
 } from '@/api/pt';
-import BranchSelect from '@/components/BranchSelect';
+import BranchFilterSelect from '@/routes/classes/BranchFilterSelect';
 import PageTitle from '@/components/PageTitle';
 import { PERM } from '@/constants/permissions';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -54,6 +54,7 @@ import {
   PT_SESSION_STATUS_MAP,
   PT_SESSION_STATUS_OPTIONS,
   isTrainerOnly,
+  legendStatusKeys,
   sessionStatusKey,
 } from './constants';
 import { usePtTrainerOptions } from './queries';
@@ -372,12 +373,9 @@ export default function PtSessionsPage() {
       </Col>
       {mode === 'pt' && (
         <Col xs={24} sm={12} lg={4}>
-          <BranchSelect
-            allowAll
+          <BranchFilterSelect
             value={branchId}
-            onChange={(v) =>
-              set({ branch_id: v === null ? 'all' : (v as number), trainer_id: undefined })
-            }
+            onChange={(v) => set({ branch_id: v === null ? 'all' : v, trainer_id: undefined })}
           />
         </Col>
       )}
@@ -416,14 +414,14 @@ export default function PtSessionsPage() {
   const legend = (
     <Space wrap size={[6, 6]} style={{ marginBottom: 12 }}>
       <Tag bordered={false}>{events.length} mục</Tag>
-      {Object.entries(PT_SESSION_STATUS_MAP).map(([k, meta]) =>
-        stats.get(k) ? (
-          <Tag key={k} bordered={false}>
-            <span className="pt-legend-dot" style={{ background: PT_SESSION_COLOR[k] }} />
-            {meta.label}: {stats.get(k)}
-          </Tag>
-        ) : null,
-      )}
+      {/* Chú thích luôn đủ màu mọi trạng thái (kể cả Vắng mặt) để đọc được lịch dù tuần chưa có buổi đó.
+          Lịch HLV không phân biệt NO_SHOW đã chốt / chưa chốt → bỏ mục "Quá giờ chưa xác nhận". */}
+      {legendStatusKeys(mode).map((k) => (
+        <Tag key={k} bordered={false} style={stats.get(k) ? undefined : { opacity: 0.6 }}>
+          <span className="pt-legend-dot" style={{ background: PT_SESSION_COLOR[k] }} />
+          {PT_SESSION_STATUS_MAP[k].label}: {stats.get(k) ?? 0}
+        </Tag>
+      ))}
       {mode === 'trainer' && (
         <Tag bordered={false}>
           <span className="pt-legend-dot is-dashed" />

@@ -71,7 +71,12 @@ export default function TodayPanel({ branchId }: { branchId: number | null }) {
         <Space size={8}>
           <MemberAvatar src={r.member_avatar_url} name={r.member_name} />
           <div style={{ lineHeight: 1.25 }}>
-            <Link to={`/app/members/${r.member_id}`}>{r.member_name}</Link>
+            {/* Lượt vào bằng vé ngày / vé tập thử không gắn hội viên (member_id = 0). */}
+            {r.member_id ? (
+              <Link to={`/app/members/${r.member_id}`}>{r.member_name}</Link>
+            ) : (
+              <Typography.Text>{r.member_name}</Typography.Text>
+            )}
             <br />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {r.member_code}
@@ -117,7 +122,7 @@ export default function TodayPanel({ branchId }: { branchId: number | null }) {
           value={s?.total ?? 0}
           icon={<TeamOutlined />}
           loading={stats.isLoading}
-          caption={s ? `${s.unique_members} hội viên` : undefined}
+          caption={s ? `${s.unique_members} khách (hội viên + vé)` : undefined}
         />
       </Col>
       <Col xs={12} md={6}>

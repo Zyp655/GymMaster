@@ -226,7 +226,9 @@ export function DeltaBadge({
   const up = pct > 0;
   const flat = pct === 0;
   return (
-    <span className={`rp-delta ${flat ? 'rp-delta--flat' : up ? 'rp-delta--up' : 'rp-delta--down'}`}>
+    <span
+      className={`rp-delta ${flat ? 'rp-delta--flat' : up ? 'rp-delta--up' : 'rp-delta--down'}`}
+    >
       {flat ? '→' : up ? '▲' : '▼'} {Math.abs(pct).toLocaleString('vi-VN')}%{' '}
       <span className="rp-delta__suffix">{suffix}</span>
     </span>

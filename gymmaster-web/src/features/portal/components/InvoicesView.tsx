@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
   CalendarDaysIcon,
@@ -48,8 +49,23 @@ const PAGE_LIMIT = 10;
 export function InvoicesView() {
   const t = useTranslations('portal.invoices');
   const toastError = useToastApiError();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [page, setPage] = useState(1);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
+  // ?invoice={id} (VD: từ thông báo) → mở sẵn dialog chi tiết hóa đơn.
+  const invoiceParam = parseInvoiceParam(searchParams.get('invoice'));
+  const [pickedInvoiceId, setPickedInvoiceId] = useState<number | null>(null);
+  const selectedInvoiceId = pickedInvoiceId ?? invoiceParam;
+  const setSelectedInvoiceId = (id: number | null) => {
+    setPickedInvoiceId(id);
+    if (id === null && invoiceParam !== null) {
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete('invoice');
+      const qs = next.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    }
+  };
   const [payingInvoiceId, setPayingInvoiceId] = useState<number | null>(null);
 
   const query = useInvoicesQuery(page, PAGE_LIMIT);
@@ -91,78 +107,143 @@ export function InvoicesView() {
           />
         ) : (
           <div className="grid gap-4">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t('colInvoiceNo')}</TableHead>
-                  <TableHead>{t('colIssuedAt')}</TableHead>
-                  <TableHead>{t('colBranch')}</TableHead>
-                  <TableHead>{t('colTotal')}</TableHead>
-                  <TableHead>{t('colPaid')}</TableHead>
-                  <TableHead>{t('colDue')}</TableHead>
-                  <TableHead>{t('colStatus')}</TableHead>
-                  <TableHead className="text-right">{t('colAction')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {query.data.items.map(invoice => {
-                  const canPay =
-                    invoice.status === 'UNPAID' || invoice.status === 'PARTIAL';
-                  const isPaying =
-                    vnpayMutation.isPending && payingInvoiceId === invoice.id;
-
-                  return (
-                    <TableRow key={invoice.id}>
-                      <TableCell className="font-semibold text-primary">
-                        {invoice.invoice_no}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-secondary">
-                        {formatDateTime(invoice.issued_at)}
-                      </TableCell>
-                      <TableCell>{invoice.branch_name}</TableCell>
-                      <TableCell className="font-semibold">
-                        {formatCurrency(invoice.total)}
-                      </TableCell>
-                      <TableCell className="text-secondary">
-                        {formatCurrency(invoice.paid_amount)}
-                      </TableCell>
-                      <TableCell
-                        className={
-                          invoice.due > 0 ? 'font-semibold text-danger' : 'text-secondary'
-                        }
+            {/* Mobile: dạng thẻ – bảng 8 cột không vừa màn hình 390px. */}
+            <ul className="grid gap-3 md:hidden">
+              {query.data.items.map(invoice => {
+                const canPay = invoice.status === 'UNPAID' || invoice.status === 'PARTIAL';
+                const isPaying = vnpayMutation.isPending && payingInvoiceId === invoice.id;
+                return (
+                  <li key={invoice.id} className="grid gap-3 rounded-xl bg-canvas p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="grid min-w-0 gap-0.5">
+                        <span className="truncate font-semibold text-primary">
+                          {invoice.invoice_no}
+                        </span>
+                        <span className="text-caption text-secondary">
+                          {formatDateTime(invoice.issued_at)} · {invoice.branch_name}
+                        </span>
+                      </div>
+                      <InvoiceStatusBadge status={invoice.status} />
+                    </div>
+                    <dl className="grid grid-cols-3 gap-2 text-caption">
+                      <div className="grid gap-0.5">
+                        <dt className="text-secondary">{t('colTotal')}</dt>
+                        <dd className="font-semibold text-primary">
+                          {formatCurrency(invoice.total)}
+                        </dd>
+                      </div>
+                      <div className="grid gap-0.5">
+                        <dt className="text-secondary">{t('colPaid')}</dt>
+                        <dd className="text-primary">{formatCurrency(invoice.paid_amount)}</dd>
+                      </div>
+                      <div className="grid gap-0.5">
+                        <dt className="text-secondary">{t('colDue')}</dt>
+                        <dd
+                          className={
+                            invoice.due > 0 ? 'font-semibold text-danger' : 'text-secondary'
+                          }
+                        >
+                          {formatCurrency(invoice.due)}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedInvoiceId(invoice.id)}
                       >
-                        {formatCurrency(invoice.due)}
-                      </TableCell>
-                      <TableCell>
-                        <InvoiceStatusBadge status={invoice.status} />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {canPay ? (
+                        <EyeIcon />
+                        {t('viewDetail')}
+                      </Button>
+                      {canPay ? (
+                        <Button
+                          size="sm"
+                          disabled={isPaying}
+                          onClick={() => void handlePayVnpay(invoice.id)}
+                        >
+                          <CreditCardIcon />
+                          {isPaying ? t('payingVnpay') : t('payVnpay')}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('colInvoiceNo')}</TableHead>
+                    <TableHead>{t('colIssuedAt')}</TableHead>
+                    <TableHead>{t('colBranch')}</TableHead>
+                    <TableHead>{t('colTotal')}</TableHead>
+                    <TableHead>{t('colPaid')}</TableHead>
+                    <TableHead>{t('colDue')}</TableHead>
+                    <TableHead>{t('colStatus')}</TableHead>
+                    <TableHead className="text-right">{t('colAction')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {query.data.items.map(invoice => {
+                    const canPay = invoice.status === 'UNPAID' || invoice.status === 'PARTIAL';
+                    const isPaying = vnpayMutation.isPending && payingInvoiceId === invoice.id;
+
+                    return (
+                      <TableRow key={invoice.id}>
+                        <TableCell className="font-semibold text-primary">
+                          {invoice.invoice_no}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-secondary">
+                          {formatDateTime(invoice.issued_at)}
+                        </TableCell>
+                        <TableCell>{invoice.branch_name}</TableCell>
+                        <TableCell className="font-semibold">
+                          {formatCurrency(invoice.total)}
+                        </TableCell>
+                        <TableCell className="text-secondary">
+                          {formatCurrency(invoice.paid_amount)}
+                        </TableCell>
+                        <TableCell
+                          className={
+                            invoice.due > 0 ? 'font-semibold text-danger' : 'text-secondary'
+                          }
+                        >
+                          {formatCurrency(invoice.due)}
+                        </TableCell>
+                        <TableCell>
+                          <InvoiceStatusBadge status={invoice.status} />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {canPay ? (
+                              <Button
+                                size="sm"
+                                disabled={isPaying}
+                                onClick={() => void handlePayVnpay(invoice.id)}
+                              >
+                                <CreditCardIcon />
+                                {isPaying ? t('payingVnpay') : t('payVnpay')}
+                              </Button>
+                            ) : null}
                             <Button
+                              variant="ghost"
                               size="sm"
-                              disabled={isPaying}
-                              onClick={() => void handlePayVnpay(invoice.id)}
+                              onClick={() => setSelectedInvoiceId(invoice.id)}
                             >
-                              <CreditCardIcon />
-                              {isPaying ? t('payingVnpay') : t('payVnpay')}
+                              <EyeIcon />
+                              {t('viewDetail')}
                             </Button>
-                          ) : null}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSelectedInvoiceId(invoice.id)}
-                          >
-                            <EyeIcon />
-                            {t('viewDetail')}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
 
             <PaginationControls
               page={query.data.current_page}
@@ -184,6 +265,12 @@ export function InvoicesView() {
       />
     </div>
   );
+}
+
+function parseInvoiceParam(value: string | null): number | null {
+  if (!value || !/^\d{1,10}$/.test(value)) return null;
+  const id = Number(value);
+  return id > 0 ? id : null;
 }
 
 /** Kế hoạch trả góp của hội viên (Sprint 21). */
@@ -220,10 +307,7 @@ function InstallmentPlansCard() {
             const planCount = plan.count ?? plan.installments ?? schedules.length;
             const planTotal = plan.total_amount ?? plan.total ?? 0;
             return (
-              <div
-                key={plan.id}
-                className="grid gap-3 rounded-xl border border-line bg-canvas p-4"
-              >
+              <div key={plan.id} className="grid gap-3 rounded-xl border border-line bg-canvas p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-body font-semibold text-primary">
                     {t('installmentPlanHeader', {
@@ -487,10 +571,7 @@ function InvoiceDetailDialog({
             {tc('actions.close')}
           </Button>
           {detail && canPay ? (
-            <Button
-              disabled={isPayingVnpay}
-              onClick={() => void onPayVnpay(detail.id)}
-            >
+            <Button disabled={isPayingVnpay} onClick={() => void onPayVnpay(detail.id)}>
               <CreditCardIcon />
               {isPayingVnpay ? tiMain('payingVnpay') : tiMain('payVnpay')}
             </Button>

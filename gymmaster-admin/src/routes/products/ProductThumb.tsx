@@ -28,4 +28,3 @@ export default function ProductThumb({ src, size = 40 }: { src?: string; size?: 
     </div>
   );
 }
-

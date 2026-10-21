@@ -29,6 +29,10 @@ export default function CancelModal({ open, sub, onClose }: CancelModalProps) {
 
   const inv = sub?.invoice;
   const refundable = inv ? Math.max(0, inv.paid_amount - inv.refunded_amount) : 0;
+  // Hóa đơn đã thu một phần (hoặc chưa thu nhưng gói không còn PENDING) → phần còn nợ sẽ được xóa khi hủy gói.
+  const willVoid = sub?.status === 'PENDING' && !!inv && inv.paid_amount === 0;
+  const writeOff =
+    inv && !willVoid && inv.status !== 'VOID' ? Math.max(0, inv.total - inv.paid_amount) : 0;
 
   useEffect(() => {
     if (open) form.resetFields();
@@ -43,9 +47,13 @@ export default function CancelModal({ open, sub, onClose }: CancelModalProps) {
         : undefined;
     modal.confirm({
       title: `Hủy gói ${sub.plan_name} của ${sub.member_name}?`,
-      content: refund
-        ? `Hoàn ${formatMoney(refund.amount)} cho hội viên. Thao tác không thể hoàn tác.`
-        : 'Gói sẽ chuyển sang “Đã hủy”. Thao tác không thể hoàn tác.',
+      content: [
+        refund ? `Hoàn ${formatMoney(refund.amount)} cho hội viên.` : 'Gói sẽ chuyển sang “Đã hủy”.',
+        writeOff > 0 ? `Sẽ xóa nợ ${formatMoney(writeOff)} trên hóa đơn ${inv?.invoice_no}.` : '',
+        'Thao tác không thể hoàn tác.',
+      ]
+        .filter(Boolean)
+        .join(' '),
       okText: 'Hủy gói',
       okButtonProps: { danger: true },
       cancelText: 'Không',
@@ -77,7 +85,16 @@ export default function CancelModal({ open, sub, onClose }: CancelModalProps) {
         layout="vertical"
         initialValues={{ withRefund: false, refund: { ...DEFAULT_PAYMENT, amount: refundable } }}
       >
-        {sub?.status === 'PENDING' && inv && inv.paid_amount === 0 && (
+        {writeOff > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={`Sẽ xóa nợ ${formatMoney(writeOff)} trên hóa đơn ${inv?.invoice_no}`}
+            description="Phần chưa thu được ghi là “Xóa nợ do hủy gói” (không tính là giảm giá) và hóa đơn không thu tiếp được nữa. Các kỳ trả góp chưa thu (nếu có) bị hủy."
+          />
+        )}
+        {willVoid && inv && (
           <Alert
             type="info"
             showIcon

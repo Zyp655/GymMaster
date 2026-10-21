@@ -584,7 +584,12 @@ func (s *reportService) exportInvoices(ctx context.Context, x *reportXLSX, ids [
 			a = &agg{}
 			byStatus[it.Status] = a
 		}
-		for _, p := range []*agg{a, &all} {
+		// Hóa đơn đã hủy (VOID) không phải doanh thu/công nợ → không cộng vào dòng "Tổng", chỉ hiện riêng theo trạng thái.
+		targets := []*agg{a, &all}
+		if it.Status == "VOID" {
+			targets = []*agg{a}
+		}
+		for _, p := range targets {
 			p.n++
 			p.total += it.Total
 			p.paid += it.Paid
@@ -607,7 +612,7 @@ func (s *reportService) exportInvoices(ctx context.Context, x *reportXLSX, ids [
 			srows = append(srows, []any{reportInvoiceStatusLabel[st], a.n, a.total, a.paid, a.refunded})
 		}
 	}
-	x.table(sum, 4, cols, srows, []any{"Tổng", all.n, all.total, all.paid, all.refunded}, false)
+	x.table(sum, 4, cols, srows, []any{"Tổng (không gồm HĐ đã hủy)", all.n, all.total, all.paid, all.refunded}, false)
 
 	const det = "Danh sách"
 	if err := x.sheet(det, "DANH SÁCH HÓA ĐƠN", subtitle); err != nil {
@@ -617,18 +622,24 @@ func (s *reportService) exportInvoices(ctx context.Context, x *reportXLSX, ids [
 		{Title: "Số HĐ", Width: 16}, {Title: "Ngày lập", Width: 17, Kind: reportColDateTime}, {Title: "Mã HV", Width: 12},
 		{Title: "Khách hàng", Width: 26}, {Title: "Chi nhánh", Width: 20}, {Title: "Nguồn", Width: 14},
 		{Title: "Tạm tính", Width: 16, Kind: reportColMoney}, {Title: "Giảm giá", Width: 14, Kind: reportColMoney},
-		{Title: "Tổng tiền", Width: 16, Kind: reportColMoney}, {Title: "Đã thu", Width: 16, Kind: reportColMoney},
+		{Title: "Xóa nợ (hủy gói)", Width: 16, Kind: reportColMoney}, {Title: "Tổng tiền", Width: 16, Kind: reportColMoney}, {Title: "Đã thu", Width: 16, Kind: reportColMoney},
 		{Title: "Đã hoàn", Width: 14, Kind: reportColMoney}, {Title: "Trạng thái", Width: 16}, {Title: "Người lập", Width: 22},
 	}
 	rows := make([][]any, 0, len(list))
-	var sub, disc float64
+	var sub, disc, wo float64
 	for _, it := range list {
+		// Xóa nợ khi hủy gói ghi riêng (total = subtotal − discount − write_off) – không lẫn vào giảm giá.
+		writeOff := max(0, roundMoneyVND(it.Subtotal-it.Discount-it.Total))
 		rows = append(rows, []any{it.InvoiceNo, it.IssuedAt, it.MemberCode, it.MemberName, it.BranchName,
-			reportInvoiceSourceLabel[it.Source], it.Subtotal, it.Discount, it.Total, it.Paid, it.Refunded,
+			reportInvoiceSourceLabel[it.Source], it.Subtotal, it.Discount, writeOff, it.Total, it.Paid, it.Refunded,
 			reportInvoiceStatusLabel[it.Status], it.IssuedBy})
+		if it.Status == "VOID" {
+			continue // dòng vẫn liệt kê nhưng không cộng vào tổng
+		}
 		sub += it.Subtotal
 		disc += it.Discount
+		wo += writeOff
 	}
-	x.table(det, 4, dcols, rows, []any{"Tổng", "", "", "", "", "", sub, disc, all.total, all.paid, all.refunded, "", ""}, true)
+	x.table(det, 4, dcols, rows, []any{"Tổng (không gồm HĐ đã hủy)", "", "", "", "", "", sub, disc, wo, all.total, all.paid, all.refunded, "", ""}, true)
 	return nil
 }

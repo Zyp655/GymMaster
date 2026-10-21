@@ -2,6 +2,9 @@ package privacy
 
 import (
 	"context"
+	"fmt"
+
+	"github.com/gogf/gf/v2/frame/g"
 
 	v1 "gymmaster-api/api/privacy/v1"
 	"gymmaster-api/internal/service"
@@ -91,4 +94,19 @@ func (c *AdminControllerV1) ListDataRequests(ctx context.Context, req *v1.ListDa
 
 func (c *AdminControllerV1) ProcessDataRequest(ctx context.Context, req *v1.ProcessDataRequestReq) (res *v1.ProcessDataRequestRes, err error) {
 	return c.svc.ProcessDataRequest(ctx, req)
+}
+
+// DownloadDataRequest ghi thẳng file JSON vào response (middleware Response bỏ qua khi handler đã tự ghi).
+func (c *MemberControllerV1) DownloadDataRequest(ctx context.Context, req *v1.DownloadDataRequestReq) (res *v1.DownloadDataRequestRes, err error) {
+	data, filename, err := c.svc.DownloadDataRequest(ctx, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	r := g.RequestFromCtx(ctx)
+	h := r.Response.Header()
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	h.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	h.Set("Cache-Control", "no-store")
+	r.Response.Write(data)
+	return nil, nil
 }

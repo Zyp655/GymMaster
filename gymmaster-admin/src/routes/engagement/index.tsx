@@ -38,10 +38,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import {
-  engagementApi,
-  MEAL_TYPE_OPTIONS,
-} from '@/api/loyalty-engagement';
+import { engagementApi, MEAL_TYPE_OPTIONS } from '@/api/loyalty-engagement';
 import type {
   Announcement,
   AnnouncementInput,
@@ -100,7 +97,7 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
 
   const foodsListQuery = useQuery({
     queryKey: [engagementApi.foodKey, 'all'],
-    queryFn: () => engagementApi.listFoods({ limit: 200 }),
+    queryFn: () => engagementApi.listFoods({ limit: 100 }),
   });
 
   const plansTable = useTableQuery<MealPlan, { page?: number; limit?: number }>({
@@ -133,7 +130,14 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
         target_calories: 2000,
         start_date: dayjs(),
         end_date: dayjs().add(30, 'day'),
-        items: [{ day_index: 1, meal: 'BREAKFAST', food_id: foodsListQuery.data?.items?.[0]?.id ?? 1, qty: 1 }],
+        items: [
+          {
+            day_index: 1,
+            meal: 'BREAKFAST',
+            food_id: foodsListQuery.data?.items?.[0]?.id ?? 1,
+            qty: 1,
+          },
+        ],
       });
     }
   }, [planModal, planForm, foodsListQuery.data]);
@@ -185,7 +189,9 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
         : engagementApi.createMealPlan(payload);
     },
     onSuccess: () => {
-      message.success(planModal.record ? 'Đã cập nhật thực đơn' : 'Đã giao thực đơn dinh dưỡng mới');
+      message.success(
+        planModal.record ? 'Đã cập nhật thực đơn' : 'Đã giao thực đơn dinh dưỡng mới',
+      );
       void qc.invalidateQueries({ queryKey: [engagementApi.mealPlanKey] });
       setPlanModal({ open: false, record: null });
     },
@@ -253,9 +259,7 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
         key: 'member',
         render: (_, r) => (
           <Space>
-            <Typography.Text strong>
-              {r.member_name || `Hội viên #${r.member_id}`}
-            </Typography.Text>
+            <Typography.Text strong>{r.member_name || `Hội viên #${r.member_id}`}</Typography.Text>
             {r.member_code && <Tag className="code-text">{r.member_code}</Tag>}
           </Space>
         ),
@@ -383,8 +387,8 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
             value={subView}
             onChange={(v) => setSubView(v as 'plans' | 'foods')}
             options={[
-              { label: 'Thực đơn dinh dưỡng hội viên (/admin/meal-plans)', value: 'plans' },
-              { label: 'Thư viện món ăn & Macro (/admin/foods)', value: 'foods' },
+              { label: 'Thực đơn dinh dưỡng hội viên', value: 'plans' },
+              { label: 'Thư viện món ăn & Macro', value: 'foods' },
             ]}
           />
         </Col>
@@ -433,7 +437,11 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
       {/* Modal tạo thực đơn */}
       <Modal
         open={planModal.open}
-        title={planModal.record ? `Sửa thực đơn: ${planModal.record.name}` : 'Soạn thực đơn dinh dưỡng cho Hội viên'}
+        title={
+          planModal.record
+            ? `Sửa thực đơn: ${planModal.record.name}`
+            : 'Soạn thực đơn dinh dưỡng cho Hội viên'
+        }
         okText="Lưu thực đơn"
         cancelText="Hủy"
         onOk={() => planForm.submit()}
@@ -468,7 +476,11 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
               </Form.Item>
             </Col>
             <Col xs={12} sm={8}>
-              <Form.Item name="target_calories" label="Mục tiêu Calo / ngày" rules={[{ required: true }]}>
+              <Form.Item
+                name="target_calories"
+                label="Mục tiêu Calo / ngày"
+                rules={[{ required: true }]}
+              >
                 <InputNumber min={800} max={5000} step={100} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
@@ -532,7 +544,12 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
                         style={{ marginBottom: 0 }}
                         rules={[{ required: true }]}
                       >
-                        <InputNumber min={0.5} step={0.5} style={{ width: '100%' }} placeholder="SL" />
+                        <InputNumber
+                          min={0.5}
+                          step={0.5}
+                          style={{ width: '100%' }}
+                          placeholder="SL"
+                        />
                       </Form.Item>
                     </Col>
                     <Col xs={2}>
@@ -569,7 +586,11 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
       {/* Modal thêm/sửa món ăn */}
       <Modal
         open={foodModal.open}
-        title={foodModal.record ? `Sửa món ăn: ${foodModal.record.name}` : 'Thêm món ăn vào thư viện dinh dưỡng'}
+        title={
+          foodModal.record
+            ? `Sửa món ăn: ${foodModal.record.name}`
+            : 'Thêm món ăn vào thư viện dinh dưỡng'
+        }
         okText="Lưu món ăn"
         cancelText="Hủy"
         onOk={() => foodForm.submit()}
@@ -944,7 +965,9 @@ function SurveysAndNpsTab({ canManage }: { canManage: boolean }) {
         title: 'Loại khảo sát',
         dataIndex: 'type',
         width: 140,
-        render: (t: string) => <Tag color="geekblue">{t === 'NPS' ? 'Đo lường NPS (0–10)' : t}</Tag>,
+        render: (t: string) => (
+          <Tag color="geekblue">{t === 'NPS' ? 'Đo lường NPS (0–10)' : t}</Tag>
+        ),
       },
       {
         title: 'Ngày bắt đầu',
@@ -1045,7 +1068,7 @@ function SurveysAndNpsTab({ canManage }: { canManage: boolean }) {
 
       <Card
         size="small"
-        title="Danh sách chiến dịch khảo sát hội viên (/admin/surveys)"
+        title="Danh sách chiến dịch khảo sát hội viên"
         extra={
           <Space>
             {canManage && (
@@ -1130,7 +1153,7 @@ export default function EngagementPage() {
   const canManage = can(PERM.ENGAGEMENT_MANAGE);
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+    <Card variant="borderless" className="page-card">
       <PageTitle
         title="Dinh dưỡng, Bảng tin & Khảo sát NPS"
         subtitle="Giao thực đơn dinh dưỡng cá nhân hóa, quản lý bảng tin chi nhánh và đo lường chỉ số hài lòng hội viên NPS"
@@ -1171,6 +1194,6 @@ export default function EngagementPage() {
           },
         ]}
       />
-    </Space>
+    </Card>
   );
 }

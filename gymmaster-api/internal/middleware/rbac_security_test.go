@@ -32,12 +32,16 @@ func TestAutomatedRBACAndBranchIsolation(t *testing.T) {
 		consts.PermSetupWizard,
 	}
 
-	t.Run("Hội viên (MEMBER) bị chặn trên tất cả permission quản trị (40300)", func(t *testing.T) {
+	t.Run("Hội viên (MEMBER) bị chặn trên tất cả permission quản trị và nhóm /v1/admin/* (40300)", func(t *testing.T) {
 		memberAuth := &token.Payload{
 			UserID:      101,
 			Roles:       []string{consts.RoleMember},
 			Permissions: nil,
 		}
+		assert.False(t, hasStaffRole(memberAuth), "MEMBER không được coi là nhân sự (/v1/admin/*)")
+		assert.False(t, hasStaffRole(&token.Payload{UserID: 102, Roles: nil}))
+		assert.True(t, hasStaffRole(&token.Payload{UserID: 201, Roles: []string{consts.RoleTrainer}}))
+		assert.True(t, hasStaffRole(&token.Payload{UserID: 202, Roles: []string{consts.RoleMember, consts.RoleReceptionist}}))
 		for _, perm := range adminPermissions {
 			allowed := memberAuth.HasRole(consts.RoleOwner) || anyOf(perm, memberAuth.HasPermission)
 			assert.False(t, allowed, "MEMBER không được phép có quyền %s", perm)

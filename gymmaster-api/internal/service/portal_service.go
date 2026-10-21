@@ -258,8 +258,18 @@ func (s *portalService) UpdateProfile(ctx context.Context, in PortalProfileInput
 	if err != nil {
 		return nil, err
 	}
+	email := strings.ToLower(strings.TrimSpace(in.Email))
+	if email != "" && !strings.EqualFold(email, m.Email) {
+		taken, err := s.d.Repo.EmailInUse(ctx, email, m.ID, m.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if taken {
+			return nil, rescode.New(rescode.Conflict, "Email này đã được sử dụng bởi tài khoản khác")
+		}
+	}
 	fields := map[string]any{
-		"email":                  strings.ToLower(strings.TrimSpace(in.Email)),
+		"email":                  email,
 		"address":                strings.TrimSpace(in.Address),
 		"emergency_contact_name": strings.TrimSpace(in.EmergencyContactName),
 		"updated_by":             reqctx.UserID(ctx),
@@ -502,7 +512,11 @@ func (s *portalService) Classes(ctx context.Context, branchID uint, from, to str
 		if len(branches) == 0 {
 			return res, nil
 		}
-		branchID = branches[0].ID
+		plans, err := s.d.Repo.SubscriptionPlans(ctx, m.ID)
+		if err != nil {
+			return nil, err
+		}
+		branchID = portalDefaultClassBranch(plans, branches, m.HomeBranchID, s.today())
 	} else if !portalHasBranch(branches, branchID) {
 		return nil, rescode.New(rescode.PermissionDenied, "Gói tập của bạn không áp dụng tại chi nhánh này")
 	}
@@ -527,15 +541,20 @@ func (s *portalService) Classes(ctx context.Context, branchID uint, from, to str
 	}
 	now := s.now()
 	lastDay := now.In(s.loc).AddDate(0, 0, advance).Format(consts.DateLayout)
+	blocked := m.BookingBlockedUntil != nil && m.BookingBlockedUntil.After(now)
+	if blocked {
+		res.BookingBlockedUntil = m.BookingBlockedUntil
+	}
 	for i := range rows {
 		r := &rows[i]
 		if !r.StartAt.After(now) {
 			continue
 		}
+		schGuardErr := bookingCheckScheduleGuard(ctx, &r.ClassSchedule)
 		item := &v1.ScheduleItem{
 			ClassSchedule:  classScheduleToRes(r),
 			CancelDeadline: r.StartAt.Add(-time.Duration(cancelMin) * time.Minute),
-			Bookable:       r.StartAt.In(s.loc).Format(consts.DateLayout) <= lastDay,
+			Bookable:       !blocked && r.StartAt.In(s.loc).Format(consts.DateLayout) <= lastDay && schGuardErr == nil,
 		}
 		if b, ok := mine[r.ID]; ok {
 			item.MyBooking = ClassBookingToRes(b)
@@ -744,6 +763,23 @@ func (s *portalService) TrainerAvailability(ctx context.Context, contractID uint
 		return res, nil
 	}
 	dayFrom, dayTo := day.Add(open), day.Add(closeAt)
+	// Ngày lễ: đóng cửa → không có khung giờ; giờ mở cửa đặc biệt → chỉ sinh khung trong giờ đặc biệt.
+	guard := currentScheduleGuard()
+	holiday, err := guard.HolidayOn(ctx, c.BranchID, dayFrom)
+	if err != nil {
+		return nil, err
+	}
+	if holiday != nil && holiday.Closed {
+		return res, nil
+	}
+	if holiday != nil && holiday.OpenTime != nil && holiday.CloseTime != nil {
+		ho, ok1 := portalClock(*holiday.OpenTime)
+		hc, ok2 := portalClock(*holiday.CloseTime)
+		if ok1 && ok2 {
+			dayFrom, dayTo = day.Add(ho), day.Add(hc)
+			res.OpenTime, res.CloseTime = *holiday.OpenTime, *holiday.CloseTime
+		}
+	}
 	trainerBusy, err := s.d.Repo.TrainerBusy(ctx, c.TrainerID, dayFrom, dayTo)
 	if err != nil {
 		return nil, err
@@ -757,6 +793,16 @@ func (s *portalService) TrainerAvailability(ctx context.Context, contractID uint
 	now := s.now()
 	length := time.Duration(c.SessionMinutes) * time.Minute
 	res.Slots = portalBuildSlots(dayFrom, dayTo, length, now, inContract, trainerBusy, memberBusy)
+	// Khung ngoài lịch rảnh HLV đã đăng ký hoặc trùng đơn nghỉ phép đã duyệt → HLV bận.
+	check, err := guard.TrainerSlotChecker(ctx, c.TrainerID, c.BranchID, dayFrom)
+	if err != nil {
+		return nil, err
+	}
+	for _, sl := range res.Slots {
+		if sl.Available && check(sl.StartAt, sl.EndAt) != "" {
+			sl.Available, sl.Reason = false, PortalSlotTrainerBusy
+		}
+	}
 	return res, nil
 }
 
@@ -858,6 +904,28 @@ func portalBranch(b *entity.Branch, homeID uint) *v1.Branch {
 		ID: b.ID, Code: b.Code, Name: b.Name, Address: b.Address, Phone: b.Phone,
 		OpenTime: b.OpenTime, CloseTime: b.CloseTime, IsHome: b.ID == homeID,
 	}
+}
+
+// portalDefaultClassBranch chọn chi nhánh mặc định cho lịch lớp: chi nhánh chính nếu một gói đang hiệu lực dùng được tại đó
+// (gói ALL_BRANCHES hoặc gói đăng ký tại chi nhánh chính); ngược lại chi nhánh của gói đang hiệu lực (ACTIVE, đúng hạn)
+// đầu tiên – tránh mặc định về chi nhánh chính nơi hội viên không đặt được lớp. Không có gói hợp lệ → branches[0].
+func portalDefaultClassBranch(plans []repository.PortalSubscriptionPlan, branches []*v1.Branch, homeID uint, today string) uint {
+	var first uint
+	for _, p := range plans {
+		if p.Status != entity.SubStatusActive || p.StartDate.Format(consts.DateLayout) > today || p.EndDate.Format(consts.DateLayout) < today {
+			continue
+		}
+		if (p.AccessScope == "ALL_BRANCHES" || p.BranchID == homeID) && portalHasBranch(branches, homeID) {
+			return homeID
+		}
+		if first == 0 && portalHasBranch(branches, p.BranchID) {
+			first = p.BranchID
+		}
+	}
+	if first > 0 {
+		return first
+	}
+	return branches[0].ID
 }
 
 func portalHasBranch(list []*v1.Branch, id uint) bool {

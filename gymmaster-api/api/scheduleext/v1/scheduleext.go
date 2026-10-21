@@ -95,6 +95,10 @@ type BranchHolidayItem struct {
 	ExtendedSubscriptions int64     `json:"extended_subscriptions,omitempty"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
+	// Chỉ có trong phản hồi thêm/sửa: buổi lớp / buổi PT đã xếp (SCHEDULED) rơi vào ngày nghỉ (hoặc ngoài giờ đặc
+	// biệt) – cần hủy, dời lịch hoặc thông báo cho hội viên. Lịch đã xếp KHÔNG tự hủy.
+	AffectedClassSchedules []*ImpactedClassSchedule `json:"affected_class_schedules,omitempty"`
+	AffectedPTSessions     []*ImpactedPTSession     `json:"affected_pt_sessions,omitempty"`
 }
 
 // ---- Admin (/v1/admin) ----------------------------------------------------------
@@ -107,9 +111,9 @@ type GetTrainerAvailabilityReq struct {
 type GetTrainerAvailabilityRes = []*TrainerAvailabilityItem
 
 type SaveTrainerAvailabilityReq struct {
-	g.Meta   `path:"/trainers/{id}/availability" method:"put" tags:"Lịch rảnh & Nghỉ lễ" summary:"Cập nhật khung giờ rảnh trong tuần của HLV" perm:"leave.manage,pt.schedule"`
+	g.Meta   `path:"/trainers/{id}/availability" method:"put" tags:"Lịch rảnh & Nghỉ lễ" summary:"Thay toàn bộ khung giờ rảnh trong tuần của HLV tại MỘT chi nhánh (danh sách rỗng = không giới hạn giờ nhận PT)" perm:"leave.manage,pt.schedule"`
 	ID       uint                           `json:"id"        in:"path" v:"required|min:1"`
-	BranchID uint                           `json:"branch_id"`
+	BranchID uint                           `json:"branch_id" v:"required|min:1#Vui lòng chọn chi nhánh|Vui lòng chọn chi nhánh"`
 	Slots    []TrainerAvailabilitySlotInput `json:"slots"`
 	Items    []TrainerAvailabilitySlotInput `json:"items"`
 }
@@ -190,11 +194,23 @@ type CreateBranchHolidayReq struct {
 	Date       string  `json:"date"        v:"required#Vui lòng chọn ngày nghỉ lễ"`
 	Name       string  `json:"name"        v:"required|max-length:150#Vui lòng nhập tên ngày lễ"`
 	Closed     *bool   `json:"closed"`
-	OpenTime   *string `json:"open_time"`
-	CloseTime  *string `json:"close_time"`
+	OpenTime   *string `json:"open_time"  dc:"HH:mm – bắt buộc khi closed=false và muốn áp giờ đặc biệt"`
+	CloseTime  *string `json:"close_time" dc:"HH:mm – phải sau open_time"`
 	ExtendSubs bool    `json:"extend_subs"`
 }
 type CreateBranchHolidayRes = BranchHolidayItem
+
+type UpdateBranchHolidayReq struct {
+	g.Meta    `path:"/branch-holidays/{id}" method:"put" tags:"Lịch rảnh & Nghỉ lễ" summary:"Sửa ngày nghỉ lễ / giờ đặc biệt (không cộng bù lại gói tập)" perm:"holiday.manage"`
+	ID        uint    `json:"id"         in:"path" v:"required|min:1"`
+	BranchID  *uint   `json:"branch_id"`
+	Date      string  `json:"date"       v:"required#Vui lòng chọn ngày nghỉ lễ"`
+	Name      string  `json:"name"       v:"required|max-length:150#Vui lòng nhập tên ngày lễ"`
+	Closed    *bool   `json:"closed"`
+	OpenTime  *string `json:"open_time"  dc:"HH:mm"`
+	CloseTime *string `json:"close_time" dc:"HH:mm"`
+}
+type UpdateBranchHolidayRes = BranchHolidayItem
 
 type DeleteBranchHolidayReq struct {
 	g.Meta `path:"/branch-holidays/{id}" method:"delete" tags:"Lịch rảnh & Nghỉ lễ" summary:"Xóa lịch nghỉ lễ" perm:"holiday.manage"`

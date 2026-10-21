@@ -58,6 +58,11 @@ func NewPayrollService(repo repository.PayrollRepository, tx postgres.TxManager,
 	}
 }
 
+// payrollStaffBranchChecker là năng lực tùy chọn của repository: kiểm tra nhân viên chấm công.
+type payrollStaffBranchChecker interface {
+	StaffBranchStatus(ctx context.Context, staffID, branchID uint) (exists, inBranch bool, err error)
+}
+
 func payrollDayRange(t time.Time) (time.Time, time.Time) {
 	loc := t.Location()
 	start := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
@@ -89,6 +94,19 @@ func (s *payrollService) ScanAttendance(ctx context.Context, req *v1.ScanAttenda
 	if staffID == 0 {
 		return nil, rescode.New(rescode.BadRequest, "Không xác định được nhân viên chấm công")
 	}
+	// Nhân viên phải tồn tại, đang hoạt động và thuộc chi nhánh chấm công (hoặc có vai trò toàn hệ thống).
+	if checker, ok := s.repo.(payrollStaffBranchChecker); ok {
+		exists, inBranch, err := checker.StaffBranchStatus(ctx, staffID, req.BranchID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, rescode.New(rescode.NotFound, "Không tìm thấy nhân viên hoặc tài khoản đã bị khóa")
+		}
+		if !inBranch {
+			return nil, rescode.New(rescode.BadRequest, "Nhân viên không thuộc chi nhánh chấm công")
+		}
+	}
 
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
 	if method != entity.AttendanceMethodQR && method != entity.AttendanceMethodManual {
@@ -100,6 +118,9 @@ func (s *payrollService) ScanAttendance(ctx context.Context, req *v1.ScanAttenda
 
 	openAtt, err := s.repo.FindOpenAttendanceToday(ctx, staffID, dayStart, dayEnd)
 	if err == nil && openAtt != nil {
+		if !reqctx.CanAccessBranch(ctx, openAtt.BranchID) {
+			return nil, rescode.New(rescode.PermissionDenied, "Nhân viên đang có lượt chấm công tại chi nhánh khác mà bạn không quản lý")
+		}
 		// Checkout
 		openAtt.CheckOutAt = &now
 		if openAtt.ShiftID != nil {
@@ -197,6 +218,11 @@ func (s *payrollService) GeneratePayroll(ctx context.Context, req *v1.GeneratePa
 	pStart, pEnd, err := payrollPeriodRange(period)
 	if err != nil {
 		return nil, err
+	}
+	// Không tạo bảng lương cho kỳ tương lai (sau tháng hiện tại).
+	cur := s.now().In(memberVNLoc)
+	if pStart.After(time.Date(cur.Year(), cur.Month(), 1, 0, 0, 0, 0, memberVNLoc)) {
+		return nil, rescode.New(rescode.BadRequest, "Không thể tạo bảng lương cho kỳ trong tương lai")
 	}
 
 	now := s.now()

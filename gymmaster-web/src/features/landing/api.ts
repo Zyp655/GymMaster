@@ -1,10 +1,12 @@
 import 'server-only';
 import dayjs from 'dayjs';
 import { serverApi } from '@/lib/http.server';
+import { ApiCode, isApiError } from '@/types/api';
+import { isValidPostSlug } from './post-slug';
+import { normalizePublicSchedules } from './schedule';
 import type {
   LoadResult,
   PublicBranch,
-  PublicClassSchedule,
   PublicClassSchedulesRaw,
   PublicPlansRes,
   PublicPost,
@@ -20,13 +22,7 @@ async function safe<T>(fn: () => Promise<T>): Promise<LoadResult<T>> {
   }
 }
 
-export function normalizePublicSchedules(
-  raw: PublicClassSchedulesRaw | null | undefined,
-): PublicClassSchedule[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  return Array.isArray(raw.items) ? raw.items : [];
-}
+export { normalizePublicSchedules } from './schedule';
 
 /** Endpoint công khai – không gắn token; http.core luôn dùng cache: 'no-store'. */
 export const landingApi = {
@@ -45,6 +41,25 @@ export const landingApi = {
   trainers: () => safe(() => serverApi.get<PublicTrainer[]>('/public/trainers', { auth: false })),
   testimonials: () =>
     safe(() => serverApi.get<PublicTestimonial[]>('/public/testimonials', { auth: false })),
+  /**
+   * Chi tiết bài viết theo slug (API chỉ trả bài đã xuất bản). `notFound: true` khi API trả 404
+   * hoặc slug không hợp lệ – để trang gọi notFound() thay vì hiển thị lỗi tải.
+   */
+  postDetail: async (
+    slug: string,
+  ): Promise<{ ok: true; data: PublicPost } | { ok: false; notFound: boolean }> => {
+    if (!isValidPostSlug(slug)) return { ok: false, notFound: true };
+    try {
+      const data = await serverApi.get<PublicPost>(`/public/posts/${encodeURIComponent(slug)}`, {
+        auth: false,
+      });
+      return { ok: true, data };
+    } catch (error) {
+      const notFound =
+        isApiError(error) && (error.code === ApiCode.NOT_FOUND || error.status === 404);
+      return { ok: false, notFound };
+    }
+  },
   posts: (category?: string) =>
     safe(() =>
       serverApi.get<PublicPost[]>('/public/posts', {

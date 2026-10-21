@@ -11,7 +11,7 @@ Trước khi bắt đầu, hãy đảm bảo máy tính đã cài đặt các c�
 | Công cụ | Phiên bản yêu cầu | Mục đích sử dụng | Kiểm tra phiên bản |
 |---|---|---|---|
 | **Docker & Docker Compose** | Docker Desktop 4.x+ / Engine 24+ | Chạy PostgreSQL 16, Mailpit (SMTP dev) hoặc chạy toàn bộ hệ thống | `docker -v && docker compose version` |
-| **Go (Golang)** | `>= 1.25` | Biên dịch và chạy backend `gymmaster-api` | `go version` |
+| **Go (Golang)** | `>= 1.26` | Biên dịch và chạy backend `gymmaster-api` | `go version` |
 | **Node.js** | `>= 22.0.0` (khuyến nghị Node 22 LTS hoặc Node 24) | Cài đặt package và chạy `gymmaster-admin` & `gymmaster-web` | `node -v` |
 | **npm** | `>= 10.0.0` (đi kèm Node.js) | Quản lý package cho 2 dự án Frontend | `npm -v` |
 | **GNU Make** *(tùy chọn)* | `>= 3.81` | Chạy các lệnh tắt trong `gymmaster-api/Makefile` | `make -v` |
@@ -26,7 +26,7 @@ Dự án gồm 3 thư mục mã nguồn chính và 2 dịch vụ hạ tầng:
 |---|---|---|---|---|
 | **Database** | *(Docker)* | PostgreSQL 16 Alpine (`Asia/Ho_Chi_Minh`) | `5432` | `localhost:5432` |
 | **Mailpit (SMTP Dev)** | *(Docker)* | Mailpit (bắt email đặt lại mật khẩu, nhắc hạn...) | `1025` (SMTP) / `8025` (Web UI) | http://localhost:8025 |
-| **Backend API** | `gymmaster-api/` | Go 1.25, GoFrame v2, GORM, golang-migrate, JWT, Cron, Excelize | `8000` | http://localhost:8000 (Swagger: `/swagger`) |
+| **Backend API** | `gymmaster-api/` | Go 1.26, GoFrame v2, GORM, golang-migrate, JWT, Cron, Excelize | `8000` | http://localhost:8000 (Swagger: `/swagger`) |
 | **Trang quản trị (Admin)** | `gymmaster-admin/` | React 18, Vite 6, TypeScript, Ant Design v5, Redux Toolkit, TanStack Query v5 | `3001` | http://localhost:3001 |
 | **Landing & Cổng hội viên** | `gymmaster-web/` | Next.js 16 (App Router), React 19, Tailwind CSS v4, NextAuth v4, next-intl, TanStack Query v5 | `3000` | http://localhost:3000 (Cổng HV: `/me`) |
 
@@ -41,7 +41,7 @@ Nếu bạn chỉ muốn khởi chạy toàn bộ hệ thống (Database + Mailp
 docker compose up -d --build
 ```
 
-- Container `migrate` sẽ tự động đợi PostgreSQL sẵn sàng, chạy toàn bộ migration (`000001` → `000010`) và nạp dữ liệu mẫu (`seed`).
+- Container `migrate` sẽ tự động đợi PostgreSQL sẵn sàng, chạy toàn bộ migration (`000001` → `000028`) và nạp dữ liệu mẫu (`seed`).
 - Xem tiến trình khởi tạo:
   ```bash
   docker compose logs -f migrate api
@@ -104,11 +104,11 @@ go install github.com/air-verse/air@latest
 
 #### 2.3. Chạy Migration và Seed dữ liệu mẫu
 ```bash
-# Áp dụng toàn bộ 10 file SQL migration vào PostgreSQL
+# Áp dụng toàn bộ 28 file SQL migration (000001 -> 000028) vào PostgreSQL
 make migrate-up
 # (Hoặc nếu không dùng make: go run . migrate up)
 
-# Tạo dữ liệu khởi tạo + dữ liệu demo (3 chi nhánh, nhân sự, 501 hội viên, lịch lớp, PT, POS...)
+# Tạo dữ liệu khởi tạo + dữ liệu demo đầy đủ cho cả 30 Sprint
 make seed
 # (Hoặc nếu không dùng make: go run . seed)
 ```
@@ -129,7 +129,7 @@ make dev
 ```
 
 Sau khi chạy, kiểm tra tại:
-- Healthcheck: http://localhost:8000/v1/health
+- Healthcheck: http://localhost:8000/health
 - Tài liệu Swagger UI: http://localhost:8000/swagger
 
 ---
@@ -286,7 +286,7 @@ npm --prefix gymmaster-web run lint
 4. **Muốn làm sạch hoàn toàn cơ sở dữ liệu và nạp lại dữ liệu demo mới:**
    ```bash
    cd gymmaster-api
-   make migrate-down n=10
+   make migrate-down n=28
    make migrate-up
    make seed
    ```

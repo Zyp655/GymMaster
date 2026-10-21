@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,10 +28,77 @@ const (
 	auditEntityInstallment = "installment_plan"
 )
 
+// financeMaxAmount: giới hạn số tiền vừa cột NUMERIC(14,2).
+const financeMaxAmount = 999_999_999_999
+
 var (
 	validExpenseCategoryTypes = []string{entity.ExpenseTypeFixed, entity.ExpenseTypeVariable}
-	validExpenseStatuses      = []string{entity.ExpenseStatusPending, entity.ExpenseStatusApproved, entity.ExpenseStatusRejected}
+
+	errCashSessionAlreadyOpen = rescode.New(rescode.Conflict, "Chi nhánh đang có ca thu ngân chưa đóng")
+	errCashSessionAlreadyClosed = rescode.New(rescode.Conflict, "Ca thu ngân đã được đóng trước đó")
+	errInstallmentPlanExists  = rescode.New(rescode.Conflict, "Hóa đơn này đã có kế hoạch trả góp")
+	errInstallmentAlreadyPaid = rescode.New(rescode.Conflict, "Kỳ trả góp này đã được thanh toán")
+	errInstallmentClosed      = rescode.New(rescode.BadRequest, "Kỳ trả góp đã tất toán hoặc đã hủy (hóa đơn đã thu đủ/đã hủy), không thể thu tiền")
 )
+
+// withTx chạy fn trong transaction (tx nil – trong unit test – thì chạy trực tiếp).
+func (s *financeService) withTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.WithTx(ctx, fn)
+}
+
+func financeValidateExpenseAmount(amount float64) error {
+	if amount <= 0 {
+		return rescode.New(rescode.BadRequest, "Số tiền chi phí phải lớn hơn 0")
+	}
+	if amount > financeMaxAmount {
+		return rescode.New(rescode.BadRequest, "Số tiền chi phí vượt quá giới hạn cho phép")
+	}
+	return nil
+}
+
+// financeParseSpentAt đọc ngày chi (YYYY-MM-DD). Quy tắc: phiếu chi ghi nhận khoản ĐÃ chi nên ngày chi không được
+// sau hôm nay (giờ VN) – chặn lỗi nhập nhầm năm (vd 2030) làm lệch báo cáo lãi/lỗ; khoản trả trước ghi theo ngày chi thực tế.
+func financeParseSpentAt(raw string, now time.Time) (*time.Time, error) {
+	parsed, err := equipmentParseDateOpt(raw)
+	if err != nil || parsed == nil {
+		return parsed, err
+	}
+	if parsed.After(equipmentStartOfDay(now)) {
+		return nil, rescode.New(rescode.BadRequest, "Ngày chi không được sau ngày hôm nay")
+	}
+	return parsed, nil
+}
+
+// installmentSplitAmounts chia total thành n kỳ (làm tròn đồng), kỳ cuối nhận phần dư để tổng khớp total.
+func installmentSplitAmounts(total float64, n int) []float64 {
+	out := make([]float64, n)
+	per := math.Floor(total / float64(n))
+	var allocated float64
+	for i := 0; i < n; i++ {
+		amt := per
+		if i == n-1 {
+			amt = roundMoneyVND(total - allocated)
+		}
+		allocated += amt
+		out[i] = amt
+	}
+	return out
+}
+
+// installmentDueDate trả ngày đến hạn kỳ thứ i (0-based) = firstDue + i tháng, kẹp về ngày cuối tháng
+// nếu tháng đích ngắn hơn (31/01 → 28|29/02 → 31/03 …) thay vì tràn sang tháng sau như time.AddDate.
+func installmentDueDate(firstDue time.Time, i int) time.Time {
+	y, m, d := firstDue.Date()
+	target := time.Date(y, m+time.Month(i), 1, 0, 0, 0, 0, firstDue.Location())
+	last := target.AddDate(0, 1, -1).Day()
+	if d > last {
+		d = last
+	}
+	return time.Date(target.Year(), target.Month(), d, 0, 0, 0, 0, firstDue.Location())
+}
 
 type (
 	FinanceService interface {
@@ -177,8 +245,8 @@ func (s *financeService) CreateExpense(ctx context.Context, req *v1.CreateExpens
 	if req.CategoryID == 0 {
 		return nil, rescode.New(rescode.BadRequest, "Vui lòng chọn danh mục chi phí")
 	}
-	if req.Amount < 0 {
-		return nil, rescode.New(rescode.BadRequest, "Số tiền chi phí không được âm")
+	if err := financeValidateExpenseAmount(req.Amount); err != nil {
+		return nil, err
 	}
 	cat, err := s.repo.FindExpenseCategoryByID(ctx, req.CategoryID)
 	if err != nil {
@@ -191,7 +259,7 @@ func (s *financeService) CreateExpense(ctx context.Context, req *v1.CreateExpens
 	now := s.now()
 	spentAt := equipmentStartOfDay(now)
 	if strings.TrimSpace(req.SpentAt) != "" {
-		parsed, pErr := equipmentParseDateOpt(req.SpentAt)
+		parsed, pErr := financeParseSpentAt(req.SpentAt, now)
 		if pErr != nil {
 			return nil, pErr
 		}
@@ -236,18 +304,31 @@ func (s *financeService) UpdateExpense(ctx context.Context, req *v1.UpdateExpens
 	if !reqctx.CanAccessBranch(ctx, row.BranchID) {
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không được thao tác chi phí tại chi nhánh này")
 	}
+	// Trạng thái chỉ đổi qua POST /expenses/{id}/approve (ghi nhận người duyệt) – PUT không được đổi trạng thái.
+	if status := strings.ToUpper(strings.TrimSpace(req.Status)); status != "" && status != row.Status {
+		return nil, rescode.New(rescode.BadRequest, "Không thể đổi trạng thái khi cập nhật chi phí, vui lòng dùng chức năng duyệt / từ chối")
+	}
 	exp := row.Expense
-	if req.CategoryID > 0 {
-		exp.CategoryID = req.CategoryID
+	updatedRow := *row
+	if req.CategoryID > 0 && req.CategoryID != exp.CategoryID {
+		cat, cErr := s.repo.FindExpenseCategoryByID(ctx, req.CategoryID)
+		if cErr != nil {
+			if errors.Is(cErr, gorm.ErrRecordNotFound) {
+				return nil, rescode.New(rescode.NotFound, "Không tìm thấy danh mục chi phí")
+			}
+			return nil, cErr
+		}
+		exp.CategoryID = cat.ID
+		updatedRow.CategoryName, updatedRow.CategoryType = cat.Name, cat.Type
 	}
 	if req.Amount != nil {
-		if *req.Amount < 0 {
-			return nil, rescode.New(rescode.BadRequest, "Số tiền chi phí không được âm")
+		if err := financeValidateExpenseAmount(*req.Amount); err != nil {
+			return nil, err
 		}
 		exp.Amount = *req.Amount
 	}
 	if strings.TrimSpace(req.SpentAt) != "" {
-		parsed, pErr := equipmentParseDateOpt(req.SpentAt)
+		parsed, pErr := financeParseSpentAt(req.SpentAt, s.now())
 		if pErr != nil {
 			return nil, pErr
 		}
@@ -259,17 +340,16 @@ func (s *financeService) UpdateExpense(ctx context.Context, req *v1.UpdateExpens
 	if req.AttachmentURL != nil {
 		exp.AttachmentURL = strings.TrimSpace(*req.AttachmentURL)
 	}
-	if status := strings.ToUpper(strings.TrimSpace(req.Status)); status != "" {
-		if !slices.Contains(validExpenseStatuses, status) {
-			return nil, rescode.New(rescode.BadRequest, "Trạng thái chi phí không hợp lệ")
-		}
-		exp.Status = status
+	// Khoản đã duyệt/từ chối mà bị sửa số tiền hoặc danh mục → quay về chờ duyệt để duyệt lại.
+	if exp.Status != entity.ExpenseStatusPending && (exp.Amount != row.Amount || exp.CategoryID != row.CategoryID) {
+		exp.Status = entity.ExpenseStatusPending
+		exp.ApprovedBy = nil
+		updatedRow.ApproverName = ""
 	}
 	exp.UpdatedAt = s.now()
 	if err := s.repo.UpdateExpense(ctx, &exp); err != nil {
 		return nil, err
 	}
-	updatedRow := *row
 	updatedRow.Expense = exp
 	return toExpenseItem(updatedRow), nil
 }
@@ -329,7 +409,9 @@ func (s *financeService) OpenCashSession(ctx context.Context, req *v1.OpenCashSe
 		return nil, rescode.New(rescode.BadRequest, "Tiền mặt đầu ca không được âm")
 	}
 	if open, err := s.repo.FindOpenCashSession(ctx, req.BranchID); err == nil && open != nil {
-		return nil, rescode.New(rescode.Conflict, "Chi nhánh đang có ca thu ngân chưa đóng")
+		return nil, errCashSessionAlreadyOpen
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 	var staffID uint
 	if uid := reqctx.UserID(ctx); uid != nil {
@@ -347,7 +429,11 @@ func (s *financeService) OpenCashSession(ctx context.Context, req *v1.OpenCashSe
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+	// Unique index một phần uq_cash_sessions_branch_open chặn hai yêu cầu mở ca đồng thời.
 	if err := s.repo.CreateCashSession(ctx, cs); err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil, errCashSessionAlreadyOpen
+		}
 		return nil, err
 	}
 	res := toCashSessionItem(repository.CashSessionRow{CashSession: *cs})
@@ -369,16 +455,21 @@ func (s *financeService) CloseCashSession(ctx context.Context, req *v1.CloseCash
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không được đóng ca thu ngân tại chi nhánh này")
 	}
 	if row.Status == entity.CashSessionClosed {
-		return nil, rescode.New(rescode.Conflict, "Ca thu ngân đã được đóng trước đó")
+		return nil, errCashSessionAlreadyClosed
 	}
 	now := s.now()
 	cashCollected, err := s.repo.SumCashPaymentsBetween(ctx, row.BranchID, row.OpenedAt, now)
 	if err != nil {
 		return nil, err
 	}
+	cashRefunded, err := s.repo.SumCashRefundsBetween(ctx, row.BranchID, row.OpenedAt, now)
+	if err != nil {
+		return nil, err
+	}
 	cs := row.CashSession
 	cs.ClosedAt = &now
-	cs.ExpectedCash = cs.OpeningCash + cashCollected
+	// Tiền mặt kỳ vọng = đầu ca + phiếu thu CASH − phiếu hoàn CASH trong ca.
+	cs.ExpectedCash = roundMoneyVND(cs.OpeningCash + cashCollected - cashRefunded)
 	cs.CountedCash = req.CountedCash
 	cs.Difference = cs.CountedCash - cs.ExpectedCash
 	if note := strings.TrimSpace(req.Note); note != "" {
@@ -386,12 +477,22 @@ func (s *financeService) CloseCashSession(ctx context.Context, req *v1.CloseCash
 	}
 	cs.Status = entity.CashSessionClosed
 	cs.UpdatedAt = now
-	if err := s.repo.UpdateCashSession(ctx, &cs); err != nil {
+	// UPDATE có điều kiện status = 'OPEN': nhiều yêu cầu đóng cùng lúc chỉ một yêu cầu thắng, còn lại 409
+	// (trước đây Save() vô điều kiện → yêu cầu cuối ghi đè số tiền đếm được của yêu cầu trước).
+	closed, err := s.repo.CloseCashSession(ctx, &cs)
+	if err != nil {
 		return nil, err
+	}
+	if !closed {
+		return nil, errCashSessionAlreadyClosed
 	}
 	updatedRow := *row
 	updatedRow.CashSession = cs
-	return toCashSessionItem(updatedRow), nil
+	res := toCashSessionItem(updatedRow)
+	if s.audit != nil {
+		s.audit.Log(ctx, AuditUpdate, auditEntityCashSession, cs.ID, toCashSessionItem(*row), res)
+	}
+	return res, nil
 }
 
 func (s *financeService) ListCashSessions(ctx context.Context, req *v1.ListCashSessionsReq) (v1.ListCashSessionsRes, error) {
@@ -431,6 +532,12 @@ func (s *financeService) ProfitLossReport(ctx context.Context, req *v1.ProfitLos
 		}
 		to = *parsed
 	}
+	if to.Before(from) {
+		return nil, rescode.New(rescode.BadRequest, "Ngày kết thúc phải sau hoặc bằng ngày bắt đầu")
+	}
+	// Mốc ngày theo giờ Việt Nam (00:00 +07) – các cột timestamptz (issued_at, created_at) được so theo ngày lịch VN.
+	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, memberVNLoc)
+	to = time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, memberVNLoc)
 	data, err := s.repo.CalcProfitLoss(ctx, branchIDs, from, to)
 	if err != nil {
 		return nil, err
@@ -456,6 +563,14 @@ func (s *financeService) ProfitLossReport(ctx context.Context, req *v1.ProfitLos
 		PayrollExpenses:   data.PayrollExpenses,
 		TotalExpenses:     totalExp,
 		NetProfit:         netProfit,
+		ExpensesByCategory: dto.Map(data.ExpensesByCategory, func(c repository.ExpenseCategoryTotal) *v1.ExpenseByCategoryItem {
+			return &v1.ExpenseByCategoryItem{
+				CategoryID:   c.CategoryID,
+				CategoryName: c.CategoryName,
+				CategoryType: c.CategoryType,
+				Amount:       c.Amount,
+			}
+		}),
 	}, nil
 }
 
@@ -476,37 +591,46 @@ func (s *financeService) CreateInstallmentPlan(ctx context.Context, req *v1.Crea
 	if inv.MemberID == nil {
 		return nil, rescode.New(rescode.BadRequest, "Hóa đơn trả góp phải gắn với hội viên")
 	}
+	// Chỉ chia kỳ phần còn nợ của hóa đơn đang chờ thu (UNPAID/PARTIAL).
+	switch inv.Status {
+	case entity.InvoiceStatusVoid:
+		return nil, rescode.New(rescode.BadRequest, "Hóa đơn đã bị hủy, không thể tạo kế hoạch trả góp")
+	case entity.InvoiceStatusRefunded:
+		return nil, rescode.New(rescode.BadRequest, "Hóa đơn đã được hoàn tiền, không thể tạo kế hoạch trả góp")
+	case entity.InvoiceStatusPaid:
+		return nil, rescode.New(rescode.BadRequest, "Hóa đơn đã được thanh toán đủ, không cần trả góp")
+	}
+	totalToSplit := roundMoneyVND(inv.Total - inv.PaidAmount)
+	if totalToSplit <= 0 {
+		return nil, rescode.New(rescode.BadRequest, "Hóa đơn không còn số tiền phải thu để trả góp")
+	}
 	if existing, err := s.repo.FindInstallmentPlanByInvoice(ctx, inv.ID); err == nil && existing != nil {
-		return nil, rescode.New(rescode.Conflict, "Hóa đơn này đã có kế hoạch trả góp")
+		return nil, errInstallmentPlanExists
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 
 	now := s.now()
-	firstDue := equipmentStartOfDay(now)
+	today := equipmentStartOfDay(now)
+	firstDue := today
 	if strings.TrimSpace(req.FirstDueDate) != "" {
 		parsed, pErr := equipmentParseDateOpt(req.FirstDueDate)
 		if pErr != nil {
 			return nil, pErr
 		}
+		if parsed.Before(today) {
+			return nil, rescode.New(rescode.BadRequest, "Ngày đến hạn kỳ đầu không được ở quá khứ")
+		}
 		firstDue = *parsed
 	}
 
-	totalToSplit := inv.Total - inv.PaidAmount
-	if totalToSplit <= 0 {
-		totalToSplit = inv.Total
-	}
-	perInstallment := math.Floor(totalToSplit / float64(req.Installments))
+	amounts := installmentSplitAmounts(totalToSplit, req.Installments)
 	schedules := make([]entity.InstallmentSchedule, req.Installments)
-	var allocated float64
-	for i := 0; i < req.Installments; i++ {
-		amt := perInstallment
-		if i == req.Installments-1 {
-			amt = totalToSplit - allocated
-		}
-		allocated += amt
+	for i := range schedules {
 		schedules[i] = entity.InstallmentSchedule{
 			Seq:       i + 1,
-			DueDate:   firstDue.AddDate(0, i, 0),
-			Amount:    amt,
+			DueDate:   installmentDueDate(firstDue, i),
+			Amount:    amounts[i],
 			Status:    entity.InstallmentPending,
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -522,8 +646,18 @@ func (s *financeService) CreateInstallmentPlan(ctx context.Context, req *v1.Crea
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if err := s.repo.CreateInstallmentPlan(ctx, plan, schedules); err != nil {
+	if err := s.withTx(ctx, func(ctx context.Context) error {
+		return s.repo.CreateInstallmentPlan(ctx, plan, schedules)
+	}); err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil, errInstallmentPlanExists
+		}
 		return nil, err
+	}
+	if s.audit != nil {
+		s.audit.Log(ctx, AuditCreate, auditEntityInstallment, plan.ID, nil, map[string]any{
+			"invoice_id": plan.InvoiceID, "total": plan.Total, "installments": plan.Installments,
+		})
 	}
 
 	schedItems := make([]*v1.InstallmentScheduleItem, 0, len(schedules))
@@ -564,6 +698,13 @@ func (s *financeService) ListInstallments(ctx context.Context, req *v1.ListInsta
 }
 
 func (s *financeService) PayInstallmentSchedule(ctx context.Context, req *v1.PayInstallmentScheduleReq) (*v1.InstallmentScheduleItem, error) {
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	if method == "" {
+		method = entity.PaymentCash
+	}
+	if !slices.Contains(invoicePayMethods, method) {
+		return nil, rescode.New(rescode.BadRequest, "Phương thức thanh toán không hợp lệ")
+	}
 	row, err := s.repo.FindInstallmentScheduleByID(ctx, req.ID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -575,29 +716,73 @@ func (s *financeService) PayInstallmentSchedule(ctx context.Context, req *v1.Pay
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không được thu tiền trả góp của chi nhánh này")
 	}
 	if row.Status == entity.InstallmentPaid {
-		return nil, rescode.New(rescode.Conflict, "Kỳ trả góp này đã được thanh toán")
+		return nil, errInstallmentAlreadyPaid
+	}
+	if !installmentIsOpen(row.Status) {
+		return nil, errInstallmentClosed
+	}
+	if s.invoices == nil || row.InvoiceID == 0 {
+		return nil, rescode.New(rescode.BadRequest, "Kỳ trả góp không gắn với hóa đơn để thu tiền")
 	}
 
-	now := s.now()
-	sc := row.InstallmentSchedule
-	sc.PaidAmount = sc.Amount
-	sc.Status = entity.InstallmentPaid
-	sc.PaidAt = &now
-	sc.UpdatedAt = now
-
-	if err := s.repo.UpdateInstallmentSchedule(ctx, &sc); err != nil {
-		return nil, err
-	}
-	if s.invoices != nil && row.InvoiceID > 0 {
-		method := strings.ToUpper(strings.TrimSpace(req.Method))
-		if method == "" {
-			method = entity.PaymentCash
+	var sc entity.InstallmentSchedule
+	// Một transaction: khóa kỳ trả góp → đánh dấu kỳ đã thu → ghi phiếu thu qua InvoiceService (khóa hóa đơn,
+	// kiểm tra số còn nợ, đồng bộ các kỳ còn lại). Thu thất bại → rollback cả việc đánh dấu kỳ.
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		// Thứ tự khóa: hóa đơn → kỳ trả góp (giống AddPayment → đồng bộ trả góp) để không deadlock.
+		inv, err := s.invoices.LockInvoice(ctx, row.InvoiceID)
+		if err != nil {
+			return err
 		}
-		_, _ = s.invoices.AddPayment(ctx, row.InvoiceID, PaymentInput{
-			Amount: sc.Amount,
+		locked, err := s.repo.LockInstallmentSchedule(ctx, row.ID)
+		if err != nil {
+			return err
+		}
+		if locked.Status == entity.InstallmentPaid {
+			return errInstallmentAlreadyPaid
+		}
+		if !installmentIsOpen(locked.Status) {
+			return errInstallmentClosed
+		}
+		if inv.Status != entity.InvoiceStatusUnpaid && inv.Status != entity.InvoiceStatusPartial {
+			return rescode.New(rescode.BadRequest, "Hóa đơn của kỳ trả góp đã thanh toán đủ hoặc đã hủy, không cần thu thêm")
+		}
+		amount := roundMoneyVND(locked.Amount - locked.PaidAmount)
+		// Hóa đơn còn nợ ít hơn số của kỳ (đã thu trực tiếp một phần) → chỉ thu đúng số còn nợ và tất toán kỳ.
+		if due := roundMoneyVND(inv.Total - inv.PaidAmount); due < amount {
+			amount = due
+		}
+		if amount <= 0 {
+			return errInstallmentAlreadyPaid
+		}
+		note := strings.TrimSpace(req.Note)
+		if note == "" {
+			note = "Thu trả góp kỳ " + strconv.Itoa(locked.Seq)
+		}
+		now := s.now()
+		sc = *locked
+		sc.PaidAmount = roundMoneyVND(locked.PaidAmount + amount)
+		sc.Amount = sc.PaidAmount
+		sc.Status = entity.InstallmentPaid
+		sc.PaidAt = &now
+		sc.UpdatedAt = now
+		// Đánh dấu kỳ TRƯỚC khi ghi thu để bước đồng bộ trả góp trong AddPayment thấy đúng các kỳ còn mở.
+		if err := s.repo.UpdateInstallmentSchedule(ctx, &sc); err != nil {
+			return err
+		}
+		if _, err := s.invoices.AddPayment(ctx, row.InvoiceID, PaymentInput{
+			Amount: amount,
 			Method: method,
-			Note:   strings.TrimSpace(req.Note),
-		})
+			Note:   note,
+		}); err != nil {
+			// Transaction sẽ rollback; khôi phục tường minh để an toàn cả khi chạy không có transaction.
+			_ = s.repo.UpdateInstallmentSchedule(ctx, locked)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	updatedRow := *row
 	updatedRow.InstallmentSchedule = sc

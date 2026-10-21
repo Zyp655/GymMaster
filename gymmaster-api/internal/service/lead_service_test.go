@@ -177,7 +177,12 @@ func (f *fakeLeadRepo) EnsureBirthdayPromotion(_ context.Context, p *entity.Prom
 func TestLeadService_PublicCreateRateLimitAndFlow(t *testing.T) {
 	repo := newFakeLeadRepo()
 	svc := NewLeadService(repo, nil, nil, nil, nil)
+	svc.(*leadService).now = func() time.Time { return time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC) }
 	ctx := ownerCtx()
+
+	// SĐT không hợp lệ bị từ chối ngay khi tạo lead.
+	_, err0 := svc.PublicCreateLead(ctx, &v1.PublicCreateLeadReq{BranchID: 1, FullName: "Sai SĐT", Phone: "abcdefghij"}, "203.0.113.99")
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err0))
 
 	// 1. Tạo lead từ trang chủ (tối đa 5 lần / 15 phút trên cùng IP)
 	var firstLead *v1.Lead
@@ -227,6 +232,16 @@ func TestLeadService_PublicCreateRateLimitAndFlow(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(tp.QRToken, "TP-"))
 
+	// Mỗi lead chỉ 1 vé tập thử còn hiệu lực; ngày quá khứ bị từ chối.
+	_, err = svc.IssueTrialPass(ctx, &v1.IssueTrialPassReq{ID: firstLead.ID, ValidDate: "2026-10-16"})
+	assert.Equal(t, rescode.Conflict.Code(), codeOf(err))
+	_, err = svc.IssueTrialPass(ctx, &v1.IssueTrialPassReq{ID: firstLead.ID, ValidDate: "2026-10-01"})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+
+	// Không chuyển CONVERTED bằng đổi trạng thái thường.
+	_, err = svc.UpdateLeadStatus(ctx, firstLead.ID, entity.LeadStatusConverted)
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+
 	updated, err = svc.GetLead(ctx, firstLead.ID)
 	require.NoError(t, err)
 	assert.Equal(t, entity.LeadStatusTrial, updated.Status)
@@ -240,6 +255,10 @@ func TestLeadService_PublicCreateRateLimitAndFlow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, entity.LeadStatusConverted, converted.Status)
 	require.NotNil(t, converted.MemberID)
+
+	// CONVERTED là trạng thái cuối.
+	_, err = svc.UpdateLeadStatus(ctx, firstLead.ID, entity.LeadStatusLost)
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
 
 	// 5. Báo cáo phễu chuyển đổi & Cron sinh nhật / churn risk
 	rep, err := svc.LeadsReport(ctx, &v1.LeadsReportReq{})

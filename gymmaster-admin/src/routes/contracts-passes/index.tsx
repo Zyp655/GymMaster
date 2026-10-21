@@ -60,13 +60,14 @@ import {
   ACTIVE_STATUS_OPTIONS,
   CONTRACT_STATUS_MAP,
   CONTRACT_STATUS_OPTIONS,
-  PAYMENT_METHOD_STATUS_OPTIONS,
+  COUNTER_PAYMENT_METHOD_OPTIONS,
 } from '@/constants/status';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useTableQuery } from '@/hooks/useTableQuery';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
 import { showError } from '@/utils/errors';
+import { isSafeSignatureSrc, safeHtml } from './sanitizeHtml';
 import { DATE_FORMAT, formatDate, formatDateTime, formatPhone, toApiDate } from '@/utils/format';
 
 /* --------------------------------------------------------------------------
@@ -82,12 +83,14 @@ function ContractTemplatesTab({ canManage }: { canManage: boolean }) {
   const [previewItem, setPreviewItem] = useState<ContractTemplate | null>(null);
   const [form] = Form.useForm<ContractTemplateInput>();
 
-  const table = useTableQuery<ContractTemplate, { status?: string; page?: number; limit?: number }>({
-    queryKey: [contractsPassesApi.templateKey, 'list'],
-    queryFn: (p) => contractsPassesApi.listTemplates(p),
-    filterKeys: ['status'],
-    defaults: { order_by: 'id', order_dir: 'DESC' },
-  });
+  const table = useTableQuery<ContractTemplate, { status?: string; page?: number; limit?: number }>(
+    {
+      queryKey: [contractsPassesApi.templateKey, 'list'],
+      queryFn: (p) => contractsPassesApi.listTemplates(p),
+      filterKeys: ['status'],
+      defaults: { order_by: 'id', order_dir: 'DESC' },
+    },
+  );
 
   useEffect(() => {
     if (!modal.open) return;
@@ -240,9 +243,7 @@ function ContractTemplatesTab({ canManage }: { canManage: boolean }) {
       <Modal
         open={modal.open}
         title={
-          modal.record
-            ? `Sửa mẫu hợp đồng: ${modal.record.code}`
-            : 'Tạo mẫu hợp đồng điện tử mới'
+          modal.record ? `Sửa mẫu hợp đồng: ${modal.record.code}` : 'Tạo mẫu hợp đồng điện tử mới'
         }
         okText="Lưu mẫu hợp đồng"
         cancelText="Hủy"
@@ -316,7 +317,7 @@ function ContractTemplatesTab({ canManage }: { canManage: boolean }) {
       >
         {previewItem && (
           <Card size="small" style={{ background: '#f8fafc', marginTop: 12 }}>
-            <div dangerouslySetInnerHTML={{ __html: previewItem.body_html }} />
+            <div dangerouslySetInnerHTML={{ __html: safeHtml(previewItem.body_html) }} />
           </Card>
         )}
       </Modal>
@@ -374,9 +375,7 @@ function MemberContractsTab() {
         key: 'member',
         render: (_, r) => (
           <Space direction="vertical" size={0}>
-            <Typography.Text strong>
-              {r.member_name || `Hội viên #${r.member_id}`}
-            </Typography.Text>
+            <Typography.Text strong>{r.member_name || `Hội viên #${r.member_id}`}</Typography.Text>
             {r.member_code && (
               <Typography.Text type="secondary" className="code-text" style={{ fontSize: 12 }}>
                 {r.member_code}
@@ -525,20 +524,24 @@ function MemberContractsTab() {
               <Descriptions.Item label="Ký lúc">
                 {viewContract.signed_at ? formatDateTime(viewContract.signed_at) : 'Chưa ký'}
               </Descriptions.Item>
-              <Descriptions.Item label="Địa chỉ IP">
-                {viewContract.ip || '—'}
-              </Descriptions.Item>
+              <Descriptions.Item label="Địa chỉ IP">{viewContract.ip || '—'}</Descriptions.Item>
             </Descriptions>
 
-            <Card size="small" title="Nội dung hợp đồng đã kết xuất" style={{ background: '#f8fafc' }}>
+            <Card
+              size="small"
+              title="Nội dung hợp đồng đã kết xuất"
+              style={{ background: '#f8fafc' }}
+            >
               <div
                 dangerouslySetInnerHTML={{
-                  __html: viewContract.rendered_html || '<p>Chưa có nội dung kết xuất</p>',
+                  __html: viewContract.rendered_html
+                    ? safeHtml(viewContract.rendered_html)
+                    : '<p>Chưa có nội dung kết xuất</p>',
                 }}
               />
             </Card>
 
-            {viewContract.signature_url && (
+            {isSafeSignatureSrc(viewContract.signature_url) && (
               <Card size="small" title="Chữ ký điện tử của hội viên">
                 <img
                   src={viewContract.signature_url}
@@ -557,6 +560,15 @@ function MemberContractsTab() {
 /* --------------------------------------------------------------------------
  * TAB 3: Bán vé ngày / Vé khách QR (/admin/day-passes)
  * -------------------------------------------------------------------------- */
+type DaySaleValues = {
+  branch_id: number;
+  buyer_name: string;
+  phone: string;
+  valid_date: Dayjs;
+  price: number;
+  payment_method: string;
+};
+
 function DayPassesTab({ canManage }: { canManage: boolean }) {
   const { message } = App.useApp();
   const qc = useQueryClient();
@@ -565,18 +577,9 @@ function DayPassesTab({ canManage }: { canManage: boolean }) {
 
   const [sellOpen, setSellOpen] = useState(false);
   const [issuedPass, setIssuedPass] = useState<DayPass | null>(null);
-  const [form] = Form.useForm<{
-    branch_id: number;
-    buyer_name: string;
-    phone: string;
-    type: DayPassType;
-    valid_date: Dayjs;
-    price: number;
-    sponsor_member_id?: number;
-    payment_method: string;
-  }>();
-
-  const passType = Form.useWatch('type', form) ?? 'DAY';
+  // Nhân viên chỉ bán vé ngày (DAY) thu tiền tại quầy. Vé khách mời (GUEST) do hội viên tự tạo trên cổng hội viên
+  // theo hạn mức gói tập (PLAN §Sprint 24) – API bán vé tại quầy luôn tạo vé DAY.
+  const [form] = Form.useForm<DaySaleValues>();
 
   const table = useTableQuery<
     DayPass,
@@ -591,24 +594,14 @@ function DayPassesTab({ canManage }: { canManage: boolean }) {
   });
 
   const createPassMut = useMutation({
-    mutationFn: (v: {
-      branch_id: number;
-      buyer_name: string;
-      phone: string;
-      type: DayPassType;
-      valid_date: Dayjs;
-      price: number;
-      sponsor_member_id?: number;
-      payment_method: string;
-    }) => {
+    mutationFn: (v: DaySaleValues) => {
       const payload: DayPassInput = {
         branch_id: v.branch_id,
         buyer_name: v.buyer_name.trim(),
         phone: v.phone.trim(),
-        type: v.type,
+        type: 'DAY',
         valid_date: toApiDate(v.valid_date) ?? dayjs().format('YYYY-MM-DD'),
-        price: v.type === 'GUEST' ? 0 : Number(v.price) || 0,
-        sponsor_member_id: v.type === 'GUEST' ? v.sponsor_member_id ?? null : null,
+        price: Number(v.price) || 0,
         payment_method: v.payment_method,
       };
       return contractsPassesApi.createDayPass(payload);
@@ -717,7 +710,6 @@ function DayPassesTab({ canManage }: { canManage: boolean }) {
               form.resetFields();
               form.setFieldsValue({
                 branch_id: branchId ?? branches[0]?.id ?? 1,
-                type: 'DAY',
                 valid_date: dayjs(),
                 price: 120000,
                 payment_method: 'CASH',
@@ -725,7 +717,7 @@ function DayPassesTab({ canManage }: { canManage: boolean }) {
               setSellOpen(true);
             }}
             addPerm={PERM.CONTRACT_MANAGE}
-            addText="Bán vé ngày / Vé khách QR"
+            addText="Bán vé ngày QR"
             onRefresh={() => table.refetch()}
             refreshing={table.isFetching}
           />
@@ -763,7 +755,7 @@ function DayPassesTab({ canManage }: { canManage: boolean }) {
 
       <Modal
         open={sellOpen}
-        title="Bán vé tập ngày (Day Pass) / Cấp vé khách mời (Guest Pass)"
+        title="Bán vé tập ngày (Day Pass)"
         okText="Phát hành vé QR"
         cancelText="Hủy"
         onOk={() => form.submit()}
@@ -780,10 +772,13 @@ function DayPassesTab({ canManage }: { canManage: boolean }) {
           style={{ marginTop: 12 }}
         >
           <Row gutter={12}>
-            <Col xs={24} sm={12}>
-              <Form.Item name="type" label="Loại vé phát hành" rules={[{ required: true }]}>
-                <Select options={DAY_PASS_TYPE_OPTIONS} />
-              </Form.Item>
+            <Col xs={24}>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="Vé khách mời (Guest Pass) do hội viên tự tạo trên cổng hội viên theo hạn mức gói tập."
+              />
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item
@@ -812,33 +807,34 @@ function DayPassesTab({ canManage }: { canManage: boolean }) {
                 <Input placeholder="0901234567" />
               </Form.Item>
             </Col>
-            {passType === 'GUEST' ? (
-              <Col xs={24}>
-                <Form.Item
-                  name="sponsor_member_id"
-                  label="Hội viên bảo lãnh (Sử dụng hạn mức Guest Pass tháng)"
-                  rules={[{ required: true, message: 'Chọn hội viên bảo lãnh' }]}
-                >
-                  <MemberSelect activeOnly />
-                </Form.Item>
-              </Col>
-            ) : (
-              <>
-                <Col xs={12}>
-                  <Form.Item name="price" label="Giá vé ngày (VND)" rules={[{ required: true }]}>
-                    <MoneyInput />
-                  </Form.Item>
-                </Col>
-                <Col xs={12}>
-                  <Form.Item name="payment_method" label="Phương thức thanh toán">
-                    <Select options={PAYMENT_METHOD_STATUS_OPTIONS} />
-                  </Form.Item>
-                </Col>
-              </>
-            )}
+            <Col xs={12}>
+              <Form.Item
+                name="price"
+                label="Giá vé ngày (VND)"
+                rules={[
+                  { required: true, message: 'Nhập giá vé' },
+                  { type: 'number', min: 0, message: 'Giá vé không được âm' },
+                ]}
+              >
+                <MoneyInput />
+              </Form.Item>
+            </Col>
+            <Col xs={12}>
+              <Form.Item name="payment_method" label="Phương thức thanh toán">
+                <Select options={COUNTER_PAYMENT_METHOD_OPTIONS} />
+              </Form.Item>
+            </Col>
             <Col xs={24}>
-              <Form.Item name="valid_date" label="Ngày hiệu lực sử dụng" rules={[{ required: true }]}>
-                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
+              <Form.Item
+                name="valid_date"
+                label="Ngày hiệu lực sử dụng"
+                rules={[{ required: true }]}
+              >
+                <DatePicker
+                  style={{ width: '100%' }}
+                  format={DATE_FORMAT}
+                  disabledDate={(d) => d.isBefore(dayjs(), 'day')}
+                />
               </Form.Item>
             </Col>
           </Row>
@@ -908,47 +904,49 @@ export default function ContractsPassesPage() {
   const canManage = can(PERM.CONTRACT_MANAGE);
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <PageTitle
-        title="Hợp đồng điện tử & Vé ngày QR"
-        subtitle="Soạn mẫu hợp đồng điện tử, quản lý chữ ký số của hội viên và phát hành vé ngày / vé khách mời QR dùng 1 lần"
-      />
+    <Card variant="borderless" className="page-card">
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <PageTitle
+          title="Hợp đồng điện tử & Vé ngày QR"
+          subtitle="Soạn mẫu hợp đồng điện tử, quản lý chữ ký số của hội viên và phát hành vé ngày / vé khách mời QR dùng 1 lần"
+        />
 
-      <Tabs
-        defaultActiveKey="templates"
-        items={[
-          {
-            key: 'templates',
-            label: (
-              <Space size={6}>
-                <FileTextOutlined />
-                <span>Mẫu hợp đồng điện tử</span>
-              </Space>
-            ),
-            children: <ContractTemplatesTab canManage={canManage} />,
-          },
-          {
-            key: 'member-contracts',
-            label: (
-              <Space size={6}>
-                <FileProtectOutlined />
-                <span>Hợp đồng hội viên đã ký</span>
-              </Space>
-            ),
-            children: <MemberContractsTab />,
-          },
-          {
-            key: 'day-passes',
-            label: (
-              <Space size={6}>
-                <QrcodeOutlined />
-                <span>Bán vé ngày / Vé khách QR</span>
-              </Space>
-            ),
-            children: <DayPassesTab canManage={canManage} />,
-          },
-        ]}
-      />
-    </Space>
+        <Tabs
+          defaultActiveKey="templates"
+          items={[
+            {
+              key: 'templates',
+              label: (
+                <Space size={6}>
+                  <FileTextOutlined />
+                  <span>Mẫu hợp đồng điện tử</span>
+                </Space>
+              ),
+              children: <ContractTemplatesTab canManage={canManage} />,
+            },
+            {
+              key: 'member-contracts',
+              label: (
+                <Space size={6}>
+                  <FileProtectOutlined />
+                  <span>Hợp đồng hội viên đã ký</span>
+                </Space>
+              ),
+              children: <MemberContractsTab />,
+            },
+            {
+              key: 'day-passes',
+              label: (
+                <Space size={6}>
+                  <QrcodeOutlined />
+                  <span>Bán vé ngày / Vé khách QR</span>
+                </Space>
+              ),
+              children: <DayPassesTab canManage={canManage} />,
+            },
+          ]}
+        />
+      </Space>
+    </Card>
   );
 }

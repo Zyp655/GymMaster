@@ -81,12 +81,16 @@ function MembersDesktop() {
         render: (_, r) => (
           <Space size={10}>
             <MemberAvatar src={r.avatar_url} name={r.full_name} size={36} />
-            <div style={{ lineHeight: 1.3 }}>
+            <div style={{ lineHeight: 1.3, minWidth: 0, maxWidth: 240 }}>
               <Link to={`/app/members/${r.id}`} style={{ fontWeight: 500 }}>
                 {r.full_name}
               </Link>
               <br />
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              <Typography.Text
+                type="secondary"
+                style={{ fontSize: 12, maxWidth: 240 }}
+                ellipsis={{ tooltip: r.email || undefined }}
+              >
                 {GENDER_LABEL[r.gender]}
                 {r.email ? ` · ${r.email}` : ''}
               </Typography.Text>
@@ -106,7 +110,7 @@ function MembersDesktop() {
         className: 'text-nowrap',
         render: (phone: string) => <a href={`tel:${phone}`}>{formatPhone(phone)}</a>,
       },
-      { title: 'Chi nhánh', dataIndex: 'home_branch_name' },
+      { title: 'Chi nhánh', dataIndex: 'home_branch_name', className: 'text-nowrap' },
       {
         title: 'Gói hiện tại',
         dataIndex: 'active_subscription',
@@ -115,17 +119,21 @@ function MembersDesktop() {
       {
         title: 'Nguồn',
         dataIndex: 'source',
+        // Ẩn bớt cột phụ ở màn hình hẹp để cột Trạng thái/Thao tác không bị che.
+        responsive: ['xxl'],
         render: (s: MemberItem['source']) => SOURCE_LABEL[s] ?? s,
       },
       {
         title: 'Trạng thái',
         dataIndex: 'status',
+        className: 'text-nowrap',
         sorter: true,
         render: (s: string) => <StatusTag status={s} map={MEMBER_STATUS_MAP} />,
       },
       {
         title: 'Ngày tạo',
         dataIndex: 'created_at',
+        responsive: ['xl'],
         sorter: true,
         render: (v: string) => <DateText value={v} />,
       },

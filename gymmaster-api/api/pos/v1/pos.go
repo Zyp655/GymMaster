@@ -145,7 +145,7 @@ type SummaryRes struct {
 	Date         string         `json:"date"`
 	BranchID     uint           `json:"branch_id"`
 	OrderCount   int64          `json:"order_count"    dc:"Số hóa đơn POS (trừ hóa đơn hủy)"`
-	ItemsSold    int64          `json:"items_sold"     dc:"Tổng số lượng sản phẩm bán ra"`
+	ItemsSold    int64          `json:"items_sold"     dc:"Số lượng sản phẩm bán THUẦN = SL trên HĐ POS lập trong ngày − SL trả hàng phát sinh trong ngày (cùng cơ sở net_revenue)"`
 	GrossRevenue float64        `json:"gross_revenue"  dc:"Σ total hóa đơn POS trong ngày"`
 	Discount     float64        `json:"discount"`
 	RefundAmount float64        `json:"refund_amount"  dc:"Σ tiền hoàn (trả hàng) phát sinh trong ngày cho hóa đơn POS"`
@@ -153,5 +153,5 @@ type SummaryRes struct {
 	CostOfGoods  float64        `json:"cost_of_goods"  dc:"Giá vốn hàng bán (SALE − SALE_RETURN trong ngày)"`
 	GrossProfit  float64        `json:"gross_profit"   dc:"= net_revenue − cost_of_goods"`
 	ByMethod     []*MethodTotal `json:"by_method"      dc:"Tiền thu theo phương thức (CASH, TRANSFER, CARD)"`
-	TopProducts  []*TopProduct  `json:"top_products"   dc:"Top 5 sản phẩm theo số lượng"`
+	TopProducts  []*TopProduct  `json:"top_products"   dc:"Top 5 sản phẩm theo số lượng thuần (đã trừ trả hàng); revenue là doanh thu thuần"`
 }

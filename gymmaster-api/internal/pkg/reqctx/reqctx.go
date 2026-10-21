@@ -17,10 +17,11 @@ func Auth(ctx context.Context) *token.Payload {
 
 // UserID trả id người dùng hiện tại, nil nếu chưa đăng nhập (dùng cho CreatedBy/UpdatedBy).
 func UserID(ctx context.Context) *uint {
-	if p := Auth(ctx); p != nil {
+	if p := Auth(ctx); p != nil && p.UserID > 0 {
 		id := p.UserID
 		return &id
 	}
+	// UserID 0 = tác vụ hệ thống (IPN, cron) → NULL để không vi phạm khóa ngoại users.
 	return nil
 }
 

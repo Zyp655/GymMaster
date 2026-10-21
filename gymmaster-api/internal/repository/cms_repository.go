@@ -151,10 +151,18 @@ func (r *CMSRepository) UpdateContactMessage(ctx context.Context, m *entity.Cont
 	return r.db.WithContext(ctx).Save(m).Error
 }
 
+// EnsureConversation trả hội thoại của hợp đồng PT (tạo nếu chưa có). Hợp đồng là nguồn sự thật về người tham gia:
+// nếu hợp đồng đã đổi HLV/hội viên, conversations.trainer_id/member_id được đồng bộ lại.
 func (r *CMSRepository) EnsureConversation(ctx context.Context, contractID, memberID, trainerID uint) (*entity.Conversation, error) {
 	var conv entity.Conversation
 	err := r.db.WithContext(ctx).Where("pt_contract_id = ?", contractID).First(&conv).Error
 	if err == nil {
+		if conv.TrainerID != trainerID || conv.MemberID != memberID {
+			if err := r.SyncConversationParticipants(ctx, conv.ID, memberID, trainerID); err != nil {
+				return nil, err
+			}
+			conv.TrainerID, conv.MemberID = trainerID, memberID
+		}
 		return &conv, nil
 	}
 	conv = entity.Conversation{
@@ -174,6 +182,62 @@ func (r *CMSRepository) EnsureConversation(ctx context.Context, contractID, memb
 	return &conv, nil
 }
 
+// SyncConversationParticipants ghi lại member_id/trainer_id của hội thoại theo hợp đồng PT (sau khi đổi HLV).
+func (r *CMSRepository) SyncConversationParticipants(ctx context.Context, convID, memberID, trainerID uint) error {
+	return r.db.WithContext(ctx).Model(&entity.Conversation{}).Where("id = ?", convID).
+		Updates(map[string]any{"member_id": memberID, "trainer_id": trainerID}).Error
+}
+
+// ConversationListFilter: phạm vi danh sách hội thoại (đã chuẩn hóa theo vai trò ở service).
+type ConversationListFilter struct {
+	BranchIDs []uint // nil = mọi chi nhánh (quản lý)
+	TrainerID uint
+	MemberID  uint
+	Offset    int
+	Limit     int
+}
+
+// ConversationListRow: hợp đồng PT kèm hội thoại (nếu đã có) và thông tin hiển thị.
+type ConversationListRow struct {
+	ContractID         uint
+	MemberID           uint
+	TrainerID          uint
+	Status             string
+	TotalSessions      int
+	UsedSessions       int
+	ConvID             *uint
+	LastMessageAt      *time.Time
+	LastMessagePreview string
+	MemberName         string
+	MemberCode         string
+	MemberUserID       *uint
+	TrainerName        string
+}
+
+// ListConversationContracts: hợp đồng PT trong phạm vi, hội thoại có tin nhắn mới nhất trước (chưa nhắn → theo hợp đồng
+// mới nhất), phân trang theo Offset/Limit.
+func (r *CMSRepository) ListConversationContracts(ctx context.Context, f ConversationListFilter) ([]ConversationListRow, error) {
+	q := r.db.WithContext(ctx).Table("pt_contracts c").
+		Select(`c.id AS contract_id, c.member_id, c.trainer_id, c.status, c.total_sessions, c.used_sessions,
+			cv.id AS conv_id, cv.last_message_at, COALESCE(cv.last_message_preview, '') AS last_message_preview,
+			m.full_name AS member_name, m.member_code, m.user_id AS member_user_id, COALESCE(u.full_name, '') AS trainer_name`).
+		Joins("JOIN members m ON m.id = c.member_id").
+		Joins("LEFT JOIN users u ON u.id = c.trainer_id").
+		Joins("LEFT JOIN conversations cv ON cv.pt_contract_id = c.id")
+	if f.BranchIDs != nil {
+		q = q.Where("c.branch_id IN ?", f.BranchIDs)
+	}
+	if f.TrainerID > 0 {
+		q = q.Where("c.trainer_id = ?", f.TrainerID)
+	}
+	if f.MemberID > 0 {
+		q = q.Where("c.member_id = ?", f.MemberID)
+	}
+	var rows []ConversationListRow
+	err := q.Order("cv.last_message_at DESC NULLS LAST").Order("c.id DESC").Offset(f.Offset).Limit(f.Limit).Scan(&rows).Error
+	return rows, err
+}
+
 func (r *CMSRepository) FindConversationByID(ctx context.Context, id uint) (*entity.Conversation, error) {
 	var conv entity.Conversation
 	if err := r.db.WithContext(ctx).First(&conv, id).Error; err != nil {
@@ -188,17 +252,23 @@ func (r *CMSRepository) ListMessages(ctx context.Context, conversationID uint) (
 	return list, err
 }
 
-func (r *CMSRepository) MarkMessagesRead(ctx context.Context, conversationID, readerUserID uint, now time.Time) error {
-	return r.db.WithContext(ctx).Model(&entity.Message{}).
-		Where("conversation_id = ? AND sender_user_id <> ? AND read_at IS NULL", conversationID, readerUserID).
-		Update("read_at", now).Error
+func (r *CMSRepository) MarkMessagesRead(ctx context.Context, conversationID, readerUserID uint, readerRole string, now time.Time) error {
+	q := r.db.WithContext(ctx).Model(&entity.Message{}).
+		Where("conversation_id = ? AND sender_user_id <> ? AND read_at IS NULL", conversationID, readerUserID)
+	if readerRole != "" {
+		q = q.Where("sender_role <> ?", readerRole)
+	}
+	return q.Update("read_at", now).Error
 }
 
-func (r *CMSRepository) CountUnreadMessages(ctx context.Context, conversationID, readerUserID uint) int64 {
+func (r *CMSRepository) CountUnreadMessages(ctx context.Context, conversationID, readerUserID uint, readerRole string) int64 {
 	var count int64
-	_ = r.db.WithContext(ctx).Model(&entity.Message{}).
-		Where("conversation_id = ? AND sender_user_id <> ? AND read_at IS NULL", conversationID, readerUserID).
-		Count(&count).Error
+	q := r.db.WithContext(ctx).Model(&entity.Message{}).
+		Where("conversation_id = ? AND sender_user_id <> ? AND read_at IS NULL", conversationID, readerUserID)
+	if readerRole != "" {
+		q = q.Where("sender_role <> ?", readerRole)
+	}
+	_ = q.Count(&count).Error
 	return count
 }
 

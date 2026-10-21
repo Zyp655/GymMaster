@@ -118,8 +118,18 @@ type (
 		// có thể đăng ký nhiều handler cho một loại).
 		RegisterPaidHandler(itemType string, h InvoiceItemHandler)
 		RegisterVoidHandler(itemType string, h InvoiceItemHandler)
+		// RegisterPayGuard: kiểm tra trước khi thu tiền theo item_type (vd. gói tập đã hủy thì không thu nữa).
+		// Guard trả lỗi → AddPayment bị từ chối.
+		RegisterPayGuard(itemType string, h InvoiceItemHandler)
+		// WriteOffRemaining khóa sổ phần còn nợ của hóa đơn (vd. khi hủy gói tập đã thu một phần):
+		// chưa thu đồng nào → VOID; đã thu một phần → giảm total = paid_amount (phần nợ chuyển thành giảm trừ)
+		// để hóa đơn không còn nợ và không thu tiếp. Không gọi Paid/VoidHandler.
+		WriteOffRemaining(ctx context.Context, invoiceID uint, reason string) (*entity.Invoice, error)
 		// FindInvoice đọc hóa đơn (không kiểm tra phạm vi) – cho module khác.
 		FindInvoice(ctx context.Context, id uint) (*entity.Invoice, error)
+		// LockInvoice khóa hóa đơn (FOR UPDATE, kiểm tra phạm vi chi nhánh) – gọi TRONG transaction khi cần
+		// khóa hóa đơn trước các bản ghi phụ (vd kỳ trả góp) để giữ thứ tự khóa thống nhất, tránh deadlock.
+		LockInvoice(ctx context.Context, id uint) (*entity.Invoice, error)
 
 		// API quản trị (có kiểm tra phạm vi chi nhánh).
 		Get(ctx context.Context, id uint) (*v1.InvoiceDetail, error)
@@ -142,6 +152,7 @@ type (
 		mu           sync.RWMutex
 		paidHandlers map[string][]InvoiceItemHandler
 		voidHandlers map[string][]InvoiceItemHandler
+		payGuards    map[string][]InvoiceItemHandler
 	}
 )
 
@@ -156,11 +167,21 @@ func NewInvoiceService(repo repository.InvoiceRepository, promotions PromotionSe
 		now:          time.Now,
 		paidHandlers: map[string][]InvoiceItemHandler{},
 		voidHandlers: map[string][]InvoiceItemHandler{},
+		payGuards:    map[string][]InvoiceItemHandler{},
 	}
 }
 
+// invoiceActorID: người thao tác cho các cột FK users(id). Tác vụ hệ thống (IPN, cron) không có người dùng
+// hoặc UserID = 0 → NULL (tránh vi phạm FK received_by/issued_by...).
+func invoiceActorID(ctx context.Context) *uint {
+	if uid := reqctx.UserID(ctx); uid != nil && *uid != 0 {
+		return uid
+	}
+	return nil
+}
+
 var (
-	invoiceItemTypes     = []string{entity.InvoiceItemMembership, entity.InvoiceItemPT, entity.InvoiceItemProduct, entity.InvoiceItemFee, entity.InvoiceItemOther}
+	invoiceItemTypes     = []string{entity.InvoiceItemMembership, entity.InvoiceItemPT, entity.InvoiceItemProduct, entity.InvoiceItemFee, entity.InvoiceItemLocker, entity.InvoiceItemOther}
 	invoiceSources       = []string{entity.InvoiceSourceCounter, entity.InvoiceSourcePOS, entity.InvoiceSourcePortal}
 	invoicePayMethods    = []string{entity.PaymentCash, entity.PaymentTransfer, entity.PaymentCard}
 	invoiceOrderable     = []string{"id", "issued_at", "total", "paid_amount", "invoice_no", "status"}
@@ -179,6 +200,12 @@ func (s *invoiceService) RegisterVoidHandler(itemType string, h InvoiceItemHandl
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.voidHandlers[itemType] = append(s.voidHandlers[itemType], h)
+}
+
+func (s *invoiceService) RegisterPayGuard(itemType string, h InvoiceItemHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.payGuards[itemType] = append(s.payGuards[itemType], h)
 }
 
 func (s *invoiceService) runHandlers(ctx context.Context, handlers map[string][]InvoiceItemHandler, inv *entity.Invoice, items []entity.InvoiceItem) error {
@@ -336,7 +363,7 @@ func (s *invoiceService) CreateInvoice(ctx context.Context, draft InvoiceDraft) 
 		MemberID: draft.MemberID, BranchID: draft.BranchID,
 		Subtotal: preview.Subtotal, Discount: preview.Discount, Total: preview.Total,
 		Status: entity.InvoiceStatusUnpaid, Source: draft.Source,
-		Note: invoiceTruncate(strings.TrimSpace(draft.Note), 500), IssuedBy: reqctx.UserID(ctx), IssuedAt: now,
+		Note: invoiceTruncate(strings.TrimSpace(draft.Note), 500), IssuedBy: invoiceActorID(ctx), IssuedAt: now,
 		Items: preview.Items,
 	}
 	if preview.Promotion != nil {
@@ -431,10 +458,26 @@ func (s *invoiceService) AddPayment(ctx context.Context, invoiceID uint, in Paym
 		if err := invoiceApplyPayment(inv, amount); err != nil {
 			return err
 		}
+		// Hội viên đang thanh toán VNPay cho hóa đơn này → không thu tại quầy song song (tránh thu trùng/thu vượt).
+		// Kiểm tra SAU khi khóa hóa đơn; IPN VNPay (method VNPAY) không bị chặn.
+		if in.Method != entity.PaymentVNPay {
+			pending, err := s.repo.PendingOnlineTxn(ctx, inv.ID, s.now().Add(-onlineTxnTTL))
+			if err != nil {
+				return err
+			}
+			if pending != nil {
+				return rescode.New(rescode.Conflict, fmt.Sprintf(
+					"Hóa đơn đang có giao dịch VNPay (%s) chờ hội viên thanh toán, hết hạn lúc %s. Vui lòng đợi giao dịch hoàn tất hoặc hết hạn rồi thu tại quầy",
+					pending.TxnRef, pending.CreatedAt.Add(onlineTxnTTL).In(subVNLoc).Format("15:04 02/01/2006")))
+			}
+		}
+		if err := s.checkPayGuards(ctx, inv); err != nil {
+			return err
+		}
 		pay := &entity.Payment{
 			InvoiceID: inv.ID, Amount: amount, Method: in.Method,
 			Reference: invoiceTruncate(strings.TrimSpace(in.Reference), 100), Note: invoiceTruncate(strings.TrimSpace(in.Note), 255),
-			PaidAt: s.now(), ReceivedBy: reqctx.UserID(ctx),
+			PaidAt: s.now(), ReceivedBy: invoiceActorID(ctx),
 		}
 		if err := s.repo.CreatePayment(ctx, pay); err != nil {
 			return err
@@ -445,6 +488,9 @@ func (s *invoiceService) AddPayment(ctx context.Context, invoiceID uint, in Paym
 		auditCatalog(ctx, s.audit, AuditPayment, auditEntityInvoice, inv.ID,
 			map[string]any{"paid_amount": before.PaidAmount, "status": before.Status},
 			map[string]any{"payment_id": pay.ID, "amount": amount, "method": pay.Method, "paid_amount": inv.PaidAmount, "status": inv.Status})
+		if err := s.syncInstallments(ctx, inv, installmentSettled); err != nil {
+			return err
+		}
 		if inv.Status == entity.InvoiceStatusPaid {
 			items, err := s.repo.Items(ctx, inv.ID)
 			if err != nil {
@@ -454,6 +500,93 @@ func (s *invoiceService) AddPayment(ctx context.Context, invoiceID uint, in Paym
 			if err := s.runHandlers(ctx, s.paidHandlers, inv, items); err != nil {
 				return err
 			}
+		}
+		out = inv
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// checkPayGuards gọi các guard đã đăng ký cho từng dòng hóa đơn trước khi ghi nhận thu tiền.
+func (s *invoiceService) checkPayGuards(ctx context.Context, inv *entity.Invoice) error {
+	s.mu.RLock()
+	hasGuards := len(s.payGuards) > 0
+	s.mu.RUnlock()
+	if !hasGuards {
+		return nil
+	}
+	items, err := s.repo.Items(ctx, inv.ID)
+	if err != nil {
+		return err
+	}
+	return s.runHandlers(ctx, s.payGuards, inv, items)
+}
+
+// invoiceApplyWriteOff khóa sổ phần còn nợ (hàm thuần). Trả false nếu không còn gì để khóa sổ.
+func invoiceApplyWriteOff(inv *entity.Invoice) bool {
+	if inv.Status == entity.InvoiceStatusVoid {
+		return false
+	}
+	due := roundMoneyVND(inv.Total - inv.PaidAmount)
+	if due <= 0 {
+		return false
+	}
+	if inv.PaidAmount <= 0 {
+		inv.Status = entity.InvoiceStatusVoid
+		return true
+	}
+	// Phần nợ được xóa ghi riêng (write_off_amount), KHÔNG cộng vào giảm giá.
+	inv.WriteOffAmount = roundMoneyVND(inv.WriteOffAmount + due)
+	inv.Total = roundMoneyVND(inv.PaidAmount)
+	if inv.RefundedAmount >= inv.PaidAmount {
+		inv.Status = entity.InvoiceStatusRefunded
+	} else {
+		inv.Status = entity.InvoiceStatusPaid
+	}
+	return true
+}
+
+func (s *invoiceService) WriteOffRemaining(ctx context.Context, invoiceID uint, reason string) (*entity.Invoice, error) {
+	reason = invoiceTruncate(strings.TrimSpace(reason), 255)
+	var out *entity.Invoice
+	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
+		inv, err := s.lock(ctx, invoiceID)
+		if err != nil {
+			return err
+		}
+		before := map[string]any{"total": inv.Total, "write_off_amount": inv.WriteOffAmount, "status": inv.Status}
+		if !invoiceApplyWriteOff(inv) {
+			out = inv
+			return nil
+		}
+		fields := map[string]any{"status": inv.Status}
+		if inv.Status == entity.InvoiceStatusVoid {
+			now := s.now()
+			inv.VoidedAt, inv.VoidedBy, inv.VoidReason = &now, invoiceActorID(ctx), reason
+			fields["voided_at"], fields["voided_by"], fields["void_reason"] = now, inv.VoidedBy, reason
+			if inv.PromotionID != nil {
+				if err := s.repo.ReleasePromotion(ctx, *inv.PromotionID); err != nil {
+					return err
+				}
+			}
+		} else {
+			if reason == "" {
+				reason = "Xóa nợ"
+			}
+			inv.WriteOffReason = reason
+			fields["total"], fields["write_off_amount"], fields["write_off_reason"] = inv.Total, inv.WriteOffAmount, reason
+		}
+		if err := s.repo.UpdateFields(ctx, inv.ID, fields); err != nil {
+			return err
+		}
+		auditCatalog(ctx, s.audit, AuditUpdate, auditEntityInvoice, inv.ID, before,
+			map[string]any{"total": inv.Total, "write_off_amount": inv.WriteOffAmount, "status": inv.Status, "write_off_reason": reason})
+		// Hóa đơn không còn nợ do xóa nợ/hủy → các kỳ trả góp chưa thu bị hủy.
+		if err := s.syncInstallments(ctx, inv, installmentCancelled); err != nil {
+			return err
 		}
 		out = inv
 		return nil
@@ -481,7 +614,7 @@ func (s *invoiceService) Void(ctx context.Context, invoiceID uint, reason string
 			return rescode.New(rescode.BadRequest, "Hóa đơn đã thu tiền nên không thể hủy, hãy dùng chức năng hoàn tiền")
 		}
 		now := s.now()
-		inv.Status, inv.VoidedAt, inv.VoidedBy, inv.VoidReason = entity.InvoiceStatusVoid, &now, reqctx.UserID(ctx), invoiceTruncate(reason, 255)
+		inv.Status, inv.VoidedAt, inv.VoidedBy, inv.VoidReason = entity.InvoiceStatusVoid, &now, invoiceActorID(ctx), invoiceTruncate(reason, 255)
 		if err := s.repo.UpdateFields(ctx, inv.ID, map[string]any{
 			"status": inv.Status, "voided_at": now, "voided_by": inv.VoidedBy, "void_reason": inv.VoidReason,
 		}); err != nil {
@@ -494,6 +627,9 @@ func (s *invoiceService) Void(ctx context.Context, invoiceID uint, reason string
 		}
 		auditCatalog(ctx, s.audit, AuditVoid, auditEntityInvoice, inv.ID, map[string]any{"status": entity.InvoiceStatusUnpaid},
 			map[string]any{"status": inv.Status, "reason": inv.VoidReason})
+		if err := s.syncInstallments(ctx, inv, installmentCancelled); err != nil {
+			return err
+		}
 		items, err := s.repo.Items(ctx, inv.ID)
 		if err != nil {
 			return err
@@ -525,18 +661,26 @@ func invoiceApplyRefund(inv *entity.Invoice, amount float64) error {
 }
 
 func (s *invoiceService) Refund(ctx context.Context, invoiceID uint, in RefundInput) (*entity.Invoice, error) {
+	inv, _, err := s.refund(ctx, invoiceID, in, nil, "")
+	return inv, err
+}
+
+// refund là logic hoàn tiền chuẩn của hóa đơn (khóa hóa đơn, kiểm tra số có thể hoàn, cập nhật trạng thái,
+// ghi phiếu hoàn, audit, đồng bộ trả góp). onlineTxnID/gatewayRef: phiếu hoàn của giao dịch VNPay (tùy chọn).
+func (s *invoiceService) refund(ctx context.Context, invoiceID uint, in RefundInput, onlineTxnID *uint, gatewayRef string) (*entity.Invoice, *entity.Refund, error) {
 	amount := roundMoneyVND(in.Amount)
 	if amount <= 0 {
-		return nil, rescode.New(rescode.BadRequest, "Số tiền hoàn phải lớn hơn 0")
+		return nil, nil, rescode.New(rescode.BadRequest, "Số tiền hoàn phải lớn hơn 0")
 	}
 	if err := invoiceValidMethod(in.Method); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	reason := strings.TrimSpace(in.Reason)
 	if reason == "" {
-		return nil, rescode.New(rescode.BadRequest, "Vui lòng nhập lý do hoàn tiền")
+		return nil, nil, rescode.New(rescode.BadRequest, "Vui lòng nhập lý do hoàn tiền")
 	}
 	var out *entity.Invoice
+	var outRefund *entity.Refund
 	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
 		inv, err := s.lock(ctx, invoiceID)
 		if err != nil {
@@ -546,7 +690,8 @@ func (s *invoiceService) Refund(ctx context.Context, invoiceID uint, in RefundIn
 		if err := invoiceApplyRefund(inv, amount); err != nil {
 			return err
 		}
-		rf := &entity.Refund{InvoiceID: inv.ID, Amount: amount, Method: in.Method, Reason: invoiceTruncate(reason, 255), RefundedBy: reqctx.UserID(ctx)}
+		rf := &entity.Refund{InvoiceID: inv.ID, Amount: amount, Method: in.Method, Reason: invoiceTruncate(reason, 255), RefundedBy: invoiceActorID(ctx),
+			OnlineTxnID: onlineTxnID, GatewayRef: invoiceTruncate(gatewayRef, 100), Status: "SUCCESS"}
 		if err := s.repo.CreateRefund(ctx, rf); err != nil {
 			return err
 		}
@@ -555,14 +700,21 @@ func (s *invoiceService) Refund(ctx context.Context, invoiceID uint, in RefundIn
 		}
 		auditCatalog(ctx, s.audit, AuditRefund, auditEntityInvoice, inv.ID,
 			map[string]any{"refunded_amount": before.RefundedAmount, "status": before.Status},
-			map[string]any{"refund_id": rf.ID, "amount": amount, "method": rf.Method, "reason": rf.Reason, "refunded_amount": inv.RefundedAmount, "status": inv.Status})
-		out = inv
+			map[string]any{"refund_id": rf.ID, "amount": amount, "method": rf.Method, "reason": rf.Reason, "refunded_amount": inv.RefundedAmount, "status": inv.Status, "online_txn_id": onlineTxnID})
+		if err := s.syncInstallments(ctx, inv, installmentCancelled); err != nil {
+			return err
+		}
+		out, outRefund = inv, rf
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return out, nil
+	return out, outRefund, nil
+}
+
+func (s *invoiceService) LockInvoice(ctx context.Context, id uint) (*entity.Invoice, error) {
+	return s.lock(ctx, id)
 }
 
 func (s *invoiceService) FindInvoice(ctx context.Context, id uint) (*entity.Invoice, error) {
@@ -729,6 +881,84 @@ func (s *invoiceService) Print(ctx context.Context, id uint) (*v1.PrintRes, erro
 	return res, nil
 }
 
+// ---- Đồng bộ kỳ trả góp ----------------------------------------------------------
+
+// Trạng thái kỳ trả góp đóng do hóa đơn thay đổi (CHECK của migration 000037).
+const (
+	installmentSettled   = "SETTLED"   // hóa đơn đã thu đủ (thu trực tiếp) → kỳ chưa thu được tất toán
+	installmentCancelled = "CANCELLED" // hóa đơn hủy / hoàn toàn bộ / xóa nợ → kỳ chưa thu bị hủy
+)
+
+// installmentIsOpen: kỳ còn phải thu.
+func installmentIsOpen(status string) bool {
+	return status == entity.InstallmentPending || status == entity.InstallmentOverdue
+}
+
+// invoiceResyncInstallments (hàm thuần) đưa các kỳ trả góp chưa thu về khớp với hóa đơn, trả các kỳ đã đổi:
+//   - hóa đơn VOID/REFUNDED → kỳ chưa thu: CANCELLED;
+//   - hóa đơn hết nợ (PAID) → kỳ chưa thu: closeStatus (SETTLED khi thu đủ, CANCELLED khi xóa nợ);
+//   - còn nợ D nhưng tổng phần chưa thu của các kỳ ≠ D (vd thu trực tiếp một phần) → chia lại D cho các kỳ chưa thu
+//     (kỳ cuối nhận phần lẻ; kỳ được chia 0đ → SETTLED).
+func invoiceResyncInstallments(scheds []entity.InstallmentSchedule, inv *entity.Invoice, closeStatus string, now time.Time) []entity.InstallmentSchedule {
+	var open []int
+	var openSum float64
+	for i := range scheds {
+		if installmentIsOpen(scheds[i].Status) {
+			open = append(open, i)
+			openSum += roundMoneyVND(scheds[i].Amount - scheds[i].PaidAmount)
+		}
+	}
+	if len(open) == 0 {
+		return nil
+	}
+	var changed []entity.InstallmentSchedule
+	closeAll := func(status string) {
+		for _, i := range open {
+			sc := scheds[i]
+			sc.Status, sc.UpdatedAt = status, now
+			changed = append(changed, sc)
+		}
+	}
+	switch inv.Status {
+	case entity.InvoiceStatusVoid, entity.InvoiceStatusRefunded:
+		closeAll(installmentCancelled)
+		return changed
+	}
+	due := roundMoneyVND(inv.Total - inv.PaidAmount)
+	if due <= 0 {
+		closeAll(closeStatus)
+		return changed
+	}
+	if roundMoneyVND(openSum) == due {
+		return nil
+	}
+	shares := installmentSplitAmounts(due, len(open))
+	for k, i := range open {
+		sc := scheds[i]
+		sc.Amount = roundMoneyVND(sc.PaidAmount + shares[k])
+		if shares[k] <= 0 {
+			sc.Status = installmentSettled
+		}
+		sc.UpdatedAt = now
+		changed = append(changed, sc)
+	}
+	return changed
+}
+
+// syncInstallments khóa và cập nhật các kỳ trả góp của hóa đơn theo trạng thái mới (trong transaction của thao tác).
+func (s *invoiceService) syncInstallments(ctx context.Context, inv *entity.Invoice, closeStatus string) error {
+	scheds, err := s.repo.InstallmentSchedules(ctx, inv.ID, true)
+	if err != nil || len(scheds) == 0 {
+		return err
+	}
+	for _, sc := range invoiceResyncInstallments(scheds, inv, closeStatus, s.now()) {
+		if err := s.repo.SaveInstallmentSchedule(ctx, &sc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ---- Mapping --------------------------------------------------------------------
 
 func toInvoiceRes(r repository.InvoiceRow) *v1.Invoice {
@@ -739,6 +969,7 @@ func toInvoiceRes(r repository.InvoiceRow) *v1.Invoice {
 		PromotionID: r.PromotionID, PromotionCode: r.PromotionCode, Note: r.Note,
 		IssuedBy: r.IssuedBy, IssuedByName: r.IssuedByName, IssuedAt: r.IssuedAt,
 		VoidedAt: r.VoidedAt, VoidReason: r.VoidReason, CreatedAt: r.CreatedAt,
+		WriteOffAmount: r.WriteOffAmount, WriteOffReason: r.WriteOffReason,
 	}
 	if r.Status == entity.InvoiceStatusVoid {
 		out.Due = 0

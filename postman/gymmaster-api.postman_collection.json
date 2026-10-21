@@ -6,25 +6,38 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:8000/v1" },
-    { "key": "adminToken", "value": "" },
-    { "key": "memberToken", "value": "" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000/v1"
+    },
+    {
+      "key": "apiOrigin",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "memberToken",
+      "value": ""
+    }
   ],
   "item": [
     {
       "name": "1. Public & Health",
       "item": [
         {
-          "name": "GET /public/health",
+          "name": "GET /health",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 200 & code 0', function () {",
+                  "pm.test('Status 200 & status ok', function () {",
                   "  pm.response.to.have.status(200);",
                   "  const json = pm.response.json();",
-                  "  pm.expect(json.code).to.eql(0);",
+                  "  pm.expect(json.status).to.eql('ok');",
                   "});"
                 ]
               }
@@ -32,7 +45,7 @@
           ],
           "request": {
             "method": "GET",
-            "url": "{{baseUrl}}/public/health"
+            "url": "{{apiOrigin}}/health"
           }
         },
         {
@@ -95,7 +108,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\"email\":\"admin@gymmaster.vn\",\"password\":\"Admin@123\"}"
@@ -107,10 +125,15 @@
           "name": "POST /auth/forgot-password",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\"email\":\"hoivien01@gymmaster.vn\",\"portal\":\"WEB\"}"
+              "raw": "{\"email\":\"hoivien@gymmaster.vn\",\"portal\":\"WEB\"}"
             },
             "url": "{{baseUrl}}/auth/forgot-password"
           }
@@ -124,7 +147,12 @@
           "name": "GET /admin/members",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/members"
           }
         },
@@ -132,7 +160,12 @@
           "name": "GET /admin/exercises",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/exercises"
           }
         },
@@ -140,7 +173,12 @@
           "name": "GET /admin/equipments",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/equipments"
           }
         },
@@ -148,7 +186,12 @@
           "name": "GET /admin/leads",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/leads"
           }
         },
@@ -156,7 +199,12 @@
           "name": "GET /admin/access-devices",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/access-devices"
           }
         },
@@ -164,7 +212,12 @@
           "name": "GET /admin/lockers/board",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/lockers/board"
           }
         },
@@ -172,7 +225,12 @@
           "name": "GET /admin/payrolls",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/payrolls"
           }
         },
@@ -180,7 +238,12 @@
           "name": "GET /admin/reports/profit-loss",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/reports/profit-loss"
           }
         },
@@ -188,7 +251,12 @@
           "name": "GET /admin/loyalty-rewards",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/loyalty-rewards"
           }
         },
@@ -196,7 +264,12 @@
           "name": "GET /admin/reports/nps",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/reports/nps"
           }
         },
@@ -204,7 +277,12 @@
           "name": "GET /admin/reports/kpi",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/reports/kpi"
           }
         },
@@ -212,11 +290,29 @@
           "name": "GET /admin/reports/cohort",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/admin/reports/cohort"
           }
         }
       ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('HTTP 2xx', function () {",
+          "  pm.expect(pm.response.code).to.be.within(200, 299);",
+          "});"
+        ]
+      }
     }
   ]
 }

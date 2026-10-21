@@ -196,7 +196,10 @@ function MonthlyPayrollTab({ canManage }: { canManage: boolean }) {
   });
 
   const currentPayroll: Payroll | null = detailQuery.data ?? matchedPayroll;
-  const payrollItems: PayrollItem[] = currentPayroll?.items ?? [];
+  const payrollItems = useMemo<PayrollItem[]>(
+    () => currentPayroll?.items ?? [],
+    [currentPayroll?.items],
+  );
   const isDraft = currentPayroll?.status === 'DRAFT';
 
   const generateMut = useMutation({
@@ -894,48 +897,51 @@ export default function PayrollsPage() {
   const { can } = usePermission();
   const canManage = can(PERM.PAYROLL_MANAGE);
 
+  // Bố cục chuẩn: Card.page-card (padding 20px như các trang khác).
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <PageTitle
-        title="Chấm công & Bảng lương"
-        subtitle="Tổng hợp ngày công, tính lương cơ bản, hoa hồng PT, hoa hồng bán gói và quản lý chi lương hàng tháng"
-      />
+    <Card variant="borderless" className="page-card">
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <PageTitle
+          title="Chấm công & Bảng lương"
+          subtitle="Tổng hợp ngày công, tính lương cơ bản, hoa hồng PT, hoa hồng bán gói và quản lý chi lương hàng tháng"
+        />
 
-      <Tabs
-        defaultActiveKey="payrolls"
-        items={[
-          {
-            key: 'payrolls',
-            label: (
-              <Space size={6}>
-                <DollarOutlined />
-                <span>Bảng lương tháng</span>
-              </Space>
-            ),
-            children: <MonthlyPayrollTab canManage={canManage} />,
-          },
-          {
-            key: 'attendances',
-            label: (
-              <Space size={6}>
-                <ClockCircleOutlined />
-                <span>Chấm công nhân viên</span>
-              </Space>
-            ),
-            children: <StaffAttendanceTab canManage={canManage} />,
-          },
-          {
-            key: 'my-payslips',
-            label: (
-              <Space size={6}>
-                <FileDoneOutlined />
-                <span>Phiếu lương của tôi</span>
-              </Space>
-            ),
-            children: <MyPayslipsTab />,
-          },
-        ]}
-      />
-    </Space>
+        <Tabs
+          defaultActiveKey="payrolls"
+          items={[
+            {
+              key: 'payrolls',
+              label: (
+                <Space size={6}>
+                  <DollarOutlined />
+                  <span>Bảng lương tháng</span>
+                </Space>
+              ),
+              children: <MonthlyPayrollTab canManage={canManage} />,
+            },
+            {
+              key: 'attendances',
+              label: (
+                <Space size={6}>
+                  <ClockCircleOutlined />
+                  <span>Chấm công nhân viên</span>
+                </Space>
+              ),
+              children: <StaffAttendanceTab canManage={canManage} />,
+            },
+            {
+              key: 'my-payslips',
+              label: (
+                <Space size={6}>
+                  <FileDoneOutlined />
+                  <span>Phiếu lương của tôi</span>
+                </Space>
+              ),
+              children: <MyPayslipsTab />,
+            },
+          ]}
+        />
+      </Space>
+    </Card>
   );
 }

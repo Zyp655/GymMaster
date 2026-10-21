@@ -18,6 +18,10 @@ export interface AuthState {
 
 /** Mã lỗi FE: tài khoản chỉ có vai trò hội viên. */
 export const MEMBER_ONLY_CODE = 40399;
+/** Backend: tài khoản đã bật 2FA, cần gửi kèm `mfa_code`. */
+export const MFA_REQUIRED_CODE = 40107;
+/** Backend: mã 2FA / mã khôi phục không đúng. */
+export const MFA_INVALID_CODE = 40108;
 
 /** Tài khoản có ít nhất một vai trò nhân viên (khác MEMBER). */
 export function isStaffUser(user: AuthUser): boolean {
@@ -84,10 +88,13 @@ export const bootstrapAuth = createAsyncThunk(
   },
 );
 
-export const login = createAsyncThunk<AuthUser, { email: string; password: string }>(
+export const login = createAsyncThunk<
+  AuthUser,
+  { email: string; password: string; mfaCode?: string }
+>(
   'auth/login',
-  async ({ email, password }) => {
-    const res = await authApi.login(email.trim(), password);
+  async ({ email, password, mfaCode }) => {
+    const res = await authApi.login(email.trim(), password, mfaCode?.trim() || undefined);
     if (!isStaffUser(res.user)) {
       // Thu hồi refresh token vừa cấp, không lưu phiên.
       await authApi.logout(res.refresh_token).catch(() => undefined);
@@ -104,8 +111,10 @@ export const login = createAsyncThunk<AuthUser, { email: string; password: strin
 
 export const logout = createAsyncThunk('auth/logout', async () => {
   const refresh = tokenStore.getRefreshToken();
-  if (refresh) await authApi.logout(refresh).catch(() => undefined);
+  // Xóa token cục bộ trước; /auth/logout là public và thu hồi bằng chính refresh token gửi trong body,
+  // nên kể cả khi access token đã hết hạn/không có thì phiên vẫn bị thu hồi phía server.
   tokenStore.clear();
+  if (refresh) await authApi.logout(refresh).catch(() => undefined);
 });
 
 const initialState: AuthState = {

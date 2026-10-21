@@ -97,8 +97,8 @@ type ListExpenseCategoriesRes []*ExpenseCategoryItem
 
 type CreateExpenseCategoryReq struct {
 	g.Meta `path:"/expense-categories" method:"post" tags:"Tài chính & Kế toán" summary:"Tạo danh mục chi phí" perm:"expense.manage"`
-	Name   string `json:"name" v:"required"`
-	Type   string `json:"type" d:"VARIABLE" v:"in:FIXED,VARIABLE"`
+	Name   string `json:"name" v:"required|max-length:150#Vui lòng nhập tên danh mục chi phí|Tên danh mục tối đa 150 ký tự"`
+	Type   string `json:"type" d:"VARIABLE" v:"in:FIXED,VARIABLE#Loại danh mục chi phí không hợp lệ"`
 }
 type CreateExpenseCategoryRes = ExpenseCategoryItem
 
@@ -114,9 +114,9 @@ type ListExpensesRes []*ExpenseItem
 
 type CreateExpenseReq struct {
 	g.Meta           `path:"/expenses" method:"post" tags:"Tài chính & Kế toán" summary:"Ghi nhận chi phí vận hành" perm:"expense.manage"`
-	BranchID         uint    `json:"branch_id"          v:"required|min:1"`
-	CategoryID       uint    `json:"category_id"        v:"required|min:1"`
-	Amount           float64 `json:"amount"             v:"required|min:0"`
+	BranchID         uint    `json:"branch_id"          v:"required|min:1#Vui lòng chọn chi nhánh|Vui lòng chọn chi nhánh"`
+	CategoryID       uint    `json:"category_id"        v:"required|min:1#Vui lòng chọn danh mục chi phí|Vui lòng chọn danh mục chi phí"`
+	Amount           float64 `json:"amount"             v:"required|min:1|max:999999999999#Vui lòng nhập số tiền chi phí|Số tiền chi phí phải lớn hơn 0|Số tiền chi phí vượt quá giới hạn cho phép"`
 	SpentAt          string  `json:"spent_at"`
 	Description      string  `json:"description"`
 	AttachmentURL    string  `json:"attachment_url"`
@@ -128,11 +128,12 @@ type UpdateExpenseReq struct {
 	g.Meta        `path:"/expenses/{id}" method:"put" tags:"Tài chính & Kế toán" summary:"Cập nhật chi phí vận hành" perm:"expense.manage"`
 	ID            uint     `json:"id"             in:"path" v:"required|min:1"`
 	CategoryID    uint     `json:"category_id"`
-	Amount        *float64 `json:"amount"`
+	Amount        *float64 `json:"amount"         v:"min:1|max:999999999999#Số tiền chi phí phải lớn hơn 0|Số tiền chi phí vượt quá giới hạn cho phép"`
 	SpentAt       string   `json:"spent_at"`
 	Description   *string  `json:"description"`
 	AttachmentURL *string  `json:"attachment_url"`
-	Status        string   `json:"status"`
+	// Status chỉ để tương thích ngược: PUT không đổi được trạng thái – dùng POST /expenses/{id}/approve.
+	Status string `json:"status" dc:"Không dùng – duyệt/từ chối qua POST /expenses/{id}/approve"`
 }
 type UpdateExpenseRes = ExpenseItem
 
@@ -145,7 +146,7 @@ type DeleteExpenseRes struct{}
 type ApproveExpenseReq struct {
 	g.Meta `path:"/expenses/{id}/approve" method:"post" tags:"Tài chính & Kế toán" summary:"Duyệt / Từ chối chi phí" perm:"expense.manage"`
 	ID     uint   `json:"id"     in:"path" v:"required|min:1"`
-	Status string `json:"status" d:"APPROVED" v:"in:APPROVED,REJECTED"`
+	Status string `json:"status" d:"APPROVED" v:"in:APPROVED,REJECTED#Trạng thái duyệt không hợp lệ"`
 }
 type ApproveExpenseRes = ExpenseItem
 
@@ -153,8 +154,8 @@ type ApproveExpenseRes = ExpenseItem
 
 type OpenCashSessionReq struct {
 	g.Meta      `path:"/cash-sessions/open" method:"post" tags:"Tài chính & Kế toán" summary:"Mở ca thu ngân" perm:"cash_session.manage"`
-	BranchID    uint    `json:"branch_id"    v:"required|min:1"`
-	OpeningCash float64 `json:"opening_cash" v:"min:0"`
+	BranchID    uint    `json:"branch_id"    v:"required|min:1#Vui lòng chọn chi nhánh|Vui lòng chọn chi nhánh"`
+	OpeningCash float64 `json:"opening_cash" v:"min:0|max:999999999999#Tiền mặt đầu ca không được âm|Tiền mặt đầu ca vượt quá giới hạn cho phép"`
 	Note        string  `json:"note"`
 }
 type OpenCashSessionRes = CashSessionItem
@@ -162,7 +163,7 @@ type OpenCashSessionRes = CashSessionItem
 type CloseCashSessionReq struct {
 	g.Meta      `path:"/cash-sessions/{id}/close" method:"post" tags:"Tài chính & Kế toán" summary:"Đóng ca thu ngân & đối soát tiền mặt" perm:"cash_session.manage"`
 	ID          uint    `json:"id"           in:"path" v:"required|min:1"`
-	CountedCash float64 `json:"counted_cash" v:"min:0"`
+	CountedCash float64 `json:"counted_cash" v:"min:0|max:999999999999#Tiền mặt đếm thực tế không được âm|Tiền mặt đếm thực tế vượt quá giới hạn cho phép"`
 	Note        string  `json:"note"`
 }
 type CloseCashSessionRes = CashSessionItem
@@ -198,6 +199,15 @@ type ProfitLossReportRes struct {
 	PayrollExpenses   float64 `json:"payroll_expenses"`
 	TotalExpenses     float64 `json:"total_expenses"`
 	NetProfit         float64 `json:"net_profit"`
+	// ExpensesByCategory: chi phí vận hành đã duyệt theo danh mục (tổng = operating_expenses).
+	ExpensesByCategory []*ExpenseByCategoryItem `json:"expenses_by_category"`
+}
+
+type ExpenseByCategoryItem struct {
+	CategoryID   uint    `json:"category_id"`
+	CategoryName string  `json:"category_name"`
+	CategoryType string  `json:"category_type"`
+	Amount       float64 `json:"amount"`
 }
 
 // ---- Admin: Trả góp & Hóa đơn điện tử -------------------------------------------
@@ -205,7 +215,7 @@ type ProfitLossReportRes struct {
 type CreateInstallmentPlanReq struct {
 	g.Meta       `path:"/invoices/{id}/installments" method:"post" tags:"Tài chính & Kế toán" summary:"Tạo kế hoạch trả góp cho hóa đơn" perm:"invoice.collect"`
 	ID           uint   `json:"id"             in:"path" v:"required|min:1"`
-	Installments int    `json:"installments"   v:"required|between:2,12"`
+	Installments int    `json:"installments"   v:"required|between:2,12#Vui lòng nhập số kỳ trả góp|Số kỳ trả góp phải từ 2 đến 12 kỳ"`
 	FirstDueDate string `json:"first_due_date"`
 }
 type CreateInstallmentPlanRes = InstallmentPlanItem
@@ -221,7 +231,7 @@ type ListInstallmentsRes []*InstallmentScheduleItem
 type PayInstallmentScheduleReq struct {
 	g.Meta `path:"/installments/{id}/pay" method:"post" tags:"Tài chính & Kế toán" summary:"Thu tiền một kỳ trả góp" perm:"invoice.collect"`
 	ID     uint   `json:"id"     in:"path" v:"required|min:1"`
-	Method string `json:"method" d:"CASH"`
+	Method string `json:"method" d:"CASH" dc:"CASH | TRANSFER | CARD (không phân biệt hoa/thường)"`
 	Note   string `json:"note"`
 }
 type PayInstallmentScheduleRes = InstallmentScheduleItem

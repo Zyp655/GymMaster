@@ -100,6 +100,7 @@ func NewSubscriptionService(repo repository.SubscriptionRepository, invoices Inv
 	for _, t := range []string{entity.InvoiceItemMembership, entity.InvoiceItemFee} {
 		invoices.RegisterPaidHandler(t, s.onInvoicePaid)
 		invoices.RegisterVoidHandler(t, s.onInvoiceVoid)
+		invoices.RegisterPayGuard(t, s.guardInvoicePayment)
 	}
 	return s
 }
@@ -184,10 +185,34 @@ func subChainStart(today time.Time, latest *entity.Subscription) time.Time {
 	return next
 }
 
-// subRemaining tính giá trị còn lại của gói tại ngày today (dùng cho nâng cấp):
-//   - TIME   : price × (số ngày còn lại / tổng số ngày), ngày còn lại tính cả hôm nay;
-//   - SESSION: price × (buổi còn lại / tổng buổi).
+// subRemaining tính giá trị còn lại của gói tại ngày today theo giá gói (sub.Price) – xem subRemainingFrom.
 func subRemaining(sub *entity.Subscription, planType string, today time.Time) (value float64, totalDays, remainingDays int) {
+	return subRemainingFrom(sub, sub.Price, planType, today)
+}
+
+// subPaidBase: giá trị gói thực sự đã trả (dùng làm gốc khấu trừ khi nâng cấp) = sub.Price trừ phần hóa đơn
+// của gói chưa thu hoặc đã hoàn (total − paid + refunded). Không có hóa đơn → sub.Price.
+func subPaidBase(sub *entity.Subscription, inv *entity.Invoice) float64 {
+	if inv == nil || inv.Status == entity.InvoiceStatusVoid {
+		return sub.Price
+	}
+	notKept := roundMoneyVND(inv.Total - inv.PaidAmount + inv.RefundedAmount)
+	return max(0, roundMoneyVND(sub.Price-max(0, notKept)))
+}
+
+// subUpgradeBase: gốc khấu trừ của gói khi nâng cấp/chuyển nhượng. Gói nhận chuyển nhượng dùng giá trị đã trả mang
+// theo từ gói gốc (CarriedPaidBase) – hóa đơn của nó chỉ là phí chuyển nhượng nên không dùng làm gốc.
+func subUpgradeBase(sub *entity.Subscription, inv *entity.Invoice) float64 {
+	if sub.CarriedPaidBase != nil {
+		return max(0, roundMoneyVND(*sub.CarriedPaidBase))
+	}
+	return subPaidBase(sub, inv)
+}
+
+// subRemainingFrom tính giá trị còn lại (theo tỷ lệ) của số tiền base tại ngày today (dùng cho nâng cấp/chuyển nhượng):
+//   - TIME   : base × (số ngày còn lại / tổng số ngày), ngày còn lại tính cả hôm nay;
+//   - SESSION: base × (buổi còn lại / tổng buổi).
+func subRemainingFrom(sub *entity.Subscription, base float64, planType string, today time.Time) (value float64, totalDays, remainingDays int) {
 	totalDays = subDaysBetween(sub.StartDate, sub.EndDate) + 1
 	switch {
 	case subNorm(today).Before(subNorm(sub.StartDate)):
@@ -197,9 +222,9 @@ func subRemaining(sub *entity.Subscription, planType string, today time.Time) (v
 	}
 	remainingDays = max(0, min(remainingDays, totalDays))
 	if planType == entity.PlanTypeSession && sub.TotalSessions != nil && *sub.TotalSessions > 0 && sub.RemainingSessions != nil {
-		value = sub.Price * float64(*sub.RemainingSessions) / float64(*sub.TotalSessions)
+		value = base * float64(*sub.RemainingSessions) / float64(*sub.TotalSessions)
 	} else if totalDays > 0 {
-		value = sub.Price * float64(remainingDays) / float64(totalDays)
+		value = base * float64(remainingDays) / float64(totalDays)
 	}
 	return roundMoneyVND(value), totalDays, remainingDays
 }
@@ -233,13 +258,22 @@ func (s *subscriptionService) loadSub(ctx context.Context, id uint, lock bool) (
 	return sub, nil
 }
 
+// upperFirst viết hoa ký tự đầu (an toàn với chữ có dấu).
+func upperFirst(s string) string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return s
+	}
+	return strings.ToUpper(string(r[0])) + string(r[1:])
+}
+
 func (s *subscriptionService) activeMember(ctx context.Context, id uint, label string) (*entity.Member, error) {
 	m, err := s.repo.FindMember(ctx, id)
 	if err != nil {
 		return nil, subMapNotFound(err, rescode.New(rescode.NotFound, "Không tìm thấy "+label))
 	}
 	if m.Status != entity.MemberStatusActive {
-		return nil, rescode.New(rescode.BadRequest, strings.ToUpper(label[:1])+label[1:]+" đang không hoạt động")
+		return nil, rescode.New(rescode.BadRequest, upperFirst(label)+" đang không hoạt động")
 	}
 	return m, nil
 }
@@ -266,7 +300,7 @@ func (s *subscriptionService) event(ctx context.Context, subID uint, typ string,
 		}
 	}
 	return s.repo.CreateEvent(ctx, &entity.SubscriptionEvent{
-		SubscriptionID: subID, EventType: typ, Data: datatypes.JSON(raw), ActorID: reqctx.UserID(ctx),
+		SubscriptionID: subID, EventType: typ, Data: datatypes.JSON(raw), ActorID: invoiceActorID(ctx),
 	})
 }
 
@@ -418,7 +452,7 @@ func (s *subscriptionService) sell(ctx context.Context, a subSellArgs) (uint, er
 		sub := &entity.Subscription{
 			MemberID: sale.member.ID, PlanID: sale.plan.ID, BranchID: sale.branchID,
 			StartDate: sale.start, EndDate: sale.end, Price: sale.plan.Price, Status: entity.SubStatusPending,
-			PreviousID: sale.previousID, SoldBy: reqctx.UserID(ctx), Note: invoiceTruncate(strings.TrimSpace(a.note), 500),
+			PreviousID: sale.previousID, SoldBy: invoiceActorID(ctx), Note: invoiceTruncate(strings.TrimSpace(a.note), 500),
 		}
 		if sale.plan.Type == entity.PlanTypeSession && sale.plan.SessionCount != nil {
 			n := *sale.plan.SessionCount
@@ -577,12 +611,25 @@ func (s *subscriptionService) prepareUpgrade(ctx context.Context, id, planID uin
 	if err != nil {
 		return nil, err
 	}
+	if newPlan.Price < oldPlan.Price {
+		return nil, rescode.New(rescode.BadRequest, fmt.Sprintf("Không thể nâng cấp sang \"%s\" vì giá thấp hơn gói hiện tại \"%s\" (giá trị còn lại sẽ bị mất). Vui lòng chọn gói có giá cao hơn hoặc dùng chức năng gia hạn/hủy gói", newPlan.Name, oldPlan.Name))
+	}
 	member, err := s.activeMember(ctx, old.MemberID, "hội viên")
 	if err != nil {
 		return nil, err
 	}
+	var oldInv *entity.Invoice
+	if old.InvoiceID != nil {
+		if oldInv, err = s.invoices.FindInvoice(ctx, *old.InvoiceID); err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
 	today := s.today()
-	value, totalDays, remDays := subRemaining(old, oldPlan.Type, today)
+	value, totalDays, remDays := subRemainingFrom(old, subUpgradeBase(old, oldInv), oldPlan.Type, today)
+	if value > newPlan.Price {
+		return nil, rescode.New(rescode.BadRequest, fmt.Sprintf("Giá trị còn lại của gói hiện tại (%s) lớn hơn giá của \"%s\" (%s), nâng cấp sẽ làm mất phần chênh lệch. Vui lòng chọn gói có giá cao hơn",
+			formatMoneyVND(value), newPlan.Name, formatMoneyVND(newPlan.Price)))
+	}
 	credit := math.Min(value, newPlan.Price)
 	start := today
 	end := subEndDate(start, newPlan.DurationDays)
@@ -625,7 +672,7 @@ func (s *subscriptionService) Upgrade(ctx context.Context, id uint, in v1.Upgrad
 		}
 		sub := &entity.Subscription{
 			MemberID: old.MemberID, PlanID: c.newPlan.ID, BranchID: old.BranchID, StartDate: start, EndDate: end,
-			Price: c.newPlan.Price, Status: entity.SubStatusPending, PreviousID: &old.ID, SoldBy: reqctx.UserID(ctx),
+			Price: c.newPlan.Price, Status: entity.SubStatusPending, PreviousID: &old.ID, SoldBy: invoiceActorID(ctx),
 			Note: invoiceTruncate(strings.TrimSpace(in.Note), 500),
 		}
 		if c.newPlan.Type == entity.PlanTypeSession && c.newPlan.SessionCount != nil {
@@ -713,11 +760,20 @@ func (s *subscriptionService) Transfer(ctx context.Context, id uint, in v1.Trans
 		if err != nil {
 			return err
 		}
-		newSub, err := subBuildTransfer(old, plan, to.ID, today)
+		var oldInv *entity.Invoice
+		if old.InvoiceID != nil && old.CarriedPaidBase == nil {
+			if oldInv, err = s.invoices.FindInvoice(ctx, *old.InvoiceID); err != nil {
+				if !errors.Is(err, errInvoiceNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				oldInv = nil
+			}
+		}
+		newSub, err := subBuildTransfer(old, plan, to.ID, today, subUpgradeBase(old, oldInv))
 		if err != nil {
 			return err
 		}
-		newSub.SoldBy = reqctx.UserID(ctx)
+		newSub.SoldBy = invoiceActorID(ctx)
 		newSub.Note = invoiceTruncate(strings.TrimSpace(in.Note), 500)
 		fee := roundMoneyVND(plan.TransferFee)
 		if fee <= 0 {
@@ -728,7 +784,7 @@ func (s *subscriptionService) Transfer(ctx context.Context, id uint, in v1.Trans
 		}
 		if err := s.event(ctx, newSub.ID, entity.SubEventCreated, map[string]any{
 			"transfer_from": old.ID, "from_member_id": old.MemberID, "start_date": subFmt(newSub.StartDate), "end_date": subFmt(newSub.EndDate),
-			"remaining_sessions": newSub.RemainingSessions, "transfer_fee": fee,
+			"remaining_sessions": newSub.RemainingSessions, "transfer_fee": fee, "carried_paid_base": newSub.CarriedPaidBase,
 		}); err != nil {
 			return err
 		}
@@ -781,7 +837,9 @@ func (s *subscriptionService) Transfer(ctx context.Context, id uint, in v1.Trans
 
 // subBuildTransfer dựng gói mới cho người nhận từ phần còn lại của gói old (hàm thuần):
 // từ max(hôm nay, start cũ) đến end_date cũ, số buổi còn lại, giá trị = giá trị còn lại; PENDING đến khi thu đủ phí.
-func subBuildTransfer(old *entity.Subscription, plan *entity.MembershipPlan, toMemberID uint, today time.Time) (*entity.Subscription, error) {
+// paidBase là giá trị gói old thực sự đã trả (sau hoàn – subUpgradeBase); phần còn lại của nó được mang sang gói mới
+// (CarriedPaidBase) để lần nâng cấp sau khấu trừ đúng số khách đã trả, không theo giá niêm yết hay hóa đơn phí chuyển nhượng.
+func subBuildTransfer(old *entity.Subscription, plan *entity.MembershipPlan, toMemberID uint, today time.Time, paidBase float64) (*entity.Subscription, error) {
 	if old.Status != entity.SubStatusActive {
 		return nil, rescode.New(rescode.BadRequest, "Chỉ chuyển nhượng được gói đang hoạt động")
 	}
@@ -796,10 +854,12 @@ func subBuildTransfer(old *entity.Subscription, plan *entity.MembershipPlan, toM
 		start = subNorm(old.StartDate)
 	}
 	value, _, _ := subRemaining(old, plan.Type, today)
+	carried, _, _ := subRemainingFrom(old, paidBase, plan.Type, today)
 	n := &entity.Subscription{
 		MemberID: toMemberID, PlanID: old.PlanID, BranchID: old.BranchID, StartDate: start, EndDate: subNorm(old.EndDate),
 		Price: value, Status: entity.SubStatusPending, PreviousID: &old.ID,
 		FreezeDaysUsed: old.FreezeDaysUsed, FreezeTimesUsed: old.FreezeTimesUsed,
+		CarriedPaidBase: &carried,
 	}
 	if old.RemainingSessions != nil {
 		r := *old.RemainingSessions
@@ -864,6 +924,16 @@ func (s *subscriptionService) Cancel(ctx context.Context, id uint, in v1.CancelI
 			if refund != nil {
 				data["refund_amount"], data["refund_method"] = roundMoneyVND(refund.Amount), refund.Method
 			}
+			// Gói đã hủy → khóa sổ phần còn nợ của hóa đơn để không còn thu tiếp được.
+			if inv != nil && inv.Status != entity.InvoiceStatusVoid && roundMoneyVND(inv.Total-inv.PaidAmount) > 0 {
+				closed, err := s.invoices.WriteOffRemaining(ctx, inv.ID, "Hủy gói tập: "+reason)
+				if err != nil {
+					return err
+				}
+				if closed != nil && closed.Status != inv.Status {
+					data["invoice_written_off"] = roundMoneyVND(inv.Total - inv.PaidAmount)
+				}
+			}
 			if err := s.event(ctx, sub.ID, entity.SubEventCancelled, data); err != nil {
 				return err
 			}
@@ -899,6 +969,19 @@ func (s *subscriptionService) subForInvoice(ctx context.Context, inv *entity.Inv
 		return nil, nil
 	}
 	return sub, nil
+}
+
+// guardInvoicePayment: không cho thu tiền hóa đơn của gói đã hủy / đã chuyển nhượng.
+func (s *subscriptionService) guardInvoicePayment(ctx context.Context, inv *entity.Invoice, item *entity.InvoiceItem) error {
+	sub, err := s.subForInvoice(ctx, inv, item)
+	if err != nil || sub == nil {
+		return err
+	}
+	switch sub.Status {
+	case entity.SubStatusCancelled, entity.SubStatusTransferred:
+		return rescode.New(rescode.BadRequest, "Gói tập của hóa đơn này đã bị hủy hoặc chuyển nhượng, không thể thu thêm tiền")
+	}
+	return nil
 }
 
 // onInvoicePaid: hóa đơn thanh toán đủ → gói PENDING chuyển ACTIVE.

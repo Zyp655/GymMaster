@@ -127,7 +127,7 @@ const menu: MenuNode[] = [
         key: '/app/leads',
         label: 'Khách tiềm năng & CSKH',
         icon: <FilterOutlined />,
-        perm: [PERM.LEAD_VIEW, PERM.LEAD_MANAGE, PERM.MEMBER_VIEW],
+        perm: [PERM.LEAD_VIEW, PERM.LEAD_MANAGE],
       },
       {
         key: '/app/loyalty',
@@ -307,7 +307,7 @@ const menu: MenuNode[] = [
         key: '/app/trainer-schedules',
         label: 'Lịch rảnh HLV & Nghỉ phép',
         icon: <ScheduleOutlined />,
-        perm: [PERM.LEAVE_MANAGE, PERM.HOLIDAY_MANAGE],
+        perm: [PERM.LEAVE_MANAGE, PERM.HOLIDAY_MANAGE, PERM.PT_SCHEDULE],
       },
     ],
   },
@@ -358,13 +358,13 @@ const menu: MenuNode[] = [
         key: '/app/security-privacy',
         label: 'Bảo mật 2FA & Dữ liệu',
         icon: <FileProtectOutlined />,
-        perm: [PERM.PRIVACY_MANAGE, PERM.MEMBER_VIEW_SENSITIVE, PERM.SETTING_MANAGE],
+        // Không đặt perm: mọi nhân viên tự quản lý 2FA/phiên đăng nhập của mình.
       },
       {
         key: '/app/cms-marketing',
         label: 'Nội dung Landing & Tin nhắn PT',
         icon: <NotificationOutlined />,
-        perm: [PERM.CMS_MANAGE, PERM.PT_VIEW, PERM.LEAD_VIEW],
+        perm: [PERM.CMS_MANAGE, PERM.STAFF_VIEW, PERM.LEAD_VIEW],
       },
       {
         key: '/app/system-tools',
@@ -404,7 +404,12 @@ export function buildMenuItems(
           key: node.key,
           label: node.label,
           icon: node.icon,
-          children: children.map(({ key, label, icon }) => ({ key, label, icon })),
+          // `title` → tooltip gốc khi nhãn dài bị cắt "…".
+          children: children.map(({ key, label, icon }) => ({
+            key,
+            label: <span title={label}>{label}</span>,
+            icon,
+          })),
         },
       ];
     }

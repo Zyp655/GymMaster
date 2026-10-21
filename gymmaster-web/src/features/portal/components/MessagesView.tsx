@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   BellAlertIcon,
@@ -13,8 +14,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { env } from '@/env';
 import { formatDateTime } from '@/lib/format';
 import {
+  portalKeys,
   useMemberCalendarTokenQuery,
   useMemberConversationsQuery,
   useMemberMessagesQuery,
@@ -45,6 +48,25 @@ export function MessagesView() {
 
   const messagesQuery = useMemberMessagesQuery(activeConvId);
   const sendMut = useSendMemberMessageMutation();
+  const messages = messagesQuery.data ?? [];
+  const qc = useQueryClient();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Tự cuộn xuống tin mới nhất khi mở hội thoại / có tin mới.
+  const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : 0;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [activeConvId, lastMessageId]);
+
+  // GET tin nhắn đánh dấu "đã đọc" phía máy chủ → làm mới danh sách hội thoại để badge "x mới" cập nhật.
+  const activeUnread = conversations.find(c => c.id === activeConvId)?.unread_count ?? 0;
+  const messagesUpdatedAt = messagesQuery.dataUpdatedAt;
+  useEffect(() => {
+    if (messagesUpdatedAt > 0 && activeUnread > 0) {
+      void qc.invalidateQueries({ queryKey: portalKeys.conversations() });
+    }
+  }, [qc, messagesUpdatedAt, activeUnread]);
 
   const calQuery = useMemberCalendarTokenQuery();
   const rotateCalMut = useRotateMemberCalendarTokenMutation();
@@ -78,14 +100,18 @@ export function MessagesView() {
     });
   };
 
+  // ics_url do API trả về là đường dẫn trên máy chủ API (VD: /v1/public/calendar.ics?token=...),
+  // nên phải ghép với origin của NEXT_PUBLIC_API_URL chứ không phải origin của web.
+  const rawIcsUrl = calQuery.data?.ics_url;
+  const icsUrl = rawIcsUrl
+    ? /^https?:\/\//i.test(rawIcsUrl)
+      ? rawIcsUrl
+      : new URL(rawIcsUrl, env.NEXT_PUBLIC_API_URL).toString()
+    : undefined;
+
   const copyIcsUrl = () => {
-    const url = calQuery.data?.ics_url;
-    if (!url) return;
-    const fullUrl =
-      typeof window !== 'undefined' && url.startsWith('/')
-        ? `${window.location.origin}${url}`
-        : url;
-    void navigator.clipboard.writeText(fullUrl);
+    if (!icsUrl) return;
+    void navigator.clipboard.writeText(icsUrl);
     toast.success('Đã sao chép đường dẫn lịch .ics');
   };
 
@@ -111,7 +137,7 @@ export function MessagesView() {
         </div>
 
         {conversations.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-line p-6 text-center text-small text-secondary">
+          <div className="text-sm rounded-xl border border-dashed border-line p-6 text-center text-secondary">
             Bạn chưa có hợp đồng PT đang hoạt động để mở hội thoại với Huấn luyện viên.
           </div>
         ) : (
@@ -140,7 +166,7 @@ export function MessagesView() {
                       Còn {conv.remaining_sessions} buổi · {conv.contract_status}
                     </div>
                     {conv.last_message_preview ? (
-                      <div className="mt-1 truncate text-xs text-muted">
+                      <div className="mt-1 truncate text-xs text-tertiary">
                         {conv.last_message_preview}
                       </div>
                     ) : null}
@@ -150,24 +176,27 @@ export function MessagesView() {
             </div>
 
             <div className="flex flex-col justify-between md:col-span-2">
-              <div className="max-h-80 min-h-56 space-y-3 overflow-y-auto rounded-xl bg-subtle/50 p-4">
-                {(messagesQuery.data ?? []).length === 0 ? (
-                  <p className="text-center text-small text-secondary">
+              <div
+                ref={scrollRef}
+                className="max-h-80 min-h-56 space-y-3 overflow-y-auto rounded-xl bg-subtle/50 p-4"
+              >
+                {messages.length === 0 ? (
+                  <p className="text-sm text-center text-secondary">
                     Chưa có tin nhắn nào. Hãy gửi lời chào tới HLV của bạn!
                   </p>
                 ) : (
-                  (messagesQuery.data ?? []).map(m => {
+                  messages.map(m => {
                     const isMine = m.sender_role === 'MEMBER';
                     return (
                       <div
                         key={m.id}
                         className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
                       >
-                        <div className="mb-1 text-xs text-muted">
+                        <div className="mb-1 text-xs text-tertiary">
                           {m.sender_name} · {formatDateTime(m.created_at)}
                         </div>
                         <div
-                          className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-small ${
+                          className={`text-sm max-w-[80%] rounded-2xl px-3.5 py-2 ${
                             isMine
                               ? 'bg-brand-600 text-white'
                               : 'border border-line bg-surface text-primary'
@@ -208,14 +237,14 @@ export function MessagesView() {
             Đồng bộ Lịch tập (.ics) sang Google Calendar / Apple Calendar
           </h2>
         </div>
-        <p className="mb-4 text-small text-secondary">
+        <p className="text-sm mb-4 text-secondary">
           Sao chép liên kết iCalendar bên dưới để tự động đồng bộ các buổi tập PT và lớp học nhóm
           sắp tới vào ứng dụng Lịch trên điện thoại của bạn.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Input
             readOnly
-            value={calQuery.data?.ics_url ?? 'Đang tạo liên kết .ics...'}
+            value={icsUrl ?? 'Đang tạo liên kết .ics...'}
             className="max-w-xl font-mono text-xs"
           />
           <Button variant="outline" onClick={copyIcsUrl}>
@@ -242,7 +271,7 @@ export function MessagesView() {
           <BellAlertIcon className="size-5 text-brand-600" />
           <h2 className="text-h4 font-semibold text-primary">Tùy chọn Kênh & Loại Thông báo</h2>
         </div>
-        <p className="mb-4 text-small text-secondary">
+        <p className="text-sm mb-4 text-secondary">
           Bật hoặc tắt các nhóm thông báo không bắt buộc theo nhu cầu của bạn.
         </p>
 
@@ -255,10 +284,10 @@ export function MessagesView() {
                 className="flex items-center justify-between gap-4 py-3"
               >
                 <div>
-                  <div className="text-small font-medium text-primary">
+                  <div className="text-sm font-medium text-primary">
                     {PREF_LABELS[item.type] ?? item.type}
                   </div>
-                  <div className="text-xs text-muted">Kênh: Thông báo trên ứng dụng & Email</div>
+                  <div className="text-xs text-tertiary">Kênh: Thông báo trên ứng dụng & Email</div>
                 </div>
                 <Button
                   size="sm"

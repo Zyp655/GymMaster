@@ -59,7 +59,7 @@ func (r *refreshTokenRepository) FindByHash(ctx context.Context, tokenHash strin
 
 func (r *refreshTokenRepository) Revoke(ctx context.Context, id uint, at time.Time) error {
 	return postgres.Conn(ctx, r.db).Model(&entity.RefreshToken{}).
-		Where("id = ?", id).Update("revoked_at", at).Error
+		Where("id = ?", id).Updates(map[string]any{"revoked_at": at, "last_used_at": at}).Error
 }
 
 func (r *refreshTokenRepository) RevokeByHash(ctx context.Context, userID uint, tokenHash string, at time.Time) error {

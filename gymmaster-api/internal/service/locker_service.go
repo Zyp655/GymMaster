@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	v1 "gymmaster-api/api/locker/v1"
 	"gymmaster-api/internal/dto"
@@ -24,12 +27,15 @@ const (
 )
 
 var (
-	validLockerSizes        = []string{entity.LockerSizeSmall, entity.LockerSizeStandard, entity.LockerSizeLarge}
-	validLockerStatuses     = []string{entity.LockerStatusAvailable, entity.LockerStatusOccupied, entity.LockerStatusRented, entity.LockerStatusBroken}
-	validLockerRentalTypes  = []string{entity.LockerRentalDaily, entity.LockerRentalMonthly}
+	validLockerSizes       = []string{entity.LockerSizeSmall, entity.LockerSizeStandard, entity.LockerSizeLarge}
+	validLockerStatuses    = []string{entity.LockerStatusAvailable, entity.LockerStatusOccupied, entity.LockerStatusRented, entity.LockerStatusBroken}
+	validLockerRentalTypes = []string{entity.LockerRentalDaily, entity.LockerRentalMonthly}
+	// defaultLockerMonthlyFee: phí thuê tháng khi tạo tủ không nhập monthly_fee.
 	defaultLockerMonthlyFee = 150000.0
 )
 
+// Hóa đơn thuê tủ theo tháng dùng dòng item_type = LOCKER (PLAN.md – tủ đồ; CHECK của invoice_items đã cho phép
+// từ migration 000018). Đăng ký loại dòng này với InvoiceService dùng chung.
 type (
 	LockerService interface {
 		ListLockers(ctx context.Context, req *v1.ListLockersReq) (v1.ListLockersRes, error)
@@ -46,10 +52,12 @@ type (
 	}
 
 	lockerService struct {
-		repo  repository.LockerRepository
-		tx    postgres.TxManager
-		audit AuditService
-		now   func() time.Time
+		repo     repository.LockerRepository
+		tx       postgres.TxManager
+		audit    AuditService
+		db       *gorm.DB       // khóa dòng tủ (SELECT ... FOR UPDATE) trong transaction gán/giải phóng
+		invoices InvoiceService // lập hóa đơn thuê tủ theo tháng (item_type = LOCKER)
+		now      func() time.Time
 	}
 )
 
@@ -60,6 +68,67 @@ func NewLockerService(repo repository.LockerRepository, tx postgres.TxManager, a
 		audit: audit,
 		now:   time.Now,
 	}
+}
+
+// NewLockerServiceWithInvoices: bản đầy đủ dùng trong module – có khóa dòng tủ và lập hóa đơn thuê tháng.
+func NewLockerServiceWithInvoices(repo repository.LockerRepository, tx postgres.TxManager, audit AuditService,
+	db *gorm.DB, invoices InvoiceService) LockerService {
+	s := &lockerService{repo: repo, tx: tx, audit: audit, db: db, invoices: invoices, now: time.Now}
+	if invoices != nil {
+		// Hủy (VOID) hóa đơn thuê tủ tháng → kết thúc lượt thuê, giải phóng tủ (trừ tủ đang báo hỏng).
+		invoices.RegisterVoidHandler(entity.InvoiceItemLocker, s.onInvoiceVoid)
+	}
+	return s
+}
+
+// onInvoiceVoid: VoidHandler cho dòng hóa đơn LOCKER (ref_id = locker_rentals.id), chạy trong transaction hủy hóa đơn.
+// Idempotent: lượt thuê đã kết thúc/hết hạn thì bỏ qua.
+func (s *lockerService) onInvoiceVoid(ctx context.Context, inv *entity.Invoice, it *entity.InvoiceItem) error {
+	if it == nil || it.RefID == nil {
+		return nil
+	}
+	ended, err := s.repo.EndRentalForVoidedInvoice(ctx, *it.RefID, s.now())
+	if err != nil {
+		return err
+	}
+	if ended && s.audit != nil {
+		s.audit.Log(ctx, AuditUpdate, "locker_rental", *it.RefID, map[string]any{"status": entity.LockerRentalActive},
+			map[string]any{"status": entity.LockerRentalEnded, "reason": "invoice_void", "invoice_id": inv.ID})
+	}
+	return nil
+}
+
+// withTx chạy fn trong transaction (nếu có TxManager).
+func (s *lockerService) withTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx != nil {
+		return s.tx.WithTx(ctx, fn)
+	}
+	return fn(ctx)
+}
+
+// lockLocker khóa dòng tủ (FOR UPDATE) trong transaction hiện tại rồi đọc lại trạng thái mới nhất,
+// để các thao tác gán/giải phóng/sửa/xóa đồng thời trên cùng một tủ được tuần tự hóa.
+func (s *lockerService) lockLocker(ctx context.Context, id uint) (*repository.LockerRow, error) {
+	if s.db != nil {
+		var l entity.Locker
+		if err := postgres.Conn(ctx, s.db).Clauses(clause.Locking{Strength: "UPDATE"}).First(&l, id).Error; err != nil {
+			return nil, err
+		}
+	}
+	return s.repo.FindLockerByID(ctx, id)
+}
+
+func lockerNotFound(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return rescode.New(rescode.NotFound, "Không tìm thấy tủ đồ")
+	}
+	return err
+}
+
+// lockerIsUniqueViolation: SQLSTATE 23505 (vd. uq_locker_rentals_locker_active – tủ đã có lượt thuê ACTIVE).
+func lockerIsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.Is(err, gorm.ErrDuplicatedKey) || (errors.As(err, &pgErr) && pgErr.Code == "23505")
 }
 
 func (s *lockerService) ListLockers(ctx context.Context, req *v1.ListLockersReq) (v1.ListLockersRes, error) {
@@ -108,12 +177,14 @@ func (s *lockerService) CreateLocker(ctx context.Context, req *v1.CreateLockerRe
 	if !slices.Contains(validLockerStatuses, status) {
 		return nil, rescode.New(rescode.BadRequest, "Trạng thái tủ không hợp lệ")
 	}
-	fee := req.MonthlyFee
+	// Bỏ trống monthly_fee → mặc định 150.000đ; nhập 0 = tủ miễn phí, được giữ nguyên
+	// (cùng quy tắc với UpdateLocker: chỉ cấm số âm).
+	fee := defaultLockerMonthlyFee
+	if req.MonthlyFee != nil {
+		fee = *req.MonthlyFee
+	}
 	if fee < 0 {
 		return nil, rescode.New(rescode.BadRequest, "Phí thuê tháng không được âm")
-	}
-	if fee == 0 {
-		fee = defaultLockerMonthlyFee
 	}
 	dup, err := s.repo.ExistsLockerCode(ctx, req.BranchID, code, 0)
 	if err != nil {
@@ -146,80 +217,116 @@ func (s *lockerService) CreateLocker(ctx context.Context, req *v1.CreateLockerRe
 }
 
 func (s *lockerService) UpdateLocker(ctx context.Context, req *v1.UpdateLockerReq) (*v1.LockerItem, error) {
-	row, err := s.repo.FindLockerByID(ctx, req.ID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, rescode.New(rescode.NotFound, "Không tìm thấy tủ đồ")
-		}
-		return nil, err
-	}
-	if !reqctx.CanAccessBranch(ctx, row.BranchID) {
-		return nil, rescode.New(rescode.PermissionDenied, "Bạn không được thao tác tủ đồ tại chi nhánh này")
-	}
-	l := row.Locker
-	before := toLockerItem(*row)
-	if code := strings.ToUpper(strings.TrimSpace(req.Code)); code != "" && code != l.Code {
-		dup, err := s.repo.ExistsLockerCode(ctx, l.BranchID, code, l.ID)
+	var (
+		res, before *v1.LockerItem
+		lockerID    uint
+	)
+	err := s.withTx(ctx, func(ctx context.Context) error {
+		row, err := s.lockLocker(ctx, req.ID)
 		if err != nil {
-			return nil, err
+			return lockerNotFound(err)
 		}
-		if dup {
-			return nil, rescode.New(rescode.Conflict, "Mã tủ đồ đã tồn tại tại chi nhánh này")
+		if !reqctx.CanAccessBranch(ctx, row.BranchID) {
+			return rescode.New(rescode.PermissionDenied, "Bạn không được thao tác tủ đồ tại chi nhánh này")
 		}
-		l.Code = code
-	}
-	if zone := strings.TrimSpace(req.Zone); zone != "" {
-		l.Zone = zone
-	}
-	if size := strings.ToUpper(strings.TrimSpace(req.Size)); size != "" {
-		if !slices.Contains(validLockerSizes, size) {
-			return nil, rescode.New(rescode.BadRequest, "Kích cỡ tủ không hợp lệ")
+		l := row.Locker
+		before = toLockerItem(*row)
+		if code := strings.ToUpper(strings.TrimSpace(req.Code)); code != "" && code != l.Code {
+			dup, err := s.repo.ExistsLockerCode(ctx, l.BranchID, code, l.ID)
+			if err != nil {
+				return err
+			}
+			if dup {
+				return rescode.New(rescode.Conflict, "Mã tủ đồ đã tồn tại tại chi nhánh này")
+			}
+			l.Code = code
 		}
-		l.Size = size
-	}
-	if req.MonthlyFee != nil {
-		if *req.MonthlyFee < 0 {
-			return nil, rescode.New(rescode.BadRequest, "Phí thuê tháng không được âm")
+		if zone := strings.TrimSpace(req.Zone); zone != "" {
+			l.Zone = zone
 		}
-		l.MonthlyFee = *req.MonthlyFee
-	}
-	if status := strings.ToUpper(strings.TrimSpace(req.Status)); status != "" {
-		if !slices.Contains(validLockerStatuses, status) {
-			return nil, rescode.New(rescode.BadRequest, "Trạng thái tủ không hợp lệ")
+		if size := strings.ToUpper(strings.TrimSpace(req.Size)); size != "" {
+			if !slices.Contains(validLockerSizes, size) {
+				return rescode.New(rescode.BadRequest, "Kích cỡ tủ không hợp lệ")
+			}
+			l.Size = size
 		}
-		l.Status = status
-	}
-	if req.Note != nil {
-		l.Note = strings.TrimSpace(*req.Note)
-	}
-	l.UpdatedAt = s.now()
-	if err := s.repo.UpdateLocker(ctx, &l); err != nil {
+		if req.MonthlyFee != nil {
+			if *req.MonthlyFee < 0 {
+				return rescode.New(rescode.BadRequest, "Phí thuê tháng không được âm")
+			}
+			l.MonthlyFee = *req.MonthlyFee
+		}
+		if status := strings.ToUpper(strings.TrimSpace(req.Status)); status != "" && status != l.Status {
+			if !slices.Contains(validLockerStatuses, status) {
+				return rescode.New(rescode.BadRequest, "Trạng thái tủ không hợp lệ")
+			}
+			if err := checkLockerStatusChange(row, status); err != nil {
+				return err
+			}
+			l.Status = status
+		}
+		if req.Note != nil {
+			l.Note = strings.TrimSpace(*req.Note)
+		}
+		l.UpdatedAt = s.now()
+		if err := s.repo.UpdateLocker(ctx, &l); err != nil {
+			return err
+		}
+		updatedRow := *row
+		updatedRow.Locker = l
+		res = toLockerItem(updatedRow)
+		lockerID = l.ID
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-	updatedRow := *row
-	updatedRow.Locker = l
-	res := toLockerItem(updatedRow)
 	if s.audit != nil {
-		s.audit.Log(ctx, AuditUpdate, auditEntityLocker, l.ID, before, res)
+		s.audit.Log(ctx, AuditUpdate, auditEntityLocker, lockerID, before, res)
 	}
 	return res, nil
 }
 
-func (s *lockerService) DeleteLocker(ctx context.Context, id uint) error {
-	row, err := s.repo.FindLockerByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return rescode.New(rescode.NotFound, "Không tìm thấy tủ đồ")
+// checkLockerStatusChange giữ trạng thái tủ nhất quán với lượt thuê:
+//   - Tủ đang có lượt thuê ACTIVE: chỉ được báo hỏng (BROKEN) hoặc trả về trạng thái đúng của lượt thuê
+//     (DAILY → OCCUPIED, MONTHLY → RENTED); muốn đặt AVAILABLE phải "Giải phóng tủ".
+//   - Tủ không có lượt thuê: chỉ được đặt AVAILABLE hoặc BROKEN; OCCUPIED/RENTED chỉ có qua thao tác gán tủ.
+func checkLockerStatusChange(row *repository.LockerRow, status string) error {
+	if row.RentalID != nil {
+		rentalStatus := entity.LockerStatusOccupied
+		if row.RentalType == entity.LockerRentalMonthly {
+			rentalStatus = entity.LockerStatusRented
 		}
-		return err
+		if status != entity.LockerStatusBroken && status != rentalStatus {
+			return rescode.New(rescode.LockerUnavailable,
+				"Tủ đồ đang có hội viên thuê, hãy dùng chức năng \"Giải phóng tủ\" trước khi đổi trạng thái")
+		}
+		return nil
 	}
-	if !reqctx.CanAccessBranch(ctx, row.BranchID) {
-		return rescode.New(rescode.PermissionDenied, "Bạn không được xóa tủ đồ tại chi nhánh này")
+	if status == entity.LockerStatusOccupied || status == entity.LockerStatusRented {
+		return rescode.New(rescode.BadRequest,
+			"Trạng thái Đang dùng/Đang cho thuê chỉ được cập nhật qua thao tác gán tủ cho hội viên")
 	}
-	if row.Status == entity.LockerStatusOccupied || row.Status == entity.LockerStatusRented {
-		return rescode.New(rescode.LockerUnavailable, "Tủ đồ đang có người sử dụng, không thể xóa")
-	}
-	if err := s.repo.DeleteLocker(ctx, id); err != nil {
+	return nil
+}
+
+func (s *lockerService) DeleteLocker(ctx context.Context, id uint) error {
+	var row *repository.LockerRow
+	err := s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.lockLocker(ctx, id)
+		if err != nil {
+			return lockerNotFound(err)
+		}
+		if !reqctx.CanAccessBranch(ctx, row.BranchID) {
+			return rescode.New(rescode.PermissionDenied, "Bạn không được xóa tủ đồ tại chi nhánh này")
+		}
+		if row.RentalID != nil || row.Status == entity.LockerStatusOccupied || row.Status == entity.LockerStatusRented {
+			return rescode.New(rescode.LockerUnavailable, "Tủ đồ đang có người sử dụng, không thể xóa")
+		}
+		return s.repo.DeleteLocker(ctx, id)
+	})
+	if err != nil {
 		return err
 	}
 	if s.audit != nil {
@@ -264,27 +371,6 @@ func (s *lockerService) GetBoard(ctx context.Context, req *v1.GetLockerBoardReq)
 }
 
 func (s *lockerService) AssignLocker(ctx context.Context, req *v1.AssignLockerReq) (*v1.LockerRentalItem, error) {
-	row, err := s.repo.FindLockerByID(ctx, req.ID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, rescode.New(rescode.NotFound, "Không tìm thấy tủ đồ")
-		}
-		return nil, err
-	}
-	if !reqctx.CanAccessBranch(ctx, row.BranchID) {
-		return nil, rescode.New(rescode.PermissionDenied, "Bạn không được thao tác tủ đồ tại chi nhánh này")
-	}
-	if row.Status != entity.LockerStatusAvailable {
-		return nil, rescode.New(rescode.LockerUnavailable, "Tủ đồ hiện không khả dụng (đang được sử dụng hoặc bị hỏng)")
-	}
-	m, err := s.repo.FindMemberByID(ctx, req.MemberID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, rescode.New(rescode.NotFound, "Không tìm thấy hội viên")
-		}
-		return nil, err
-	}
-
 	rentalType := strings.ToUpper(strings.TrimSpace(req.Type))
 	if rentalType == "" {
 		rentalType = entity.LockerRentalDaily
@@ -292,57 +378,106 @@ func (s *lockerService) AssignLocker(ctx context.Context, req *v1.AssignLockerRe
 	if !slices.Contains(validLockerRentalTypes, rentalType) {
 		return nil, rescode.New(rescode.BadRequest, "Loại thuê tủ không hợp lệ (DAILY hoặc MONTHLY)")
 	}
+	if req.Months < 0 || req.Months > 24 {
+		return nil, rescode.New(rescode.BadRequest, "Số tháng thuê phải từ 1 đến 24")
+	}
 
-	now := s.now()
 	var (
-		newStatus string
-		endAt     *time.Time
-		price     float64
+		row    *repository.LockerRow
+		m      *entity.Member
+		rental *entity.LockerRental
 	)
-	if rentalType == entity.LockerRentalMonthly {
-		months := req.Months
-		if months <= 0 {
-			months = 1
+	// Toàn bộ trong MỘT transaction: khóa dòng tủ (FOR UPDATE) → kiểm tra trạng thái → tạo lượt thuê
+	// (+ unique index uq_locker_rentals_locker_active chặn 2 lượt ACTIVE) → lập hóa đơn thuê tháng → cập nhật tủ.
+	err := s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.lockLocker(ctx, req.ID)
+		if err != nil {
+			return lockerNotFound(err)
 		}
-		e := now.Add(time.Duration(months) * 30 * 24 * time.Hour)
-		endAt = &e
-		price = row.MonthlyFee * float64(months)
-		newStatus = entity.LockerStatusRented
-	} else {
-		e := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
-		endAt = &e
-		price = 0
-		newStatus = entity.LockerStatusOccupied
-	}
-
-	rental := &entity.LockerRental{
-		LockerID:  row.ID,
-		MemberID:  m.ID,
-		Type:      rentalType,
-		StartAt:   now,
-		EndAt:     endAt,
-		Price:     price,
-		Status:    entity.LockerRentalActive,
-		Note:      strings.TrimSpace(req.Note),
-		CreatedBy: reqctx.UserID(ctx),
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	l := row.Locker
-	l.Status = newStatus
-	l.UpdatedAt = now
-
-	run := func(txCtx context.Context) error {
-		if err := s.repo.CreateRental(txCtx, rental); err != nil {
+		if !reqctx.CanAccessBranch(ctx, row.BranchID) {
+			return rescode.New(rescode.PermissionDenied, "Bạn không được thao tác tủ đồ tại chi nhánh này")
+		}
+		if row.Status != entity.LockerStatusAvailable || row.RentalID != nil {
+			return rescode.New(rescode.LockerUnavailable, "Tủ đồ hiện không khả dụng (đang được sử dụng hoặc bị hỏng)")
+		}
+		m, err = s.repo.FindMemberByID(ctx, req.MemberID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return rescode.New(rescode.NotFound, "Không tìm thấy hội viên")
+			}
 			return err
 		}
-		return s.repo.UpdateLocker(txCtx, &l)
-	}
-	if s.tx != nil {
-		err = s.tx.WithTx(ctx, run)
-	} else {
-		err = run(ctx)
-	}
+
+		now := s.now()
+		var (
+			newStatus string
+			endAt     *time.Time
+			price     float64
+			months    = req.Months
+		)
+		if rentalType == entity.LockerRentalMonthly {
+			if months <= 0 {
+				months = 1
+			}
+			e := now.Add(time.Duration(months) * 30 * 24 * time.Hour)
+			endAt = &e
+			price = row.MonthlyFee * float64(months)
+			newStatus = entity.LockerStatusRented
+		} else {
+			e := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
+			endAt = &e
+			newStatus = entity.LockerStatusOccupied
+		}
+		rental = &entity.LockerRental{
+			LockerID:  row.ID,
+			MemberID:  m.ID,
+			Type:      rentalType,
+			StartAt:   now,
+			EndAt:     endAt,
+			Price:     price,
+			Status:    entity.LockerRentalActive,
+			Note:      strings.TrimSpace(req.Note),
+			CreatedBy: reqctx.UserID(ctx),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if err := s.repo.CreateRental(ctx, rental); err != nil {
+			if lockerIsUniqueViolation(err) {
+				return rescode.New(rescode.LockerUnavailable, "Tủ đồ vừa được gán cho hội viên khác")
+			}
+			return err
+		}
+		if rentalType == entity.LockerRentalMonthly && s.invoices != nil {
+			rentalID := rental.ID
+			inv, err := s.invoices.CreateInvoice(ctx, InvoiceDraft{
+				MemberID: &m.ID,
+				BranchID: row.BranchID,
+				Items: []InvoiceItemDraft{{
+					ItemType:    entity.InvoiceItemLocker,
+					RefID:       &rentalID,
+					Description: fmt.Sprintf("Thuê tủ đồ %s (%s) – %d tháng", row.Code, row.Zone, months),
+					Quantity:    months,
+					UnitPrice:   row.MonthlyFee,
+				}},
+				Note: fmt.Sprintf("Thuê tủ đồ %s theo tháng", row.Code),
+			})
+			if err != nil {
+				return err
+			}
+			rental.InvoiceID = &inv.ID
+			if s.db != nil {
+				if err := postgres.Conn(ctx, s.db).Model(&entity.LockerRental{}).Where("id = ?", rental.ID).
+					Update("invoice_id", inv.ID).Error; err != nil {
+					return err
+				}
+			}
+		}
+		l := row.Locker
+		l.Status = newStatus
+		l.UpdatedAt = now
+		return s.repo.UpdateLocker(ctx, &l)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -360,36 +495,38 @@ func (s *lockerService) AssignLocker(ctx context.Context, req *v1.AssignLockerRe
 }
 
 func (s *lockerService) ReleaseLocker(ctx context.Context, id uint) (*v1.LockerItem, error) {
-	row, err := s.repo.FindLockerByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, rescode.New(rescode.NotFound, "Không tìm thấy tủ đồ")
+	var (
+		l          entity.Locker
+		branchName string
+	)
+	err := s.withTx(ctx, func(ctx context.Context) error {
+		row, err := s.lockLocker(ctx, id)
+		if err != nil {
+			return lockerNotFound(err)
 		}
-		return nil, err
-	}
-	if !reqctx.CanAccessBranch(ctx, row.BranchID) {
-		return nil, rescode.New(rescode.PermissionDenied, "Bạn không được thao tác tủ đồ tại chi nhánh này")
-	}
-	now := s.now()
-	l := row.Locker
-	l.Status = entity.LockerStatusAvailable
-	l.UpdatedAt = now
-
-	run := func(txCtx context.Context) error {
-		if err := s.repo.EndActiveRentalsByLocker(txCtx, id, now); err != nil {
+		if !reqctx.CanAccessBranch(ctx, row.BranchID) {
+			return rescode.New(rescode.PermissionDenied, "Bạn không được thao tác tủ đồ tại chi nhánh này")
+		}
+		if row.RentalID == nil && row.Status != entity.LockerStatusOccupied && row.Status != entity.LockerStatusRented {
+			return rescode.New(rescode.Conflict, "Tủ đồ không có lượt thuê đang hoạt động để giải phóng")
+		}
+		now := s.now()
+		l = row.Locker
+		branchName = row.BranchName
+		// Tủ đang báo hỏng: chỉ kết thúc lượt thuê, giữ nguyên trạng thái BROKEN.
+		if l.Status != entity.LockerStatusBroken {
+			l.Status = entity.LockerStatusAvailable
+		}
+		l.UpdatedAt = now
+		if err := s.repo.EndActiveRentalsByLocker(ctx, id, now); err != nil {
 			return err
 		}
-		return s.repo.UpdateLocker(txCtx, &l)
-	}
-	if s.tx != nil {
-		err = s.tx.WithTx(ctx, run)
-	} else {
-		err = run(ctx)
-	}
+		return s.repo.UpdateLocker(ctx, &l)
+	})
 	if err != nil {
 		return nil, err
 	}
-	return toLockerItem(repository.LockerRow{Locker: l, BranchName: row.BranchName}), nil
+	return toLockerItem(repository.LockerRow{Locker: l, BranchName: branchName}), nil
 }
 
 func (s *lockerService) CreateRental(ctx context.Context, req *v1.CreateLockerRentalReq) (*v1.LockerRentalItem, error) {

@@ -6,6 +6,13 @@ import type { ActiveStatus, ListParams, Page } from './types';
 export type PlanType = 'TIME' | 'SESSION';
 export type AccessScope = 'SINGLE_BRANCH' | 'ALL_BRANCHES';
 
+/** Khung giờ được vào tập (gói Off-Peak). dow: 1=T2 … 6=T7, 0=CN; rỗng = mọi ngày. */
+export interface AccessHoursSlot {
+  dow: number[];
+  from: string;
+  to: string;
+}
+
 export interface MembershipPlan {
   id: number;
   code: string;
@@ -21,6 +28,10 @@ export interface MembershipPlan {
   max_freeze_times: number;
   includes_classes: boolean;
   transfer_fee: number;
+  /** Số vé mời khách mỗi tháng hội viên được tạo trên cổng hội viên. */
+  guest_passes_per_month: number;
+  /** Rỗng = vào tập mọi giờ mở cửa. */
+  access_hours: AccessHoursSlot[];
   status: ActiveStatus;
   sort_order: number;
   created_at: string;

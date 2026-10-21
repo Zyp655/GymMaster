@@ -12,8 +12,8 @@ import (
 
 type ImportItem struct {
 	ProductID uint    `json:"product_id" v:"required|min:1#Vui lòng chọn sản phẩm|Sản phẩm không hợp lệ"`
-	Quantity  int     `json:"quantity"   v:"required|min:1#Vui lòng nhập số lượng|Số lượng phải lớn hơn 0"`
-	UnitCost  float64 `json:"unit_cost"  v:"min:0#Đơn giá nhập không được âm"`
+	Quantity  int     `json:"quantity"   v:"required|min:1|max:1000000#Vui lòng nhập số lượng|Số lượng phải lớn hơn 0|Số lượng mỗi dòng tối đa 1.000.000"`
+	UnitCost  float64 `json:"unit_cost"  v:"min:0|max:999999999999#Đơn giá nhập không được âm|Đơn giá nhập vượt quá giới hạn cho phép (tối đa 999.999.999.999đ)"`
 }
 
 type ImportReq struct {
@@ -27,7 +27,7 @@ type ImportRes = Voucher
 
 type TransferItem struct {
 	ProductID uint `json:"product_id" v:"required|min:1#Vui lòng chọn sản phẩm|Sản phẩm không hợp lệ"`
-	Quantity  int  `json:"quantity"   v:"required|min:1#Vui lòng nhập số lượng|Số lượng phải lớn hơn 0"`
+	Quantity  int  `json:"quantity"   v:"required|min:1|max:1000000#Vui lòng nhập số lượng|Số lượng phải lớn hơn 0|Số lượng mỗi dòng tối đa 1.000.000"`
 }
 
 type TransferReq struct {
@@ -41,7 +41,7 @@ type TransferRes = Voucher
 
 type AdjustItem struct {
 	ProductID      uint `json:"product_id"      v:"required|min:1#Vui lòng chọn sản phẩm|Sản phẩm không hợp lệ"`
-	ActualQuantity *int `json:"actual_quantity" v:"min:0#Số lượng thực tế không được âm" dc:"Bắt buộc"`
+	ActualQuantity *int `json:"actual_quantity" v:"min:0|max:100000000#Số lượng thực tế không được âm|Số lượng thực tế vượt quá giới hạn cho phép (tối đa 100.000.000)" dc:"Bắt buộc"`
 }
 
 type AdjustReq struct {
@@ -104,7 +104,7 @@ type StockReq struct {
 	dto.PageReq
 	BranchID   uint `json:"branch_id"   in:"query" dc:"Có → mọi sản phẩm đang kinh doanh tại chi nhánh (kể cả tồn 0); không → các dòng tồn của chi nhánh trong phạm vi"`
 	CategoryID uint `json:"category_id" in:"query"`
-	LowStock   bool `json:"low_stock"   in:"query" dc:"true → chỉ dòng quantity < min_stock"`
+	LowStock   bool `json:"low_stock"   in:"query" dc:"true → chỉ dòng tồn thấp (định nghĩa chung repository.LowStockCond: dòng tồn đã có, SP & CN ACTIVE, min_stock > 0, quantity < min_stock)"`
 }
 
 type StockRow struct {

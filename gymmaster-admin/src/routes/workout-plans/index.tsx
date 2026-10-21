@@ -74,13 +74,7 @@ interface PlanEditorModalProps {
   onClose: () => void;
 }
 
-function PlanEditorModal({
-  open,
-  planId,
-  initialRecord,
-  readOnly,
-  onClose,
-}: PlanEditorModalProps) {
+function PlanEditorModal({ open, planId, initialRecord, readOnly, onClose }: PlanEditorModalProps) {
   const [form] = Form.useForm<PlanFormValues>();
   const { message } = App.useApp();
   const qc = useQueryClient();
@@ -95,7 +89,7 @@ function PlanEditorModal({
 
   const exercisesQuery = useQuery({
     queryKey: [workoutApi.exerciseKey, 'all'],
-    queryFn: () => workoutApi.listExercises({ limit: 200 }),
+    queryFn: () => workoutApi.listExercises({ limit: 100 }),
     enabled: open,
     staleTime: 60_000,
   });
@@ -133,7 +127,10 @@ function PlanEditorModal({
         status: src.status || 'ACTIVE',
         date_range:
           src.start_date || src.end_date
-            ? [src.start_date ? dayjs(src.start_date) : null, src.end_date ? dayjs(src.end_date) : null]
+            ? [
+                src.start_date ? dayjs(src.start_date) : null,
+                src.end_date ? dayjs(src.end_date) : null,
+              ]
             : undefined,
         days:
           src.days && src.days.length > 0
@@ -142,7 +139,16 @@ function PlanEditorModal({
                 {
                   day_index: 1,
                   title: 'Buổi 1 – Thân trên',
-                  items: [{ exercise_id: exerciseOptions[0]?.value ?? 1, sets: 3, reps: 10, weight: 20, rest_sec: 60, note: '' }],
+                  items: [
+                    {
+                      exercise_id: exerciseOptions[0]?.value ?? 1,
+                      sets: 3,
+                      reps: 10,
+                      weight: 20,
+                      rest_sec: 60,
+                      note: '',
+                    },
+                  ],
                 },
               ],
       });
@@ -234,10 +240,7 @@ function PlanEditorModal({
               </Form.Item>
             </Col>
             <Col xs={24} sm={8}>
-              <Form.Item
-                name="member_id"
-                label="Hội viên (để trống = Giáo án mẫu)"
-              >
+              <Form.Item name="member_id" label="Hội viên (để trống = Giáo án mẫu)">
                 <MemberSelect
                   placeholder="Chọn hội viên hoặc để trống làm mẫu"
                   initialMember={
@@ -257,16 +260,15 @@ function PlanEditorModal({
             </Col>
             <Col xs={24} sm={6}>
               <Form.Item name="trainer_id" label="Huấn luyện viên">
-                <Select
-                  allowClear
-                  options={trainerOptions}
-                  placeholder="Chọn HLV phụ trách"
-                />
+                <Select allowClear options={trainerOptions} placeholder="Chọn HLV phụ trách" />
               </Form.Item>
             </Col>
             <Col xs={24} sm={10}>
               <Form.Item name="goal" label="Mục tiêu tập luyện">
-                <Input placeholder="VD: Tăng cơ ngực/vai, cải thiện sức bền tim mạch" maxLength={255} />
+                <Input
+                  placeholder="VD: Tăng cơ ngực/vai, cải thiện sức bền tim mạch"
+                  maxLength={255}
+                />
               </Form.Item>
             </Col>
             <Col xs={24} sm={8}>
@@ -297,12 +299,11 @@ function PlanEditorModal({
                   <Card
                     key={dayField.key}
                     size="small"
-                    style={{ background: '#fafbfc', borderColor: '#e5e7eb' }}
+                    style={{ background: 'var(--gm-hover)', borderColor: 'var(--gm-border)' }}
                     title={
                       <Row gutter={8} align="middle">
                         <Col flex="130px">
                           <Form.Item
-                            {...dayField}
                             name={[dayField.name, 'day_index']}
                             style={{ marginBottom: 0 }}
                             rules={[{ required: true, message: 'Chọn ngày' }]}
@@ -318,15 +319,11 @@ function PlanEditorModal({
                         </Col>
                         <Col flex="auto">
                           <Form.Item
-                            {...dayField}
                             name={[dayField.name, 'title']}
                             style={{ marginBottom: 0 }}
                             rules={[{ required: true, message: 'Nhập tiêu đề buổi tập' }]}
                           >
-                            <Input
-                              size="small"
-                              placeholder="Tiêu đề buổi (VD: Ngực & Tay sau)"
-                            />
+                            <Input size="small" placeholder="Tiêu đề buổi (VD: Ngực & Tay sau)" />
                           </Form.Item>
                         </Col>
                       </Row>
@@ -352,7 +349,6 @@ function PlanEditorModal({
                             <Row key={itemField.key} gutter={8} align="middle">
                               <Col xs={24} md={8}>
                                 <Form.Item
-                                  {...itemField}
                                   name={[itemField.name, 'exercise_id']}
                                   style={{ marginBottom: 0 }}
                                   rules={[{ required: true, message: 'Chọn bài tập' }]}
@@ -367,35 +363,32 @@ function PlanEditorModal({
                               </Col>
                               <Col xs={6} md={3}>
                                 <Form.Item
-                                  {...itemField}
                                   name={[itemField.name, 'sets']}
                                   style={{ marginBottom: 0 }}
                                 >
                                   <InputNumber
                                     min={1}
                                     max={20}
-                                    addonBefore="Set"
+                                    prefix="Set"
                                     style={{ width: '100%' }}
                                   />
                                 </Form.Item>
                               </Col>
                               <Col xs={6} md={3}>
                                 <Form.Item
-                                  {...itemField}
                                   name={[itemField.name, 'reps']}
                                   style={{ marginBottom: 0 }}
                                 >
                                   <InputNumber
                                     min={1}
                                     max={200}
-                                    addonBefore="Rep"
+                                    prefix="Rep"
                                     style={{ width: '100%' }}
                                   />
                                 </Form.Item>
                               </Col>
                               <Col xs={6} md={3}>
                                 <Form.Item
-                                  {...itemField}
                                   name={[itemField.name, 'weight']}
                                   style={{ marginBottom: 0 }}
                                 >
@@ -403,14 +396,13 @@ function PlanEditorModal({
                                     min={0}
                                     max={500}
                                     step={2.5}
-                                    addonAfter="kg"
+                                    suffix="kg"
                                     style={{ width: '100%' }}
                                   />
                                 </Form.Item>
                               </Col>
                               <Col xs={6} md={3}>
                                 <Form.Item
-                                  {...itemField}
                                   name={[itemField.name, 'rest_sec']}
                                   style={{ marginBottom: 0 }}
                                 >
@@ -418,14 +410,13 @@ function PlanEditorModal({
                                     min={0}
                                     max={600}
                                     step={15}
-                                    addonAfter="s"
+                                    suffix="s"
                                     style={{ width: '100%' }}
                                   />
                                 </Form.Item>
                               </Col>
                               <Col xs={21} md={3}>
                                 <Form.Item
-                                  {...itemField}
                                   name={[itemField.name, 'note']}
                                   style={{ marginBottom: 0 }}
                                 >

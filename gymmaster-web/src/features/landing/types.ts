@@ -60,9 +60,7 @@ export interface PublicClassSchedule {
   note?: string;
 }
 
-export type PublicClassSchedulesRaw =
-  | PublicClassSchedule[]
-  | { items?: PublicClassSchedule[] };
+export type PublicClassSchedulesRaw = PublicClassSchedule[] | { items?: PublicClassSchedule[] };
 
 export interface CreatePublicLeadPayload {
   full_name: string;
@@ -118,3 +116,15 @@ export interface PublicPost {
 
 /** Kết quả tải dữ liệu phía server: null = lỗi (hiển thị thông báo thay vì làm hỏng cả trang). */
 export type LoadResult<T> = { ok: true; data: T } | { ok: false };
+
+/** Nhãn tiếng Việt cho mã chuyên mục bài viết (khớp `POST_CATEGORY_LABELS` bên admin). */
+export const POST_CATEGORY_LABELS: Record<string, string> = {
+  TAP_LUYEN: 'Tập luyện',
+  DINH_DUONG: 'Dinh dưỡng',
+  SU_KIEN: 'Sự kiện',
+};
+
+export function postCategoryLabel(code: string | null | undefined): string {
+  if (!code) return '';
+  return POST_CATEGORY_LABELS[code.toUpperCase()] ?? code;
+}

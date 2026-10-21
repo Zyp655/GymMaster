@@ -91,7 +91,7 @@ type PayslipItem struct {
 
 type ScanAttendanceReq struct {
 	g.Meta   `path:"/attendances/scan" method:"post" tags:"Chấm công & Lương" summary:"Chấm công vào/ra cho nhân viên" perm:"payroll.manage,shift.manage"`
-	StaffID  uint   `json:"staff_id"`
+	StaffID  uint   `json:"staff_id"  v:"min:0#Nhân viên không hợp lệ" dc:"Bỏ trống = chấm công cho chính mình"`
 	BranchID uint   `json:"branch_id" v:"required|min:1"`
 	Method   string `json:"method"    d:"QR" v:"in:QR,MANUAL"`
 	Note     string `json:"note"`

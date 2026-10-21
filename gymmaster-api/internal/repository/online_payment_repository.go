@@ -38,6 +38,21 @@ type (
 		FindMemberByID(ctx context.Context, id uint) (*entity.Member, error)
 		FindPlanByID(ctx context.Context, id uint) (*entity.MembershipPlan, error)
 		SetInvoiceSource(ctx context.Context, invoiceID uint, source string) error
+
+		// FindPendingByInvoice: giao dịch PENDING mới nhất của hóa đơn tạo từ since (chưa hết hạn); nil nếu không có.
+		FindPendingByInvoice(ctx context.Context, invoiceID uint, since time.Time) (*entity.OnlinePaymentTxn, error)
+		// FindPortalCheckout: đơn đăng ký gói trực tuyến đang chờ thanh toán (gói PENDING + hóa đơn PORTAL UNPAID
+		// chưa thu đồng nào) của hội viên cho đúng gói/chi nhánh – để dùng lại thay vì tạo đơn trùng.
+		FindPortalCheckout(ctx context.Context, memberID, planID, branchID uint) (*PortalCheckout, error)
+	}
+
+	// PortalCheckout là đơn đăng ký trực tuyến đang chờ thanh toán.
+	PortalCheckout struct {
+		SubscriptionID uint
+		InvoiceID      uint
+		InvoiceNo      string
+		Total          float64
+		PromotionCode  string
 	}
 
 	onlinePaymentRepository struct {
@@ -135,4 +150,29 @@ func (r *onlinePaymentRepository) FindPlanByID(ctx context.Context, id uint) (*e
 
 func (r *onlinePaymentRepository) SetInvoiceSource(ctx context.Context, invoiceID uint, source string) error {
 	return postgres.Conn(ctx, r.db).Model(&entity.Invoice{}).Where("id = ?", invoiceID).Update("source", source).Error
+}
+
+func (r *onlinePaymentRepository) FindPendingByInvoice(ctx context.Context, invoiceID uint, since time.Time) (*entity.OnlinePaymentTxn, error) {
+	var rows []entity.OnlinePaymentTxn
+	err := postgres.Conn(ctx, r.db).Where("invoice_id = ? AND status = ? AND created_at >= ?", invoiceID, entity.OnlineTxnPending, since).
+		Order("id DESC").Limit(1).Find(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
+}
+
+func (r *onlinePaymentRepository) FindPortalCheckout(ctx context.Context, memberID, planID, branchID uint) (*PortalCheckout, error) {
+	var rows []PortalCheckout
+	err := postgres.Conn(ctx, r.db).Table("subscriptions s").
+		Select("s.id AS subscription_id, i.id AS invoice_id, i.invoice_no, i.total, COALESCE(p.code, '') AS promotion_code").
+		Joins("JOIN invoices i ON i.id = s.invoice_id").
+		Joins("LEFT JOIN promotions p ON p.id = i.promotion_id").
+		Where("s.member_id = ? AND s.plan_id = ? AND s.branch_id = ? AND s.status = ?", memberID, planID, branchID, entity.SubStatusPending).
+		Where("i.status = ? AND i.source = ? AND i.paid_amount = 0", entity.InvoiceStatusUnpaid, entity.InvoiceSourcePortal).
+		Order("s.id DESC").Limit(1).Scan(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
 }

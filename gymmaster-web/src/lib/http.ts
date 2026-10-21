@@ -4,7 +4,7 @@ import { getCsrfToken, getSession, signOut } from 'next-auth/react';
 import { getApiBaseUrl } from '@/env';
 import { ApiCode, ApiError } from '@/types/api';
 import { getClientAccessToken, setClientAccessToken } from './session-token';
-import { sendRequest, type HttpMethod, type RequestOptions } from './http.core';
+import { sendRawRequest, sendRequest, type HttpMethod, type RequestOptions } from './http.core';
 
 let refreshPromise: Promise<string | null> | null = null;
 let signingOut = false;
@@ -58,15 +58,18 @@ async function forceSignOut() {
   await signOut({ callbackUrl: `/login?returnUrl=${encodeURIComponent(returnUrl)}` });
 }
 
-async function request<T>(method: HttpMethod, path: string, options: RequestOptions = {}) {
-  const baseUrl = getApiBaseUrl();
+/** Gắn access token, tự refresh khi 40101 rồi thử lại một lần; 40100/40103 → đăng xuất. */
+async function withAuth<R>(
+  options: Pick<RequestOptions, 'auth' | 'token'>,
+  run: (accessToken: string | undefined) => Promise<R>,
+): Promise<R> {
   const useAuth = options.auth !== false;
   const accessToken = useAuth
     ? (options.token ?? (await currentAccessToken()) ?? undefined)
     : undefined;
 
   try {
-    return await sendRequest<T>(baseUrl, method, path, { ...options, accessToken });
+    return await run(accessToken);
   } catch (error) {
     if (!useAuth || !(error instanceof ApiError)) throw error;
 
@@ -76,13 +79,34 @@ async function request<T>(method: HttpMethod, path: string, options: RequestOpti
         await forceSignOut();
         throw error;
       }
-      return sendRequest<T>(baseUrl, method, path, { ...options, accessToken: newToken });
+      return run(newToken);
     }
     if (error.code === ApiCode.UNAUTHORIZED || error.code === ApiCode.REFRESH_TOKEN_INVALID) {
       await forceSignOut();
     }
     throw error;
   }
+}
+
+function request<T>(method: HttpMethod, path: string, options: RequestOptions = {}) {
+  const baseUrl = getApiBaseUrl();
+  return withAuth(options, accessToken =>
+    sendRequest<T>(baseUrl, method, path, { ...options, accessToken }),
+  );
+}
+
+/** Tải file (GET, có xác thực) → Blob + tên file từ Content-Disposition nếu đọc được. */
+async function download(
+  path: string,
+  options: Omit<RequestOptions, 'body'> = {},
+): Promise<{ blob: Blob; filename: string | null }> {
+  const baseUrl = getApiBaseUrl();
+  const response = await withAuth(options, accessToken =>
+    sendRawRequest(baseUrl, 'GET', path, { ...options, accessToken }),
+  );
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+  return { blob: await response.blob(), filename: match ? decodeURIComponent(match[1]) : null };
 }
 
 /** HTTP client dùng trong Client Components / TanStack Query. */
@@ -96,4 +120,5 @@ export const apiClient = {
   patch: <T>(path: string, body?: unknown, options?: RequestOptions) =>
     request<T>('PATCH', path, { ...options, body }),
   del: <T>(path: string, options?: RequestOptions) => request<T>('DELETE', path, options),
+  download,
 };

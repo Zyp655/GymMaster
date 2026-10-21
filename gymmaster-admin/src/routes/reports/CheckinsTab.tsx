@@ -109,7 +109,14 @@ export default function CheckinsTab({ branchId, from, to }: CheckinsTabProps) {
                 <tr>
                   <th style={{ textAlign: 'left', padding: '4px 8px', width: 52 }}>Thứ</th>
                   {HOURS.map((h) => (
-                    <th key={h} style={{ textAlign: 'center', fontWeight: 500, color: '#6B7280' }}>
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: 'center',
+                        fontWeight: 500,
+                        color: 'var(--gm-text-secondary)',
+                      }}
+                    >
                       {h}h
                     </th>
                   ))}
@@ -125,8 +132,10 @@ export default function CheckinsTab({ branchId, from, to }: CheckinsTabProps) {
                       const count = row.hours[h] ?? 0;
                       const ratio = count > 0 ? Math.max(0.15, count / max) : 0;
                       const bg =
-                        count > 0 ? `rgba(249, 115, 22, ${ratio.toFixed(2)})` : '#F3F4F6';
-                      const fg = ratio > 0.55 ? '#FFFFFF' : '#111827';
+                        count > 0
+                          ? `rgba(249, 115, 22, ${ratio.toFixed(2)})`
+                          : 'var(--gm-tone-slate-bg)';
+                      const fg = ratio > 0.55 ? '#FFFFFF' : 'var(--gm-ink)';
                       return (
                         <Tooltip
                           key={h}
@@ -151,7 +160,13 @@ export default function CheckinsTab({ branchId, from, to }: CheckinsTabProps) {
                     <td style={{ textAlign: 'right', fontWeight: 600, padding: '4px 6px' }}>
                       {formatNumber(row.total)}
                     </td>
-                    <td style={{ textAlign: 'right', color: '#6B7280', padding: '4px 6px' }}>
+                    <td
+                      style={{
+                        textAlign: 'right',
+                        color: 'var(--gm-text-secondary)',
+                        padding: '4px 6px',
+                      }}
+                    >
                       {row.avg_per_day}
                     </td>
                   </tr>

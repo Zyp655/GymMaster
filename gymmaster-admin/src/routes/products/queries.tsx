@@ -48,7 +48,11 @@ export function useSaveSupplier() {
 type Named = { id: number; name: string };
 
 /** Xóa nhiều mục, báo từng mục lỗi (vd. sản phẩm còn tồn, danh mục còn sản phẩm). */
-function useDeleteMany(label: string, removeFn: (id: number) => Promise<unknown>, onDone: () => unknown) {
+function useDeleteMany(
+  label: string,
+  removeFn: (id: number) => Promise<unknown>,
+  onDone: () => unknown,
+) {
   const { message, modal } = App.useApp();
   return useMutation({
     mutationFn: async (items: Named[]) => {

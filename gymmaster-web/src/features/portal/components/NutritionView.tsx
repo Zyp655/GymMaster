@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -10,14 +10,25 @@ import {
   CalendarDaysIcon,
   ClipboardDocumentListIcon,
   FireIcon,
+  PencilSquareIcon,
   PlusCircleIcon,
   SparklesIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { EmptyState } from '@/components/common/EmptyState';
 import { LoadError } from '@/components/common/LoadError';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Form,
   FormControl,
@@ -48,16 +59,52 @@ import { useToastApiError } from '@/hooks/use-api-error';
 import { formatDate, formatNumber } from '@/lib/format';
 import { looseT } from '@/lib/utils';
 import { DEFAULT_VIETNAMESE_FOODS } from '../api';
+import { defaultInput, fromServings, maxInput, qtyMode, toServings } from '../food-units';
 import {
   useCreateMemberFoodLogMutation,
+  useDeleteMemberFoodLogMutation,
   useMemberFoodLogsQuery,
   useMemberMealPlansQuery,
+  useUpdateMemberFoodLogMutation,
 } from '../queries';
 import { createFoodLogSchema, type FoodLogFormValues } from '../schema';
-import type { FoodLogItem, MealType } from '../types';
+import type { FoodItem, FoodLogItem, MealType } from '../types';
 import { PortalPageHeader } from './PortalPageHeader';
 
 const MEAL_TYPES: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'];
+
+type NutritionT = ReturnType<typeof useTranslations<'portal.nutrition'>>;
+
+/** Kiểm tra giới hạn theo đơn vị món (≤ 100 khẩu phần); trả thông báo lỗi hoặc null. */
+function qtyLimitError(t: NutritionT, food: FoodItem | undefined, qty: number): string | null {
+  if (!food) return null;
+  const max = maxInput(food.unit);
+  if (qty > max) {
+    return qtyMode(food.unit) === 'gram'
+      ? t('qtyMaxGram', { max: formatNumber(max) })
+      : t('qtyMaxServing', { max: formatNumber(max) });
+  }
+  if (toServings(food.unit, qty) <= 0) return t('qtyTooSmall');
+  return null;
+}
+
+/** Hiển thị khẩu phần đã lưu: món theo gam → "12,5 g"; món theo khẩu phần → "1,5 × 1 bát". */
+function formatLoggedQty(t: NutritionT, unit: string | undefined, servings: number): string {
+  return qtyMode(unit) === 'gram'
+    ? t('gramUnit', { value: formatNumber(fromServings(unit, servings)) })
+    : t('servingQty', { value: formatNumber(servings), unit: unit ?? '' });
+}
+
+/** Nhãn ô số lượng hiển thị rõ đơn vị đang nhập (gam hoặc khẩu phần). */
+function QtyUnitHint({ food }: { food: FoodItem | undefined }) {
+  const t = useTranslations('portal.nutrition');
+  if (!food) return null;
+  return (
+    <Badge variant="neutral" className="shrink-0">
+      {qtyMode(food.unit) === 'gram' ? t('unitGram') : t('unitServing', { unit: food.unit })}
+    </Badge>
+  );
+}
 
 export function NutritionView() {
   const t = useTranslations('portal.nutrition');
@@ -70,6 +117,9 @@ export function NutritionView() {
   const overviewQuery = useMemberMealPlansQuery();
   const logsQuery = useMemberFoodLogsQuery(selectedDate);
   const createLogMutation = useCreateMemberFoodLogMutation();
+  const deleteLogMutation = useDeleteMemberFoodLogMutation();
+  const [editingLog, setEditingLog] = useState<FoodLogItem | null>(null);
+  const [deletingLog, setDeletingLog] = useState<FoodLogItem | null>(null);
 
   const foods = useMemo(() => {
     const list = overviewQuery.data?.foods;
@@ -82,12 +132,12 @@ export function NutritionView() {
     defaultValues: {
       food_id: foods[0]?.id ?? 1,
       meal_type: 'BREAKFAST',
-      qty: foods[0]?.unit === '100g' ? 100 : 1,
+      qty: defaultInput(foods[0]?.unit),
     },
   });
 
-  const watchedFoodId = form.watch('food_id');
-  const watchedQty = form.watch('qty');
+  const watchedFoodId = useWatch({ control: form.control, name: 'food_id' });
+  const watchedQty = useWatch({ control: form.control, name: 'qty' });
   const selectedFood = useMemo(
     () => foods.find(f => f.id === Number(watchedFoodId)),
     [foods, watchedFoodId],
@@ -95,13 +145,12 @@ export function NutritionView() {
 
   const previewMacros = useMemo(() => {
     if (!selectedFood || !watchedQty || watchedQty <= 0) return null;
-    const isPer100g = selectedFood.unit.toLowerCase().includes('100');
-    const ratio = isPer100g && watchedQty >= 10 ? watchedQty / 100 : watchedQty;
+    const ratio = toServings(selectedFood.unit, watchedQty);
     const p = selectedFood.protein_g ?? selectedFood.protein ?? 0;
     const c = selectedFood.carbs_g ?? selectedFood.carbs ?? 0;
     const f = selectedFood.fat_g ?? selectedFood.fat ?? 0;
     return {
-      calories: Math.round(selectedFood.calories * ratio),
+      calories: Math.round(selectedFood.calories * ratio * 10) / 10,
       protein: Math.round(p * ratio * 10) / 10,
       carbs: Math.round(c * ratio * 10) / 10,
       fat: Math.round(f * ratio * 10) / 10,
@@ -154,22 +203,19 @@ export function NutritionView() {
     Math.round(
       ((!Array.isArray(rawLogs) &&
         (rawLogs?.total_protein_g ?? rawLogs?.total_protein ?? rawLogs?.totals?.protein)) ||
-        sumP) *
-        10,
+        sumP) * 10,
     ) / 10;
   const totalCarbs =
     Math.round(
       ((!Array.isArray(rawLogs) &&
         (rawLogs?.total_carbs_g ?? rawLogs?.total_carbs ?? rawLogs?.totals?.carbs)) ||
-        sumC) *
-        10,
+        sumC) * 10,
     ) / 10;
   const totalFat =
     Math.round(
       ((!Array.isArray(rawLogs) &&
         (rawLogs?.total_fat_g ?? rawLogs?.total_fat ?? rawLogs?.totals?.fat)) ||
-        sumF) *
-        10,
+        sumF) * 10,
     ) / 10;
 
   const caloriePercent = Math.min(
@@ -178,6 +224,12 @@ export function NutritionView() {
   );
 
   const onSubmit = form.handleSubmit(async values => {
+    const food = foods.find(f => f.id === Number(values.food_id));
+    const limitError = qtyLimitError(t, food, values.qty);
+    if (limitError) {
+      form.setError('qty', { message: limitError });
+      return;
+    }
     try {
       await createLogMutation.mutateAsync({
         date: selectedDate,
@@ -185,7 +237,7 @@ export function NutritionView() {
         meal: values.meal_type,
         meal_type: values.meal_type,
         food_id: values.food_id,
-        qty: values.qty,
+        qty: toServings(food?.unit, values.qty),
       });
       toast.success(t('addFoodSuccess'));
     } catch (error) {
@@ -292,13 +344,14 @@ export function NutritionView() {
                   <FormItem>
                     <FormLabel>{t('foodLabel')}</FormLabel>
                     <Select
-                      value={field.value ? String(field.value) : undefined}
+                      value={field.value ? String(field.value) : ''}
                       onValueChange={val => {
                         const id = Number(val);
                         field.onChange(id);
                         const found = foods.find(f => f.id === id);
                         if (found) {
-                          form.setValue('qty', found.unit.includes('100') ? 100 : 1);
+                          form.setValue('qty', defaultInput(found.unit));
+                          form.clearErrors('qty');
                         }
                       }}
                     >
@@ -326,18 +379,24 @@ export function NutritionView() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>
-                      {t('qtyLabel')}
-                      {selectedFood ? ` (${selectedFood.unit})` : ''}
+                      {selectedFood && qtyMode(selectedFood.unit) === 'gram'
+                        ? t('qtyGramLabel')
+                        : t('qtyServingLabel')}
                     </FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number"
-                        step="any"
-                        min={0.1}
-                        value={field.value ?? ''}
-                        onChange={e => field.onChange(Number(e.target.value))}
-                      />
-                    </FormControl>
+                    <div className="flex items-center gap-2">
+                      <FormControl>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          step="any"
+                          min={0}
+                          max={maxInput(selectedFood?.unit)}
+                          value={Number.isFinite(field.value) ? field.value : ''}
+                          onChange={e => field.onChange(e.target.valueAsNumber)}
+                        />
+                      </FormControl>
+                      <QtyUnitHint food={selectedFood} />
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -390,8 +449,11 @@ export function NutritionView() {
                 <TableHead>{t('mealTypeLabel')}</TableHead>
                 <TableHead>{t('foodLabel')}</TableHead>
                 <TableHead className="text-right">{t('qtyLabel')}</TableHead>
-                <TableHead className="text-right">Calo</TableHead>
-                <TableHead className="text-right">P / C / F</TableHead>
+                <TableHead className="text-right">{t('caloriesCol')}</TableHead>
+                <TableHead className="text-right">{t('macrosCol')}</TableHead>
+                <TableHead className="text-right">
+                  <span className="sr-only">{t('actionsCol')}</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -408,8 +470,8 @@ export function NutritionView() {
                     <TableCell className="font-medium text-primary">
                       {item.food_name || `#${item.food_id}`}
                     </TableCell>
-                    <TableCell className="text-right text-secondary">
-                      {formatNumber(item.qty)} {item.unit || ''}
+                    <TableCell className="text-right whitespace-nowrap text-secondary">
+                      {formatLoggedQty(t, item.unit, item.qty)}
                     </TableCell>
                     <TableCell className="text-right font-semibold text-brand-600">
                       {t('kcalUnit', { value: formatNumber(Math.round(item.calories ?? 0)) })}
@@ -417,6 +479,26 @@ export function NutritionView() {
                     <TableCell className="text-right text-caption text-secondary">
                       {Math.round(pVal * 10) / 10}g / {Math.round(cVal * 10) / 10}g /{' '}
                       {Math.round(fVal * 10) / 10}g
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t('editLog')}
+                          onClick={() => setEditingLog(item)}
+                        >
+                          <PencilSquareIcon />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t('deleteLog')}
+                          onClick={() => setDeletingLog(item)}
+                        >
+                          <TrashIcon />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -442,17 +524,12 @@ export function NutritionView() {
         ) : (
           <div className="grid gap-4">
             {mealPlans.map(plan => (
-              <div
-                key={plan.id}
-                className="grid gap-3 rounded-xl border border-line bg-canvas p-4"
-              >
+              <div key={plan.id} className="grid gap-3 rounded-xl border border-line bg-canvas p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="grid gap-0.5">
                     <p className="text-h4 font-semibold text-primary">{plan.name}</p>
                     {plan.description || plan.goal ? (
-                      <p className="text-caption text-secondary">
-                        {plan.description || plan.goal}
-                      </p>
+                      <p className="text-caption text-secondary">{plan.description || plan.goal}</p>
                     ) : null}
                   </div>
                   <Badge variant="brand">
@@ -476,7 +553,8 @@ export function NutritionView() {
                               {tl(`meals.${entryMeal}`)}
                             </span>
                             <span className="text-body font-medium text-primary">
-                              {entry.food_name || `#${entry.food_id}`} ({entry.qty})
+                              {entry.food_name || `#${entry.food_id}`} (
+                              {formatLoggedQty(t, entry.unit, entry.qty)})
                             </span>
                           </div>
                           {entry.calories ? (
@@ -494,6 +572,206 @@ export function NutritionView() {
           </div>
         )}
       </Card>
+
+      <FoodLogEditDialog
+        log={editingLog}
+        foods={foods}
+        onOpenChange={open => !open && setEditingLog(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deletingLog)}
+        onOpenChange={open => !open && setDeletingLog(null)}
+        description={t('deleteLogConfirm', { name: deletingLog?.food_name ?? '' })}
+        loading={deleteLogMutation.isPending}
+        onConfirm={async () => {
+          if (!deletingLog) return;
+          try {
+            await deleteLogMutation.mutateAsync(deletingLog.id);
+            toast.success(t('deleteLogSuccess'));
+            setDeletingLog(null);
+          } catch (error) {
+            toastError(error);
+          }
+        }}
+      />
     </div>
+  );
+}
+
+/** Sửa món / bữa / khẩu phần của một bản ghi nhật ký ăn uống. */
+function FoodLogEditDialog({
+  log,
+  foods,
+  onOpenChange,
+}: {
+  log: FoodLogItem | null;
+  foods: FoodItem[];
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useTranslations('portal.nutrition');
+  const tc = useTranslations('common');
+  const tv = useTranslations('common.validation');
+  const toastError = useToastApiError();
+  const mutation = useUpdateMemberFoodLogMutation();
+  const schema = useMemo(() => createFoodLogSchema(looseT(tv)), [tv]);
+  const form = useForm<FoodLogFormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: { food_id: 0, meal_type: 'BREAKFAST', qty: 1 },
+  });
+
+  useEffect(() => {
+    if (!log) return;
+    const food = foods.find(f => f.id === log.food_id);
+    const meal = (log.meal_type || log.meal) as MealType;
+    form.reset({
+      food_id: log.food_id,
+      meal_type: MEAL_TYPES.includes(meal) ? meal : 'BREAKFAST',
+      qty: fromServings(food?.unit ?? log.unit, log.qty),
+    });
+  }, [log, foods, form]);
+
+  const watchedFoodId = useWatch({ control: form.control, name: 'food_id' });
+  const selectedFood = foods.find(f => f.id === Number(watchedFoodId));
+
+  const onSubmit = form.handleSubmit(async values => {
+    if (!log) return;
+    const food = foods.find(f => f.id === Number(values.food_id));
+    const limitError = qtyLimitError(t, food, values.qty);
+    if (limitError) {
+      form.setError('qty', { message: limitError });
+      return;
+    }
+    try {
+      await mutation.mutateAsync({
+        id: log.id,
+        payload: {
+          food_id: values.food_id,
+          meal: values.meal_type,
+          qty: toServings(food?.unit, values.qty),
+        },
+      });
+      toast.success(t('editLogSuccess'));
+      onOpenChange(false);
+    } catch (error) {
+      toastError(error);
+    }
+  });
+
+  return (
+    <Dialog open={Boolean(log)} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md" closeLabel={tc('actions.close')}>
+        <DialogHeader>
+          <DialogTitle>{t('editLogTitle')}</DialogTitle>
+          <DialogDescription>{t('editLogDesc')}</DialogDescription>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={onSubmit} className="grid gap-4" noValidate>
+            <FormField
+              control={form.control}
+              name="meal_type"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('mealTypeLabel')}</FormLabel>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {MEAL_TYPES.map(mt => (
+                        <SelectItem key={mt} value={mt}>
+                          {t(`meals.${mt}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="food_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('foodLabel')}</FormLabel>
+                  <Select
+                    value={field.value ? String(field.value) : ''}
+                    onValueChange={val => {
+                      const id = Number(val);
+                      const prev = foods.find(f => f.id === Number(field.value));
+                      const next = foods.find(f => f.id === id);
+                      field.onChange(id);
+                      // Đổi giữa món tính theo gam và theo khẩu phần → đặt lại số lượng mặc định.
+                      if (next && qtyMode(prev?.unit) !== qtyMode(next.unit)) {
+                        form.setValue('qty', defaultInput(next.unit));
+                      }
+                      form.clearErrors('qty');
+                    }}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder={t('foodPlaceholder')} />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {foods.map(food => (
+                        <SelectItem key={food.id} value={String(food.id)}>
+                          {food.name} ({food.calories} kcal / {food.unit})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="qty"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {selectedFood && qtyMode(selectedFood.unit) === 'gram'
+                      ? t('qtyGramLabel')
+                      : t('qtyServingLabel')}
+                  </FormLabel>
+                  <div className="flex items-center gap-2">
+                    <FormControl>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        step="any"
+                        min={0}
+                        max={maxInput(selectedFood?.unit)}
+                        value={Number.isFinite(field.value) ? field.value : ''}
+                        onChange={e => field.onChange(e.target.valueAsNumber)}
+                      />
+                    </FormControl>
+                    <QtyUnitHint food={selectedFood} />
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={mutation.isPending}
+              >
+                {tc('actions.cancel')}
+              </Button>
+              <Button type="submit" disabled={mutation.isPending}>
+                {mutation.isPending ? t('addingFood') : tc('actions.save')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   );
 }

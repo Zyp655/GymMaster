@@ -25,10 +25,11 @@ type fakeRoomRepo struct {
 	nextID uint
 	rooms  map[uint]*entity.Room
 	future map[uint]int64
+	maxCap map[uint]int
 }
 
 func newFakeRoomRepo() *fakeRoomRepo {
-	return &fakeRoomRepo{rooms: map[uint]*entity.Room{}, future: map[uint]int64{}}
+	return &fakeRoomRepo{rooms: map[uint]*entity.Room{}, future: map[uint]int64{}, maxCap: map[uint]int{}}
 }
 
 func (f *fakeRoomRepo) List(context.Context, dto.Query, []uint) ([]entity.Room, int64, error) {
@@ -72,6 +73,9 @@ func (f *fakeRoomRepo) CountFutureSchedules(_ context.Context, id uint, _ time.T
 	return f.future[id], nil
 }
 func (f *fakeRoomRepo) ActiveOptions(context.Context, []uint) ([]entity.Room, error) { return nil, nil }
+func (f *fakeRoomRepo) MaxFutureScheduleCapacity(_ context.Context, id uint, _ time.Time) (int, error) {
+	return f.maxCap[id], nil
+}
 
 func TestRoom_NameUniquePerBranch(t *testing.T) {
 	svc := NewRoomService(newFakeRoomRepo())
@@ -121,6 +125,36 @@ func TestRoom_DeleteBlockedByFutureSchedules(t *testing.T) {
 	repo.future[r.ID] = 0
 	require.NoError(t, svc.Delete(ownerCtx(), r.ID))
 	assert.Empty(t, repo.rooms)
+}
+
+func TestRoom_UpdateBlockedByUpcomingSchedules(t *testing.T) {
+	repo := newFakeRoomRepo()
+	svc := NewRoomService(repo)
+	r, err := svc.Create(ownerCtx(), roomv1.RoomInput{BranchID: 1, Name: "P1", Capacity: 20, Status: "ACTIVE"})
+	require.NoError(t, err)
+	repo.future[r.ID] = 2
+	repo.maxCap[r.ID] = 15
+
+	for name, in := range map[string]roomv1.RoomInput{
+		"đổi chi nhánh":          {BranchID: 2, Name: "P1", Capacity: 20, Status: "ACTIVE"},
+		"ngừng hoạt động":        {BranchID: 1, Name: "P1", Capacity: 20, Status: "INACTIVE"},
+		"giảm dưới sức chứa lớp": {BranchID: 1, Name: "P1", Capacity: 10, Status: "ACTIVE"},
+	} {
+		_, err := svc.Update(ownerCtx(), r.ID, in)
+		require.Error(t, err, name)
+		assert.Equal(t, rescode.Conflict.Code(), codeOf(err), name)
+	}
+	assert.Equal(t, 20, repo.rooms[r.ID].Capacity)
+
+	// Giảm nhưng vẫn ≥ sức chứa lớp lớn nhất, đổi tên → được.
+	upd, err := svc.Update(ownerCtx(), r.ID, roomv1.RoomInput{BranchID: 1, Name: "P1 mới", Capacity: 15, Status: "ACTIVE"})
+	require.NoError(t, err)
+	assert.Equal(t, 15, upd.Capacity)
+
+	// Hết lịch sắp tới → chuyển chi nhánh được.
+	repo.future[r.ID], repo.maxCap[r.ID] = 0, 0
+	_, err = svc.Update(ownerCtx(), r.ID, roomv1.RoomInput{BranchID: 2, Name: "P1 mới", Capacity: 5, Status: "ACTIVE"})
+	require.NoError(t, err)
 }
 
 // ---- shift ------------------------------------------------------------------

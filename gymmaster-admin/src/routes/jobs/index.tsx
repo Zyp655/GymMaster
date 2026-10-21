@@ -8,6 +8,7 @@ import {
   Drawer,
   Form,
   Input,
+  List,
   Modal,
   Result,
   Row,
@@ -15,6 +16,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -30,7 +32,10 @@ import ConfirmButton from '@/components/ConfirmButton';
 import DateText from '@/components/DateText';
 import PageTitle from '@/components/PageTitle';
 import StatusTag from '@/components/StatusTag';
+import { PERM } from '@/constants/permissions';
 import type { StatusMeta } from '@/constants/status';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { usePermission } from '@/hooks/usePermission';
 import { getErrorMessage, setFormError, showError } from '@/utils/errors';
 import { formatDateTime, formatNumber } from '@/utils/format';
 
@@ -89,7 +94,11 @@ function JobRunsDrawer({ jobName, onClose }: { jobName: string | null; onClose: 
       title: 'Thông báo / Lỗi',
       dataIndex: 'message',
       render: (v: string) =>
-        v ? <Typography.Text type="danger">{v}</Typography.Text> : <Typography.Text type="secondary">—</Typography.Text>,
+        v ? (
+          <Typography.Text type="danger">{v}</Typography.Text>
+        ) : (
+          <Typography.Text type="secondary">—</Typography.Text>
+        ),
     },
   ];
 
@@ -201,7 +210,11 @@ function TestEmailModal({ open, onClose }: { open: boolean; onClose: () => void 
             { type: 'email', message: 'Địa chỉ email không hợp lệ' },
           ]}
         >
-          <Input placeholder="VD: admin@gymmaster.vn" autoFocus onPressEnter={() => void handleSubmit()} />
+          <Input
+            placeholder="VD: admin@gymmaster.vn"
+            autoFocus
+            onPressEnter={() => void handleSubmit()}
+          />
         </Form.Item>
       </Form>
     </Modal>
@@ -236,22 +249,65 @@ export default function JobsPage() {
     onError: (e) => showError(e, 'Không thể chạy job'),
   });
 
+  const isMobile = useIsMobile();
+  const { can } = usePermission();
+  const canManage = can(PERM.JOB_MANAGE);
+
+  const renderActions = (r: JobInfo, iconOnly: boolean) => (
+    <Space size={6}>
+      {canManage && (
+        <Tooltip title={iconOnly ? 'Chạy ngay' : undefined}>
+          <span>
+            <ConfirmButton
+              size="small"
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              disabled={r.running}
+              confirmTitle={`Chạy ngay job "${r.name}"?`}
+              confirmContent={r.description}
+              okText="Chạy ngay"
+              onConfirm={() => runJob.mutateAsync(r.name)}
+              aria-label="Chạy ngay"
+            >
+              {iconOnly ? null : 'Chạy ngay'}
+            </ConfirmButton>
+          </span>
+        </Tooltip>
+      )}
+      <Tooltip title={iconOnly ? 'Lịch sử chạy' : undefined}>
+        <Button
+          size="small"
+          icon={<HistoryOutlined />}
+          onClick={() => setHistoryJob(r.name)}
+          aria-label="Lịch sử chạy"
+        >
+          {iconOnly ? null : 'Lịch sử'}
+        </Button>
+      </Tooltip>
+    </Space>
+  );
+
   const columns = useMemo<ColumnsType<JobInfo>>(
     () => [
       {
         title: 'Job định kỳ',
         key: 'name',
+        width: 320,
         render: (_, r) => (
-          <Space direction="vertical" size={2}>
+          <Space direction="vertical" size={2} style={{ maxWidth: 320 }}>
             <Space size={6}>
               <span className="code-text" style={{ fontWeight: 600 }}>
                 {r.name}
               </span>
               {r.running && <Tag color="processing">Đang chạy</Tag>}
             </Space>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            <Typography.Paragraph
+              type="secondary"
+              style={{ fontSize: 12, marginBottom: 0 }}
+              ellipsis={{ rows: 2, tooltip: r.description }}
+            >
               {r.description}
-            </Typography.Text>
+            </Typography.Paragraph>
           </Space>
         ),
       },
@@ -281,6 +337,7 @@ export default function JobsPage() {
       {
         title: 'Lần chạy gần nhất',
         key: 'last_run',
+        width: 230,
         render: (_, r) => {
           const lr = r.last_run;
           if (!lr) return <Typography.Text type="secondary">Chưa từng chạy</Typography.Text>;
@@ -310,32 +367,11 @@ export default function JobsPage() {
         title: '',
         key: 'actions',
         fixed: 'right',
-        width: 210,
-        render: (_, r) => (
-          <Space size={6}>
-            <ConfirmButton
-              size="small"
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              disabled={r.running}
-              confirmTitle={`Chạy ngay job "${r.name}"?`}
-              confirmContent={r.description}
-              okText="Chạy ngay"
-              onConfirm={() => runJob.mutateAsync(r.name)}
-            >
-              Chạy ngay
-            </ConfirmButton>
-            <Button
-              size="small"
-              icon={<HistoryOutlined />}
-              onClick={() => setHistoryJob(r.name)}
-            >
-              Lịch sử
-            </Button>
-          </Space>
-        ),
+        width: 84,
+        render: (_, r) => renderActions(r, true),
       },
     ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [runJob],
   );
 
@@ -356,9 +392,11 @@ export default function JobsPage() {
             >
               Làm mới
             </Button>
-            <Button icon={<MailOutlined />} onClick={() => setEmailModalOpen(true)}>
-              Gửi email thử
-            </Button>
+            {canManage && (
+              <Button icon={<MailOutlined />} onClick={() => setEmailModalOpen(true)}>
+                Gửi email thử
+              </Button>
+            )}
           </Space>
         </Col>
       </Row>
@@ -369,6 +407,41 @@ export default function JobsPage() {
           title="Không tải được danh sách job định kỳ"
           subTitle={getErrorMessage(query.error)}
           extra={<Button onClick={() => void query.refetch()}>Thử lại</Button>}
+        />
+      ) : isMobile ? (
+        <List<JobInfo>
+          loading={query.isLoading}
+          dataSource={query.data ?? []}
+          locale={{ emptyText: 'Chưa có job hệ thống nào' }}
+          renderItem={(r) => (
+            <List.Item style={{ display: 'block', paddingInline: 0 }}>
+              <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                <Space size={6} wrap>
+                  <span className="code-text" style={{ fontWeight: 600, wordBreak: 'break-all' }}>
+                    {r.name}
+                  </span>
+                  {r.running && <Tag color="processing">Đang chạy</Tag>}
+                  <Tag className="code-text">{r.spec}</Tag>
+                </Space>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {r.description}
+                </Typography.Text>
+                <Typography.Text style={{ fontSize: 12 }}>
+                  Kế tiếp: {r.next_run_at ? formatDateTime(r.next_run_at) : '—'}
+                  {' · '}Gần nhất:{' '}
+                  {r.last_run ? (
+                    <>
+                      <StatusTag status={r.last_run.status} map={JOB_RUN_STATUS_MAP} />
+                      {formatDateTime(r.last_run.started_at)}
+                    </>
+                  ) : (
+                    'Chưa từng chạy'
+                  )}
+                </Typography.Text>
+                {renderActions(r, false)}
+              </Space>
+            </List.Item>
+          )}
         />
       ) : (
         <Table<JobInfo>

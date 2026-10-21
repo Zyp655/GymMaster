@@ -68,6 +68,11 @@ const (
 	OnlineTxnSuccess = "SUCCESS"
 	OnlineTxnFailed  = "FAILED"
 	OnlineTxnExpired = "EXPIRED"
+	// OnlineTxnNeedsRefund: đã nhận tiền VNPay nhưng không (hoặc không hết) ghi vào hóa đơn
+	// (hóa đơn đã thu đủ/đã hủy hoặc thu vượt số còn nợ) – nhân viên cần hoàn cho khách.
+	OnlineTxnNeedsRefund = "NEEDS_REFUND"
+	// OnlineTxnRefunded: đã hoàn toàn bộ số tiền của giao dịch.
+	OnlineTxnRefunded = "REFUNDED"
 )
 
 // Subscription là một lần đăng ký gói tập của hội viên.
@@ -89,8 +94,11 @@ type Subscription struct {
 	PreviousID        *uint
 	SoldBy            *uint
 	Note              string `gorm:"type:varchar(500);not null;default:''"`
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// CarriedPaidBase: gói nhận chuyển nhượng – giá trị đã trả (sau hoàn) mang theo từ gói gốc tại ngày chuyển,
+	// dùng làm gốc khấu trừ khi nâng cấp (hóa đơn của gói này chỉ là phí chuyển nhượng). NULL = gói bán thường.
+	CarriedPaidBase *float64 `gorm:"type:numeric(14,2)"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (Subscription) TableName() string { return "subscriptions" }
@@ -146,6 +154,9 @@ type Invoice struct {
 	VoidedAt       *time.Time
 	VoidedBy       *uint
 	VoidReason     string `gorm:"type:varchar(255);not null;default:''"`
+	// WriteOffAmount: phần nợ được xóa khi hủy gói (total = subtotal − discount − write_off_amount).
+	WriteOffAmount float64 `gorm:"type:numeric(14,2);not null;default:0"`
+	WriteOffReason string  `gorm:"type:varchar(255);not null;default:''"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 
@@ -214,8 +225,12 @@ type OnlinePaymentTxn struct {
 	ProviderTxnNo string         `gorm:"type:varchar(100);not null;default:''"`
 	BankCode      string         `gorm:"type:varchar(50);not null;default:''"`
 	RawIPN        datatypes.JSON `gorm:"column:raw_ipn;type:jsonb"`
-	CreatedAt     time.Time
-	PaidAt        *time.Time
+	// RecordedAmount: phần đã ghi nhận vào hóa đơn (NULL = dữ liệu cũ, coi như toàn bộ Amount).
+	RecordedAmount *float64 `gorm:"type:numeric(14,2)"`
+	RefundedAmount float64  `gorm:"type:numeric(14,2);not null;default:0"`
+	Note           string   `gorm:"type:varchar(255);not null;default:''"`
+	CreatedAt      time.Time
+	PaidAt         *time.Time
 }
 
 func (OnlinePaymentTxn) TableName() string { return "online_payment_txns" }

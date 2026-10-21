@@ -273,9 +273,15 @@ func (r *equipmentRepository) MaintenanceSummary(ctx context.Context, branchIDs 
 	}
 
 	out := &MaintenanceSummaryData{}
-	if err := base().Select("COALESCE(SUM(ml.cost), 0) AS total_cost, COUNT(*) AS total_logs").Scan(out).Error; err != nil {
+	// Tổng quát quét vào struct riêng (chỉ cột vô hướng) – GORM không Scan được vào struct có field slice.
+	var totals struct {
+		TotalCost float64
+		TotalLogs int64
+	}
+	if err := base().Select("COALESCE(SUM(ml.cost), 0) AS total_cost, COUNT(*) AS total_logs").Scan(&totals).Error; err != nil {
 		return nil, err
 	}
+	out.TotalCost, out.TotalLogs = totals.TotalCost, totals.TotalLogs
 	if err := base().
 		Select("eq.branch_id AS branch_id, COALESCE(b.name, '') AS branch_name, COALESCE(SUM(ml.cost), 0) AS total_cost, COUNT(*) AS total_logs").
 		Group("eq.branch_id, b.name").
@@ -291,6 +297,22 @@ func (r *equipmentRepository) MaintenanceSummary(ctx context.Context, branchIDs 
 		return nil, err
 	}
 	return out, nil
+}
+
+// EquipmentRoomLookup tra chi nhánh của phòng tập (kiểm tra thiết bị đặt đúng phòng thuộc chi nhánh).
+type EquipmentRoomLookup interface {
+	RoomBranchID(ctx context.Context, roomID uint) (uint, error)
+}
+
+func (r *equipmentRepository) RoomBranchID(ctx context.Context, roomID uint) (uint, error) {
+	var ids []uint
+	if err := postgres.Conn(ctx, r.db).Table("rooms").Where("id = ?", roomID).Pluck("branch_id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, gorm.ErrRecordNotFound
+	}
+	return ids[0], nil
 }
 
 func (r *equipmentRepository) ListDueMaintenance(ctx context.Context, today time.Time) ([]EquipmentRow, error) {

@@ -20,6 +20,7 @@ import { formatMoney } from '@/utils/format';
 import PlanForm from './PlanForm';
 import {
   ACCESS_SCOPE_LABELS,
+  accessHoursText,
   PLAN_TYPE_META,
   PLAN_TYPE_OPTIONS,
   SALE_STATUS_MAP,
@@ -118,6 +119,23 @@ export function MembershipPlansDesktop() {
             </Tag>
           ) : (
             <Typography.Text type="secondary">—</Typography.Text>
+          ),
+      },
+      {
+        title: 'Vé mời/tháng',
+        dataIndex: 'guest_passes_per_month',
+        align: 'right',
+        render: (v?: number) => (v ? v : <Typography.Text type="secondary">—</Typography.Text>),
+      },
+      {
+        title: 'Khung giờ vào tập',
+        key: 'access_hours',
+        width: 200,
+        render: (_, r) =>
+          r.access_hours?.length ? (
+            accessHoursText(r.access_hours)
+          ) : (
+            <Typography.Text type="secondary">Mọi giờ</Typography.Text>
           ),
       },
       { title: 'Thứ tự', dataIndex: 'sort_order', sorter: true, align: 'right' },
@@ -259,6 +277,8 @@ export function MembershipPlansMobile() {
           ['Bảo lưu', freezeText(r)],
           ['Lớp nhóm', r.includes_classes ? 'Có' : 'Không'],
           ['Phí chuyển nhượng', formatMoney(r.transfer_fee)],
+          ['Vé mời / tháng', String(r.guest_passes_per_month ?? 0)],
+          ['Khung giờ vào tập', accessHoursText(r.access_hours)],
         ]}
         actions={(r) => [
           {

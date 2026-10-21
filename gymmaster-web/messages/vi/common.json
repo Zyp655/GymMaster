@@ -57,7 +57,8 @@
     "minLength": "Tối thiểu {min} ký tự",
     "maxLength": "Tối đa {max} ký tự",
     "phone": "Số điện thoại không hợp lệ",
-    "time": "Giờ không hợp lệ (định dạng HH:mm)"
+    "time": "Giờ không hợp lệ (định dạng HH:mm)",
+    "positiveNumber": "Giá trị phải lớn hơn 0"
   },
   "confirm": {
     "deleteTitle": "Xác nhận xóa",
@@ -67,7 +68,8 @@
   "notFound": {
     "title": "Không tìm thấy trang",
     "description": "Trang bạn tìm không tồn tại hoặc đã bị di chuyển.",
-    "backHome": "Về trang tổng quan"
+    "backHome": "Về trang chủ",
+    "backDashboard": "Về trang tổng quan"
   },
   "errorPage": {
     "title": "Đã xảy ra lỗi",

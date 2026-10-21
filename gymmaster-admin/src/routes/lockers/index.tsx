@@ -80,33 +80,35 @@ import { useTableQuery } from '@/hooks/useTableQuery';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
 import { showError } from '@/utils/errors';
 import { DATE_FORMAT, formatDate, formatDateTime, formatMoney, toApiDate } from '@/utils/format';
+import './lockers.css';
 
 const LOCKER_VISUAL_STYLES: Record<
   LockerStatus,
   { bg: string; border: string; text: string; badge: string }
 > = {
+  // Biến CSS định nghĩa ở lockers.css (có biến thể chế độ tối).
   AVAILABLE: {
-    bg: '#f0fdf4',
-    border: '#86efac',
-    text: '#166534',
+    bg: 'var(--locker-available-bg)',
+    border: 'var(--locker-available-border)',
+    text: 'var(--locker-available-text)',
     badge: '#16a34a',
   },
   OCCUPIED: {
-    bg: '#fff7ed',
-    border: '#fdba74',
-    text: '#9a3412',
+    bg: 'var(--locker-occupied-bg)',
+    border: 'var(--locker-occupied-border)',
+    text: 'var(--locker-occupied-text)',
     badge: '#ea580c',
   },
   RENTED: {
-    bg: '#eff6ff',
-    border: '#93c5fd',
-    text: '#1e40af',
+    bg: 'var(--locker-rented-bg)',
+    border: 'var(--locker-rented-border)',
+    text: 'var(--locker-rented-text)',
     badge: '#2563eb',
   },
   BROKEN: {
-    bg: '#fef2f2',
-    border: '#fca5a5',
-    text: '#991b1b',
+    bg: 'var(--locker-broken-bg)',
+    border: 'var(--locker-broken-border)',
+    text: 'var(--locker-broken-text)',
     badge: '#dc2626',
   },
 };
@@ -289,7 +291,7 @@ function AssignLockerModal({
     if (rentalType === 'MONTHLY') {
       const m = Number(months) || 1;
       form.setFieldsValue({
-        price: (locker.monthly_fee || 150000) * m,
+        price: (locker.monthly_fee ?? 150000) * m,
         end_at: dayjs().add(m, 'month'),
       });
     } else {
@@ -343,11 +345,7 @@ function AssignLockerModal({
         onFinish={(v) => assignMut.mutate(v)}
         style={{ marginTop: 12 }}
       >
-        <Form.Item
-          name="type"
-          label="Hình thức sử dụng tủ"
-          rules={[{ required: true }]}
-        >
+        <Form.Item name="type" label="Hình thức sử dụng tủ" rules={[{ required: true }]}>
           <Radio.Group
             optionType="button"
             buttonStyle="solid"
@@ -424,7 +422,10 @@ function OccupiedLockerModal({
 
   if (!locker) return null;
   const rental = locker.active_rental ?? locker.current_rental;
-  const memberName = rental?.member_name ?? locker.member_name ?? (rental?.member_id ? `Hội viên #${rental.member_id}` : '—');
+  const memberName =
+    rental?.member_name ??
+    locker.member_name ??
+    (rental?.member_id ? `Hội viên #${rental.member_id}` : '—');
   const memberCode = rental?.member_code ?? locker.member_code;
   const rType = rental?.type ?? locker.rental_type;
   const endAt = rental?.end_at ?? locker.end_at;
@@ -486,9 +487,7 @@ function OccupiedLockerModal({
               )}
             </Descriptions.Item>
             {endAt && (
-              <Descriptions.Item label="Hạn sử dụng đến">
-                {formatDateTime(endAt)}
-              </Descriptions.Item>
+              <Descriptions.Item label="Hạn sử dụng đến">{formatDateTime(endAt)}</Descriptions.Item>
             )}
           </>
         )}
@@ -630,11 +629,20 @@ function LockerBoardTab({
         </Row>
       </Card>
 
+      {/* Chữ dùng màu văn bản chính (colorText) để đủ tương phản trên nền xanh nhạt ở cả chế độ sáng/tối. */}
       <Alert
         type="info"
         showIcon
-        message="Hướng dẫn thao tác nhanh trên sơ đồ tủ"
-        description="Bấm vào ô tủ Trống (màu xanh lá) để Gán tủ theo lượt hoặc Cho thuê tủ tháng. Bấm vào ô tủ Đang dùng (màu cam / xanh dương) để xem hội viên và Giải phóng tủ."
+        message={<Typography.Text strong>Hướng dẫn thao tác nhanh trên sơ đồ tủ</Typography.Text>}
+        description={
+          <Typography.Text>
+            Bấm vào ô tủ <Typography.Text strong>Trống</Typography.Text> (màu xanh lá) để Gán tủ
+            theo lượt hoặc Cho thuê tủ tháng. Bấm vào ô tủ{' '}
+            <Typography.Text strong>Đang dùng</Typography.Text> (màu cam / xanh dương) để xem hội
+            viên và Giải phóng tủ. Tủ <Typography.Text strong>Hỏng</Typography.Text> giữ nguyên
+            trạng thái khi giải phóng lượt thuê.
+          </Typography.Text>
+        }
       />
 
       {boardQuery.isLoading ? (
@@ -687,20 +695,16 @@ function LockerBoardTab({
                       <div
                         key={lk.id}
                         onClick={() => handleTileClick(lk)}
-                        style={{
-                          background: st.bg,
-                          border: `1.5px solid ${st.border}`,
-                          borderRadius: 10,
-                          padding: '10px 12px',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'space-between',
-                          minHeight: 104,
-                        }}
+                        className="locker-tile"
+                        style={{ background: st.bg, border: `1.5px solid ${st.border}` }}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
                           <Typography.Text
                             strong
                             className="code-text"
@@ -711,21 +715,27 @@ function LockerBoardTab({
                           <StatusTag status={lk.status} map={LOCKER_STATUS_MAP} />
                         </div>
 
-                        <div style={{ marginTop: 6, fontSize: 12, color: '#475569' }}>
+                        <div className="locker-tile__meta">
                           {memberLabel ? (
-                            <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                            <div className="locker-tile__member">
                               <UserOutlined /> {memberLabel}
                             </div>
                           ) : (
                             <div>Cỡ: {LOCKER_SIZE_LABELS[lk.size] ?? lk.size}</div>
                           )}
                           {lk.status === 'RENTED' && (rental?.end_at || lk.end_at) && (
-                            <div style={{ fontSize: 11, color: '#1e40af', marginTop: 2 }}>
+                            <div
+                              className="locker-tile__note"
+                              style={{ color: LOCKER_VISUAL_STYLES.RENTED.text }}
+                            >
                               Hạn: {formatDate(rental?.end_at ?? lk.end_at)}
                             </div>
                           )}
                           {lk.status === 'AVAILABLE' && (
-                            <div style={{ fontSize: 11, color: '#15803d', marginTop: 2 }}>
+                            <div
+                              className="locker-tile__note"
+                              style={{ color: LOCKER_VISUAL_STYLES.AVAILABLE.text }}
+                            >
                               {formatMoney(lk.monthly_fee)}/tháng
                             </div>
                           )}
@@ -981,56 +991,58 @@ export default function LockersPage() {
   });
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <PageTitle
-        title="Sơ đồ tủ đồ & Dịch vụ thuê tủ"
-        subtitle="Quản lý sơ đồ tủ đồ trực quan theo khu vực, gán tủ theo lượt check-in hoặc cho thuê tủ cố định theo tháng"
-      />
+    <Card variant="borderless" className="page-card">
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <PageTitle
+          title="Sơ đồ tủ đồ & Dịch vụ thuê tủ"
+          subtitle="Quản lý sơ đồ tủ đồ trực quan theo khu vực, gán tủ theo lượt check-in hoặc cho thuê tủ cố định theo tháng"
+        />
 
-      <Tabs
-        defaultActiveKey="board"
-        items={[
-          {
-            key: 'board',
-            label: (
-              <Space size={6}>
-                <AppstoreOutlined />
-                <span>Sơ đồ tủ trực quan (Board)</span>
-              </Space>
-            ),
-            children: (
-              <LockerBoardTab
-                canManage={canManage}
-                onAddLocker={() => setFormModal({ open: true, record: null })}
-                onEditLocker={(lk) => setFormModal({ open: true, record: lk })}
-              />
-            ),
-          },
-          {
-            key: 'list',
-            label: (
-              <Space size={6}>
-                <TableOutlined />
-                <span>Danh sách & Quản lý tủ đồ</span>
-              </Space>
-            ),
-            children: (
-              <LockerListTab
-                canManage={canManage}
-                onAddLocker={() => setFormModal({ open: true, record: null })}
-                onEditLocker={(lk) => setFormModal({ open: true, record: lk })}
-              />
-            ),
-          },
-        ]}
-      />
+        <Tabs
+          defaultActiveKey="board"
+          items={[
+            {
+              key: 'board',
+              label: (
+                <Space size={6}>
+                  <AppstoreOutlined />
+                  <span>Sơ đồ tủ trực quan (Board)</span>
+                </Space>
+              ),
+              children: (
+                <LockerBoardTab
+                  canManage={canManage}
+                  onAddLocker={() => setFormModal({ open: true, record: null })}
+                  onEditLocker={(lk) => setFormModal({ open: true, record: lk })}
+                />
+              ),
+            },
+            {
+              key: 'list',
+              label: (
+                <Space size={6}>
+                  <TableOutlined />
+                  <span>Danh sách & Quản lý tủ đồ</span>
+                </Space>
+              ),
+              children: (
+                <LockerListTab
+                  canManage={canManage}
+                  onAddLocker={() => setFormModal({ open: true, record: null })}
+                  onEditLocker={(lk) => setFormModal({ open: true, record: lk })}
+                />
+              ),
+            },
+          ]}
+        />
 
-      <LockerFormModal
-        open={formModal.open}
-        record={formModal.record}
-        readOnly={!canManage}
-        onClose={() => setFormModal({ open: false, record: null })}
-      />
-    </Space>
+        <LockerFormModal
+          open={formModal.open}
+          record={formModal.record}
+          readOnly={!canManage}
+          onClose={() => setFormModal({ open: false, record: null })}
+        />
+      </Space>
+    </Card>
   );
 }

@@ -70,7 +70,7 @@ type ScheduleItem struct {
 	*classv1.ClassSchedule
 	MyBooking      *classv1.ClassBooking `json:"my_booking"      dc:"Lượt đặt còn hiệu lực của hội viên (BOOKED/WAITLIST/ATTENDED/NO_SHOW) hoặc null"`
 	CancelDeadline time.Time             `json:"cancel_deadline" dc:"Hội viên tự hủy được trước thời điểm này"`
-	Bookable       bool                  `json:"bookable"        dc:"Trong khoảng được đặt trước (booking.advance_days) và chưa bắt đầu"`
+	Bookable       bool                  `json:"bookable"        dc:"Trong khoảng được đặt trước (booking.advance_days), chưa bắt đầu và hội viên không bị khóa đặt lớp"`
 }
 
 // Booking: lượt đặt lớp của hội viên kèm hạn tự hủy.
@@ -174,6 +174,7 @@ type ListClassesRes struct {
 	To                  string          `json:"to"`
 	AdvanceDays         int             `json:"advance_days"          dc:"booking.advance_days"`
 	CancelBeforeMinutes int             `json:"cancel_before_minutes" dc:"booking.cancel_before_minutes"`
+	BookingBlockedUntil *time.Time      `json:"booking_blocked_until" dc:"Hội viên bị khóa đặt lớp đến thời điểm này (vắng mặt nhiều lần); null = không bị khóa"`
 	Items               []*ScheduleItem `json:"items"`
 }
 

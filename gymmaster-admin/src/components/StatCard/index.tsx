@@ -1,14 +1,14 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { Card, Typography } from 'antd';
 import { formatMoney, formatNumber } from '@/utils/format';
-import { CARD_STYLE, TONES } from './tokens';
+import { CARD_STYLE, INK, TONES } from './tokens';
 
 const { Text } = Typography;
 
-const INK = { value: '#111827', label: '#6B7280' };
-
 const STAT_BODY_STYLE: CSSProperties = {
   padding: '14px 16px',
+  // Cho phép cỡ chữ số liệu co theo bề rộng thẻ (cqi) → số tiền dài không tràn/xuống dòng.
+  containerType: 'inline-size',
   height: '100%',
   display: 'flex',
   flexDirection: 'column',
@@ -19,7 +19,9 @@ const VALUE_STYLE: CSSProperties = {
   alignItems: 'baseline',
   flexWrap: 'wrap',
   gap: 5,
-  fontSize: 22,
+  flex: '1 1 auto',
+  minWidth: 0,
+  fontSize: 'clamp(15px, 9cqi, 22px)',
   fontWeight: 700,
   lineHeight: '28px',
   color: INK.value,
@@ -94,6 +96,7 @@ export function StatCard({
 
   return (
     <Card
+      className="gm-stat-card"
       loading={loading}
       style={{ ...CARD_STYLE, cursor: onClick ? 'pointer' : undefined }}
       styles={{ body: STAT_BODY_STYLE }}
@@ -102,13 +105,15 @@ export function StatCard({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
         <div style={VALUE_STYLE}>
-          {shown}
+          {/* Giữ số và "₫" trên cùng một dòng. */}
+          <span style={{ whiteSpace: 'nowrap' }}>{shown}</span>
           {valueSuffix ? (
             <span style={{ fontSize: 13, fontWeight: 500, color: INK.label }}>{valueSuffix}</span>
           ) : null}
         </div>
         {icon ? (
           <span
+            className="gm-stat-card__icon"
             style={{
               width: 34,
               height: 34,

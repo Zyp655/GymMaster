@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -97,11 +97,10 @@ export function ReviewDialog({
   useEffect(() => {
     if (target) {
       form.reset({ rating: 5, comment: '' });
-      setHoverRating(0);
     }
   }, [target, form]);
 
-  const currentRating = form.watch('rating');
+  const currentRating = useWatch({ control: form.control, name: 'rating' }) ?? 5;
   const activeStars = hoverRating || currentRating;
 
   const onSubmit = form.handleSubmit(async values => {

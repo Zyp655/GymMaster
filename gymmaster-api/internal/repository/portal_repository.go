@@ -66,6 +66,8 @@ type (
 		Freezes(ctx context.Context, memberID uint) ([]PortalFreezeRow, error)
 		// UpdateProfile cập nhật các cột hồ sơ hội viên được phép tự sửa.
 		UpdateProfile(ctx context.Context, memberID uint, fields map[string]any) error
+		// EmailInUse: email (không phân biệt hoa thường) đã thuộc hội viên khác hoặc tài khoản khác (chưa xóa).
+		EmailInUse(ctx context.Context, email string, memberID uint, userID *uint) (bool, error)
 		// FindContract: hợp đồng PT (không khóa) kèm HLV, chi nhánh, giờ mở cửa.
 		FindContract(ctx context.Context, id uint) (*PortalContract, error)
 		// TrainerBusy: buổi PT (SCHEDULED/COMPLETED) + lớp chưa hủy của HLV giao với [from, to).
@@ -130,6 +132,24 @@ func (r *portalRepository) Freezes(ctx context.Context, memberID uint) ([]Portal
 
 func (r *portalRepository) UpdateProfile(ctx context.Context, memberID uint, fields map[string]any) error {
 	return postgres.Conn(ctx, r.db).Model(&entity.Member{}).Where("id = ?", memberID).Updates(fields).Error
+}
+
+func (r *portalRepository) EmailInUse(ctx context.Context, email string, memberID uint, userID *uint) (bool, error) {
+	db := postgres.Conn(ctx, r.db)
+	var n int64
+	if err := db.Table("members").
+		Where("deleted_at IS NULL AND id <> ? AND LOWER(email) = LOWER(?)", memberID, email).
+		Count(&n).Error; err != nil || n > 0 {
+		return n > 0, err
+	}
+	q := db.Table("users").Where("deleted_at IS NULL AND LOWER(email) = LOWER(?)", email)
+	if userID != nil {
+		q = q.Where("id <> ?", *userID)
+	}
+	if err := q.Count(&n).Error; err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 func (r *portalRepository) FindContract(ctx context.Context, id uint) (*PortalContract, error) {

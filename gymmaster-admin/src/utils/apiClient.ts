@@ -19,9 +19,10 @@ export interface Envelope<T = unknown> {
   data: T;
 }
 
-/** Mã lỗi nghiệp vụ backend (HTTP status = code / 100). */
+/** Mã lỗi nghiệp vụ backend (trường `code` trong body; HTTP status chuẩn hóa theo nhóm mã – xem rescode). */
 export const ErrorCode = {
   OK: 0,
+  /** @deprecated Backend đã chuẩn hóa lỗi validate về 40000; giữ lại để tương thích. */
   VALIDATION: 51,
   BAD_REQUEST: 40000,
   UNAUTHORIZED: 40100,
@@ -35,6 +36,8 @@ export const ErrorCode = {
   INTERNAL: 50000,
   /** Mã nội bộ phía FE: không kết nối được máy chủ. */
   NETWORK: -1,
+  /** Mã nội bộ phía FE: request bị hủy chủ động (AbortController) – không phải lỗi. */
+  CANCELED: -2,
 } as const;
 
 export class ApiError extends Error {
@@ -122,6 +125,9 @@ export function toApiError(error: unknown): ApiError {
         res.status * 100,
         res.status,
       );
+    }
+    if (error.code === AxiosError.ERR_CANCELED) {
+      return new ApiError('Yêu cầu đã bị hủy', ErrorCode.CANCELED, 0);
     }
     if (error.code === AxiosError.ECONNABORTED || error.code === 'ETIMEDOUT') {
       return new ApiError('Máy chủ phản hồi quá lâu, vui lòng thử lại', ErrorCode.NETWORK, 0);

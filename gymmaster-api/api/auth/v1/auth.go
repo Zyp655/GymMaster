@@ -24,6 +24,7 @@ type LoginReq struct {
 	g.Meta   `path:"/auth/login" method:"post" tags:"Xác thực" summary:"Đăng nhập bằng email + mật khẩu"`
 	Email    string `json:"email"    v:"required|email#Vui lòng nhập email|Email không hợp lệ"`
 	Password string `json:"password" v:"required#Vui lòng nhập mật khẩu"`
+	MFACode  string `json:"mfa_code" dc:"Mã TOTP 6 số hoặc mã khôi phục – chỉ cần khi tài khoản đã bật 2FA (thiếu → 40107 MFA_REQUIRED)"`
 }
 type LoginRes = TokenRes
 
@@ -34,8 +35,8 @@ type RefreshReq struct {
 type RefreshRes = TokenRes
 
 type LogoutReq struct {
-	g.Meta       `path:"/auth/logout" method:"post" tags:"Xác thực" summary:"Đăng xuất (thu hồi refresh token)"`
-	RefreshToken string `json:"refresh_token"`
+	g.Meta       `path:"/auth/logout" method:"post" tags:"Xác thực" summary:"Đăng xuất (thu hồi refresh token, không cần access token còn hạn)"`
+	RefreshToken string `json:"refresh_token" dc:"Refresh token cần thu hồi"`
 }
 type LogoutRes struct{}
 
@@ -75,23 +76,24 @@ type RegisterMemberReq struct {
 	g.Meta   `path:"/auth/register-member" method:"post" tags:"Xác thực" summary:"Hội viên tự đăng ký tài khoản"`
 	FullName string `json:"full_name" v:"required|length:2,150#Vui lòng nhập họ tên|Họ tên từ 2 đến 150 ký tự"`
 	Phone    string `json:"phone"     v:"required|length:9,20#Vui lòng nhập số điện thoại|Số điện thoại không hợp lệ"`
-	Email    string `json:"email"     v:"required|email#Vui lòng nhập email|Email không hợp lệ"`
-	Password string `json:"password"  v:"required|length:8,72#Vui lòng nhập mật khẩu|Mật khẩu từ 8 đến 72 ký tự"`
-	BranchID uint   `json:"branch_id"`
+	Email    string `json:"email"     v:"email#Email không hợp lệ" dc:"Bắt buộc khi tạo hội viên mới; bỏ qua khi SĐT trùng hồ sơ có sẵn (OTP gửi tới email trong hồ sơ)"`
+	Password string `json:"password"  v:"length:8,72#Mật khẩu từ 8 đến 72 ký tự" dc:"Bắt buộc khi tạo hội viên mới; bỏ qua khi SĐT trùng hồ sơ có sẵn (mật khẩu gửi ở bước verify-member-otp)"`
+	BranchID *int   `json:"branch_id" dc:"Bỏ trống = chi nhánh mặc định; nếu gửi phải > 0"`
 }
 
 type RegisterMemberRes struct {
 	RequiresOTP bool      `json:"requires_otp"`
 	Message     string    `json:"message"`
+	MaskedEmail string    `json:"masked_email,omitempty" dc:"Email (đã che) trong hồ sơ hội viên nhận OTP – chỉ có khi requires_otp=true"`
 	Token       *TokenRes `json:"token,omitempty"`
 }
 
 type VerifyMemberOTPReq struct {
-	g.Meta `path:"/auth/verify-member-otp" method:"post" tags:"Xác thực" summary:"Xác thực OTP liên kết hồ sơ hội viên"`
-	Phone  string `json:"phone" v:"required#Vui lòng nhập số điện thoại"`
-	Email  string `json:"email" v:"required|email#Vui lòng nhập email|Email không hợp lệ"`
-	OTP    string `json:"otp"   v:"required|length:6,6#Vui lòng nhập mã OTP|Mã OTP phải gồm 6 chữ số"`
+	g.Meta   `path:"/auth/verify-member-otp" method:"post" tags:"Xác thực" summary:"Xác thực OTP liên kết hồ sơ hội viên và đặt mật khẩu"`
+	Phone    string `json:"phone"    v:"required#Vui lòng nhập số điện thoại"`
+	Email    string `json:"email"    dc:"Không dùng nữa (giữ để tương thích): tài khoản luôn dùng email trong hồ sơ hội viên"`
+	OTP      string `json:"otp"      v:"required|length:6,6#Vui lòng nhập mã OTP|Mã OTP phải gồm 6 chữ số"`
+	Password string `json:"password" v:"required|length:8,72#Vui lòng nhập mật khẩu|Mật khẩu từ 8 đến 72 ký tự" dc:"Mật khẩu cho tài khoản mới – đặt ở bước này để người khác yêu cầu lại OTP không thể đặt mật khẩu thay chủ hồ sơ"`
 }
 
 type VerifyMemberOTPRes = TokenRes
-

@@ -31,7 +31,6 @@ type (
 		Update(ctx context.Context, d *entity.AccessDevice) error
 		Delete(ctx context.Context, id uint, deletedBy *uint) error
 		TouchSeen(ctx context.Context, id uint, seenAt time.Time) error
-		AttachDeviceToCheckin(ctx context.Context, checkinID, deviceID uint) error
 		ListStaleActiveDevices(ctx context.Context, cutoff time.Time) ([]AccessDeviceRow, error)
 		MarkDevicesOffline(ctx context.Context, ids []uint) error
 	}
@@ -128,16 +127,6 @@ func (r *deviceRepository) TouchSeen(ctx context.Context, id uint, seenAt time.T
 			"last_seen_at": seenAt,
 			"status":       entity.DeviceStatusActive,
 			"updated_at":   seenAt,
-		}).Error
-}
-
-func (r *deviceRepository) AttachDeviceToCheckin(ctx context.Context, checkinID, deviceID uint) error {
-	return postgres.Conn(ctx, r.db).Table("checkins").
-		Where("id = ?", checkinID).
-		Updates(map[string]any{
-			"device_id": deviceID,
-			"method":    entity.CheckinMethodDevice,
-			"staff_id":  nil,
 		}).Error
 }
 

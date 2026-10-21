@@ -31,6 +31,8 @@ func PTServiceOf(d *Deps) service.PTService {
 	}
 	s := service.NewPTService(repository.NewPTRepository(d.DB), d.Invoices, d.Tx, d.Settings, d.Audit, d.Notifier)
 	ptServices[d] = s
+	// Ràng buộc lịch dùng chung: nghỉ lễ chi nhánh, lịch rảnh & nghỉ phép HLV (PT, lớp nhóm, cổng hội viên).
+	service.SetScheduleGuard(service.NewScheduleGuard(d.DB))
 	return s
 }
 

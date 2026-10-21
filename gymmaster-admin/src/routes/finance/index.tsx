@@ -58,17 +58,20 @@ import type {
   InstallmentSchedule,
   InstallmentStatus,
 } from '@/api/payroll-finance';
+import invoiceApi from '@/api/invoice';
 import ActionBar from '@/components/ActionBar';
 import BranchSelect from '@/components/BranchSelect';
 import ConfirmButton from '@/components/ConfirmButton';
 import DataTable from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
+import HelpLabel from '@/components/HelpLabel';
 import MoneyInput from '@/components/Money/MoneyInput';
 import MoneyText from '@/components/Money/MoneyText';
 import PageTitle from '@/components/PageTitle';
 import StatCard from '@/components/StatCard';
 import StatusTag from '@/components/StatusTag';
 import { PERM } from '@/constants/permissions';
+import { REVENUE_HELP } from '@/constants/revenueBasis';
 import {
   CASH_SESSION_STATUS_MAP,
   CASH_SESSION_STATUS_OPTIONS,
@@ -76,12 +79,13 @@ import {
   EXPENSE_STATUS_OPTIONS,
   INSTALLMENT_STATUS_MAP,
   INSTALLMENT_STATUS_OPTIONS,
-  PAYMENT_METHOD_STATUS_OPTIONS,
+  COUNTER_PAYMENT_METHOD_OPTIONS,
 } from '@/constants/status';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useTableQuery } from '@/hooks/useTableQuery';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
+import InstallmentPlanModal from '@/routes/invoices/InstallmentPlanModal';
 import { showError } from '@/utils/errors';
 import { DATE_FORMAT, formatDate, formatDateTime, formatMoney, toApiDate } from '@/utils/format';
 
@@ -120,62 +124,55 @@ function ProfitLossTab() {
     if (!pnl) return [];
     return [
       {
-        key: 'rev_total',
-        item: '1. Tổng doanh thu thuần (A)',
-        amount: pnl.revenue.total,
+        key: 'rev_gross',
+        item: '1. Tổng doanh thu',
+        amount: pnl.gross_revenue,
+        isHeader: true,
+        color: '#16a34a',
+      },
+      { key: 'rev_mem', item: '   • Gói tập hội viên', amount: pnl.membership_revenue },
+      { key: 'rev_pt', item: '   • Hợp đồng PT 1-1', amount: pnl.pt_revenue },
+      { key: 'rev_pos', item: '   • Bán lẻ POS', amount: pnl.pos_revenue },
+      { key: 'rev_locker', item: '   • Cho thuê tủ đồ', amount: pnl.locker_revenue },
+      { key: 'rev_other', item: '   • Phí & dịch vụ khác', amount: pnl.other_revenue },
+      { key: 'refunds', item: '2. Hoàn tiền', amount: -Math.abs(pnl.refunds), color: '#ea580c' },
+      {
+        key: 'rev_net',
+        item: '3. Doanh thu thuần (A = 1 − 2)',
+        amount: pnl.net_revenue,
         isHeader: true,
         color: '#16a34a',
       },
       {
-        key: 'rev_mem',
-        item: '   • Doanh thu gói tập hội viên',
-        amount: pnl.revenue.membership ?? 0,
-      },
-      {
-        key: 'rev_pt',
-        item: '   • Doanh thu hợp đồng PT 1-1',
-        amount: pnl.revenue.pt ?? 0,
-      },
-      {
-        key: 'rev_pos',
-        item: '   • Doanh thu bán lẻ POS & Dịch vụ',
-        amount: pnl.revenue.pos ?? 0,
-      },
-      {
-        key: 'rev_locker',
-        item: '   • Doanh thu cho thuê tủ đồ & Vé ngày',
-        amount: (pnl.revenue.locker ?? 0) + (pnl.revenue.day_pass ?? 0),
-      },
-      {
         key: 'cogs',
-        item: '2. Giá vốn hàng bán POS (B)',
-        amount: -Math.abs(pnl.pos_cogs || 0),
+        item: '4. Giá vốn hàng bán POS (B)',
+        amount: -Math.abs(pnl.pos_cost),
         isHeader: true,
         color: '#ea580c',
       },
       {
         key: 'gross',
-        item: '3. Lợi nhuận gộp (C = A - B)',
-        amount: pnl.gross_profit ?? pnl.revenue.total - pnl.pos_cogs,
+        item: '5. Lợi nhuận gộp (C = A − B)',
+        amount: pnl.gross_profit,
         isHeader: true,
       },
       {
         key: 'opex',
-        item: '4. Chi phí vận hành đã duyệt (D)',
-        amount: -Math.abs(pnl.operating_expenses || 0),
+        item: '6. Chi phí vận hành đã duyệt (D)',
+        amount: -Math.abs(pnl.operating_expenses),
         isHeader: true,
         color: '#dc2626',
       },
       {
         key: 'payroll',
-        item: '5. Quỹ lương & Hoa hồng nhân sự (E)',
-        amount: -Math.abs(pnl.payroll_cost || 0),
+        item: '7. Quỹ lương nhân sự (E)',
+        amount: -Math.abs(pnl.payroll_expenses),
         isHeader: true,
         color: '#dc2626',
       },
       {
         key: 'net',
-        item: '6. LỢI NHUẬN RÒNG TRƯỚC THUẾ (C - D - E)',
+        item: '8. LỢI NHUẬN RÒNG (C − D − E)',
         amount: pnl.net_profit,
         isHeader: true,
         color: pnl.net_profit >= 0 ? '#15803d' : '#b91c1c',
@@ -225,8 +222,8 @@ function ProfitLossTab() {
       <Row gutter={[12, 12]}>
         <Col xs={12} sm={8} lg={4} style={{ flex: '1 1 180px' }}>
           <StatCard
-            label="Tổng doanh thu"
-            value={pnl?.revenue.total ?? 0}
+            label={<HelpLabel help={REVENUE_HELP.pnl}>Doanh thu thuần</HelpLabel>}
+            value={pnl?.net_revenue ?? 0}
             currency
             icon={<DollarOutlined />}
             loading={pnlQuery.isLoading}
@@ -235,7 +232,7 @@ function ProfitLossTab() {
         <Col xs={12} sm={8} lg={4} style={{ flex: '1 1 180px' }}>
           <StatCard
             label="Giá vốn POS"
-            value={pnl?.pos_cogs ?? 0}
+            value={pnl?.pos_cost ?? 0}
             currency
             icon={<CalculatorOutlined />}
             loading={pnlQuery.isLoading}
@@ -253,7 +250,7 @@ function ProfitLossTab() {
         <Col xs={12} sm={12} lg={4} style={{ flex: '1 1 180px' }}>
           <StatCard
             label="Quỹ lương nhân sự"
-            value={pnl?.payroll_cost ?? 0}
+            value={pnl?.payroll_expenses ?? 0}
             currency
             icon={<AuditOutlined />}
             loading={pnlQuery.isLoading}
@@ -273,7 +270,14 @@ function ProfitLossTab() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={14}>
-          <Card size="small" title="Bảng cân đối Lãi / Lỗ (Profit & Loss Statement)">
+          <Card
+            size="small"
+            title={
+              <HelpLabel help={REVENUE_HELP.pnl}>
+                Bảng cân đối Lãi / Lỗ (Profit & Loss Statement)
+              </HelpLabel>
+            }
+          >
             <Table
               size="small"
               rowKey="key"
@@ -301,8 +305,10 @@ function ProfitLossTab() {
                   dataIndex: 'amount',
                   align: 'right',
                   render: (v: number, r) => (
-                    <span style={{ fontWeight: r.isHeader ? 700 : 400, color: r.color }}>
-                      {formatMoney(v)}
+                    <span
+                      style={{ fontWeight: r.isHeader ? 700 : 400, color: r.color, whiteSpace: 'nowrap' }}
+                    >
+                      {formatMoney(v || 0)}
                     </span>
                   ),
                 },
@@ -324,19 +330,40 @@ function ProfitLossTab() {
             ) : (
               <Table
                 size="small"
-                rowKey="category_name"
+                rowKey="category_id"
                 pagination={false}
                 dataSource={pnl.expenses_by_category}
                 columns={[
                   {
                     title: 'Danh mục chi phí',
                     dataIndex: 'category_name',
+                    render: (v: string, r) => (
+                      <Space size={4} wrap>
+                        <span>{v || `Danh mục #${r.category_id}`}</span>
+                        {r.category_type && (
+                          <Tag color={r.category_type === 'FIXED' ? 'geekblue' : 'cyan'}>
+                            {EXPENSE_CATEGORY_TYPE_LABELS[r.category_type] ?? r.category_type}
+                          </Tag>
+                        )}
+                      </Space>
+                    ),
                   },
                   {
                     title: 'Tổng chi',
                     dataIndex: 'amount',
                     align: 'right',
+                    width: 140,
                     render: (v: number) => <MoneyText value={v} strong />,
+                  },
+                  {
+                    title: 'Tỷ trọng',
+                    key: 'share',
+                    align: 'right',
+                    width: 80,
+                    render: (_, r) =>
+                      pnl.operating_expenses > 0
+                        ? `${Math.round((r.amount / pnl.operating_expenses) * 1000) / 10}%`
+                        : '—',
                   },
                 ]}
               />
@@ -459,14 +486,15 @@ function OperatingExpensesTab({ canManage }: { canManage: boolean }) {
       {
         title: 'Ngày chi',
         dataIndex: 'spent_at',
-        width: 115,
+        width: 105,
         render: (v: string) => formatDate(v),
       },
       {
         title: 'Danh mục chi phí',
         dataIndex: 'category_name',
+        width: 200,
         render: (v: string | undefined, r) => (
-          <Space>
+          <Space direction="vertical" size={2}>
             <Typography.Text strong>{v || `Danh mục #${r.category_id}`}</Typography.Text>
             {r.category_type && (
               <Tag color={r.category_type === 'FIXED' ? 'geekblue' : 'cyan'}>
@@ -477,30 +505,51 @@ function OperatingExpensesTab({ canManage }: { canManage: boolean }) {
         ),
       },
       {
-        title: 'Nội dung khoản chi',
+        title: 'Nội dung / Chi nhánh',
         dataIndex: 'description',
-      },
-      {
-        title: 'Chi nhánh',
-        dataIndex: 'branch_name',
-        render: (v: string | undefined, r) => v || `CN #${r.branch_id}`,
+        width: 280,
+        render: (v: string, r) => (
+          <Space direction="vertical" size={0} style={{ maxWidth: 264 }}>
+            <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth: 264 }}>
+              {v || '—'}
+            </Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {r.branch_name || `CN #${r.branch_id}`}
+            </Typography.Text>
+          </Space>
+        ),
       },
       {
         title: 'Số tiền chi',
         dataIndex: 'amount',
         align: 'right',
-        render: (v: number) => <MoneyText value={v} strong />,
+        width: 140,
+        render: (v: number) => (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            <MoneyText value={v} strong />
+          </span>
+        ),
       },
       {
         title: 'Trạng thái',
         dataIndex: 'status',
-        render: (s: ExpenseStatus) => <StatusTag status={s} map={EXPENSE_STATUS_MAP} />,
+        width: 140,
+        render: (s: ExpenseStatus, r) => (
+          <Space direction="vertical" size={0}>
+            <StatusTag status={s} map={EXPENSE_STATUS_MAP} />
+            {r.approver_name && s !== 'PENDING' && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                bởi {r.approver_name}
+              </Typography.Text>
+            )}
+          </Space>
+        ),
       },
       {
         title: '',
         key: 'actions',
         fixed: 'right',
-        width: 210,
+        width: 150,
         render: (_, r) => (
           <Space size={4}>
             {canManage && r.status === 'PENDING' && (
@@ -513,7 +562,7 @@ function OperatingExpensesTab({ canManage }: { canManage: boolean }) {
                   confirmTitle={`Duyệt khoản chi ${formatMoney(r.amount)} – "${r.description}"?`}
                   onConfirm={() => approveMut.mutateAsync(r.id)}
                 >
-                  Duyệt chi
+                  Duyệt
                 </ConfirmButton>
                 <ConfirmButton
                   perm={PERM.EXPENSE_MANAGE}
@@ -521,7 +570,9 @@ function OperatingExpensesTab({ canManage }: { canManage: boolean }) {
                   danger
                   icon={<CloseCircleOutlined />}
                   confirmTitle="Từ chối khoản chi phí này?"
+                  okText="Từ chối"
                   onConfirm={() => rejectMut.mutateAsync(r.id)}
+                  aria-label="Từ chối"
                 />
               </>
             )}
@@ -662,9 +713,14 @@ function OperatingExpensesTab({ canManage }: { canManage: boolean }) {
               <Form.Item
                 name="spent_at"
                 label="Ngày chi"
+                tooltip="Ngày đã chi thực tế – không được sau hôm nay (khoản trả trước ghi theo ngày chi tiền)"
                 rules={[{ required: true, message: 'Chọn ngày chi' }]}
               >
-                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
+                <DatePicker
+                  style={{ width: '100%' }}
+                  format={DATE_FORMAT}
+                  disabledDate={(d) => d.isAfter(dayjs(), 'day')}
+                />
               </Form.Item>
             </Col>
             <Col xs={24}>
@@ -800,70 +856,104 @@ function CashSessionsTab() {
   const columns = useMemo<ColumnsType<CashSession>>(
     () => [
       {
-        title: 'Mã ca',
+        title: 'Ca',
         dataIndex: 'id',
-        width: 85,
-        render: (id: number) => <span className="code-text">CA-#{id}</span>,
+        width: 110,
+        render: (id: number, r) => (
+          <Space direction="vertical" size={2}>
+            <span className="code-text">CA-#{id}</span>
+            <StatusTag status={r.status} map={CASH_SESSION_STATUS_MAP} />
+          </Space>
+        ),
       },
       {
-        title: 'Chi nhánh',
+        title: 'Chi nhánh / Thu ngân',
         dataIndex: 'branch_name',
-        render: (v: string | undefined, r) => v || `CN #${r.branch_id}`,
+        width: 200,
+        render: (v: string | undefined, r) => (
+          <Space direction="vertical" size={0}>
+            <Typography.Text strong>{v || `CN #${r.branch_id}`}</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {r.staff_name || `NV #${r.staff_id}`}
+            </Typography.Text>
+          </Space>
+        ),
       },
       {
-        title: 'Thu ngân',
-        dataIndex: 'staff_name',
-        render: (v: string | undefined, r) => v || `NV #${r.staff_id}`,
-      },
-      {
-        title: 'Mở ca lúc',
+        title: 'Thời gian ca',
         dataIndex: 'opened_at',
-        render: (v: string) => formatDateTime(v),
+        width: 160,
+        render: (v: string, r) => (
+          <Space direction="vertical" size={0} style={{ whiteSpace: 'nowrap' }}>
+            <span>Mở: {formatDateTime(v)}</span>
+            {r.closed_at && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Đóng: {formatDateTime(r.closed_at)}
+              </Typography.Text>
+            )}
+          </Space>
+        ),
       },
       {
-        title: 'Tiền đầu ca (opening_cash)',
+        title: 'Tiền đầu ca',
         dataIndex: 'opening_cash',
         align: 'right',
-        render: (v: number) => <MoneyText value={v} />,
+        width: 125,
+        render: (v: number) => (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            <MoneyText value={v} />
+          </span>
+        ),
       },
       {
-        title: 'Kỳ vọng hệ thống (expected_cash)',
+        title: 'Tiền mặt kỳ vọng',
         dataIndex: 'expected_cash',
         align: 'right',
+        width: 135,
         render: (v: number, r) =>
-          r.status === 'CLOSED' || v > 0 ? <MoneyText value={v} strong /> : '—',
+          r.status === 'CLOSED' ? (
+            <span style={{ whiteSpace: 'nowrap' }}>
+              <MoneyText value={v} strong />
+            </span>
+          ) : (
+            '—'
+          ),
       },
       {
-        title: 'Tiền thực đếm (counted_cash)',
+        title: 'Tiền thực đếm',
         dataIndex: 'counted_cash',
         align: 'right',
-        render: (v: number, r) => (r.status === 'CLOSED' ? <MoneyText value={v} strong /> : '—'),
+        width: 125,
+        render: (v: number, r) =>
+          r.status === 'CLOSED' ? (
+            <span style={{ whiteSpace: 'nowrap' }}>
+              <MoneyText value={v} strong />
+            </span>
+          ) : (
+            '—'
+          ),
       },
       {
-        title: 'Chênh lệch (difference)',
+        title: 'Chênh lệch',
         dataIndex: 'difference',
         align: 'right',
+        width: 120,
         render: (diff: number, r) => {
           if (r.status !== 'CLOSED') return '—';
           const num = Number(diff) || 0;
-          if (num === 0) return <Tag color="green">Khớp (0 ₫)</Tag>;
+          if (num === 0) return <Tag color="green">Khớp</Tag>;
           return (
-            <Typography.Text strong type={num > 0 ? 'success' : 'danger'}>
+            <Typography.Text strong type={num > 0 ? 'success' : 'danger'} style={{ whiteSpace: 'nowrap' }}>
               {num > 0 ? `+${formatMoney(num)}` : formatMoney(num)}
             </Typography.Text>
           );
         },
       },
       {
-        title: 'Trạng thái',
-        dataIndex: 'status',
-        render: (s: CashSessionStatus) => <StatusTag status={s} map={CASH_SESSION_STATUS_MAP} />,
-      },
-      {
         title: '',
         key: 'actions',
         fixed: 'right',
-        width: 140,
+        width: 150,
         render: (_, r) =>
           canCash && r.status === 'OPEN' ? (
             <Button
@@ -972,7 +1062,7 @@ function CashSessionsTab() {
           </Form.Item>
           <Form.Item
             name="opening_cash"
-            label="Tiền mặt đầu ca trong két (opening_cash)"
+            label="Tiền mặt đầu ca trong két"
             rules={[{ required: true, message: 'Nhập tiền mặt đầu ca' }]}
           >
             <MoneyInput />
@@ -1000,7 +1090,7 @@ function CashSessionsTab() {
               type="info"
               showIcon
               message={`Tiền đầu ca: ${formatMoney(closeTarget.opening_cash)}`}
-              description="Hệ thống sẽ tự động cộng tổng các phiếu thu Tiền mặt (CASH) phát sinh trong thời gian mở ca để tính expected_cash và chênh lệch difference."
+              description="Tiền mặt kỳ vọng = tiền đầu ca + các phiếu thu tiền mặt − các phiếu hoàn tiền mặt phát sinh trong thời gian mở ca; chênh lệch = tiền thực đếm − tiền kỳ vọng."
             />
             <Form
               form={closeForm}
@@ -1009,7 +1099,7 @@ function CashSessionsTab() {
             >
               <Form.Item
                 name="counted_cash"
-                label="Tiền mặt thực đếm tại két cuối ca (counted_cash)"
+                label="Tiền mặt thực đếm tại két cuối ca"
                 rules={[{ required: true, message: 'Nhập số tiền thực đếm' }]}
               >
                 <MoneyInput />
@@ -1033,16 +1123,16 @@ function CashSessionsTab() {
       >
         {closedResult && (
           <Descriptions bordered size="small" column={1} style={{ marginTop: 12 }}>
-            <Descriptions.Item label="Tiền đầu ca (opening_cash)">
+            <Descriptions.Item label="Tiền đầu ca">
               {formatMoney(closedResult.opening_cash)}
             </Descriptions.Item>
-            <Descriptions.Item label="Tiền hệ thống kỳ vọng (expected_cash)">
+            <Descriptions.Item label="Tiền mặt kỳ vọng">
               <Typography.Text strong>{formatMoney(closedResult.expected_cash)}</Typography.Text>
             </Descriptions.Item>
-            <Descriptions.Item label="Tiền thực đếm (counted_cash)">
+            <Descriptions.Item label="Tiền thực đếm">
               <Typography.Text strong>{formatMoney(closedResult.counted_cash)}</Typography.Text>
             </Descriptions.Item>
-            <Descriptions.Item label="Chênh lệch (difference)">
+            <Descriptions.Item label="Chênh lệch">
               <Typography.Text
                 strong
                 type={
@@ -1068,6 +1158,10 @@ function CashSessionsTab() {
 /* --------------------------------------------------------------------------
  * TAB 4: Quản lý trả góp & Hóa đơn điện tử (/admin/installments, /admin/invoices/:id/installments, /admin/invoices/:id/einvoice)
  * -------------------------------------------------------------------------- */
+/** Kỳ còn mở (PENDING/OVERDUE) đã qua ngày đến hạn. */
+const installmentIsOverdue = (r: InstallmentSchedule) =>
+  r.status === 'OVERDUE' || (r.status === 'PENDING' && dayjs(r.due_date).isBefore(dayjs(), 'day'));
+
 function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
   const { message } = App.useApp();
   const qc = useQueryClient();
@@ -1077,13 +1171,8 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
   const [einvoiceResult, setEinvoiceResult] = useState<EInvoiceResult | null>(null);
   const [payTarget, setPayTarget] = useState<InstallmentSchedule | null>(null);
 
-  const [planForm] = Form.useForm<{
-    invoice_id: number;
-    installments: number;
-    first_due_date?: Dayjs;
-  }>();
   const [einvoiceForm] = Form.useForm<{ invoice_id: number }>();
-  const [payForm] = Form.useForm<{ payment_method: string; note?: string }>();
+  const [payForm] = Form.useForm<{ method: string; note?: string }>();
 
   const table = useTableQuery<
     InstallmentSchedule,
@@ -1095,30 +1184,16 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
     defaults: { order_by: 'due_date', order_dir: 'ASC' },
   });
 
-  const createPlanMut = useMutation({
-    mutationFn: (v: { invoice_id: number; installments: number; first_due_date?: Dayjs }) =>
-      financeExtApi.createInstallmentPlan(Number(v.invoice_id), {
-        installments: Number(v.installments) || 3,
-        first_due_date: toApiDate(v.first_due_date) ?? undefined,
-      }),
-    onSuccess: () => {
-      message.success('Đã tạo kế hoạch trả góp cho hóa đơn thành công!');
-      void qc.invalidateQueries({ queryKey: [financeExtApi.installmentKey] });
-      setPlanModal(false);
-    },
-    onError: (err) => showError(err, 'Không thể tạo kế hoạch trả góp'),
-  });
-
   const payScheduleMut = useMutation({
-    mutationFn: (v: { payment_method: string; note?: string }) =>
+    mutationFn: (v: { method: string; note?: string }) =>
       financeExtApi.payInstallment(payTarget!.id, {
-        amount: payTarget!.amount,
-        payment_method: v.payment_method,
+        method: v.method,
         note: v.note,
       }),
     onSuccess: () => {
       message.success(`Đã thu tiền kỳ trả góp #${payTarget?.seq} thành công!`);
       void qc.invalidateQueries({ queryKey: [financeExtApi.installmentKey] });
+      void qc.invalidateQueries({ queryKey: [invoiceApi.key] });
       setPayTarget(null);
     },
     onError: (err) => showError(err, 'Không thể thu tiền kỳ trả góp'),
@@ -1147,11 +1222,8 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
         title: 'Kỳ thứ',
         dataIndex: 'seq',
         width: 90,
-        render: (seq: number, r) => (
-          <Tag color="blue">
-            Kỳ #{seq}
-            {r.total_installments ? `/${r.total_installments}` : ''}
-          </Tag>
+        render: (seq: number) => (
+          <Tag color="blue">Kỳ #{seq}</Tag>
         ),
       },
       {
@@ -1159,7 +1231,7 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
         key: 'invoice',
         render: (_, r) => (
           <span className="code-text">
-            {r.invoice_code || (r.invoice_id ? `INV-#${r.invoice_id}` : `Plan #${r.plan_id}`)}
+            {r.invoice_no || (r.invoice_id ? `HĐ #${r.invoice_id}` : `Kế hoạch #${r.plan_id}`)}
           </span>
         ),
       },
@@ -1183,7 +1255,7 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
         title: 'Ngày đến hạn',
         dataIndex: 'due_date',
         render: (v: string, r) => {
-          const overdue = r.status !== 'PAID' && dayjs(v).isBefore(dayjs(), 'day');
+          const overdue = installmentIsOverdue(r);
           return (
             <Typography.Text type={overdue ? 'danger' : undefined}>
               {formatDate(v)} {overdue ? '(Quá hạn)' : ''}
@@ -1206,7 +1278,10 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
       {
         title: 'Trạng thái',
         dataIndex: 'status',
-        render: (s: InstallmentStatus) => <StatusTag status={s} map={INSTALLMENT_STATUS_MAP} />,
+        // PENDING đã qua ngày đến hạn hiển thị "Quá hạn" (trạng thái suy ra, API vẫn trả PENDING).
+        render: (s: InstallmentStatus, r) => (
+          <StatusTag status={installmentIsOverdue(r) ? 'OVERDUE' : s} map={INSTALLMENT_STATUS_MAP} />
+        ),
       },
       {
         title: '',
@@ -1214,14 +1289,15 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
         fixed: 'right',
         width: 150,
         render: (_, r) =>
-          canManage && r.status !== 'PAID' ? (
+          // Chỉ kỳ còn mở mới thu được – kỳ đã thu/tất toán/hủy (hóa đơn đã thu đủ hoặc đã hủy) ẩn nút.
+          canManage && (r.status === 'PENDING' || r.status === 'OVERDUE') ? (
             <Button
               size="small"
               type="primary"
               icon={<CreditCardOutlined />}
               onClick={() => {
                 payForm.resetFields();
-                payForm.setFieldsValue({ payment_method: 'CASH' });
+                payForm.setFieldsValue({ method: 'CASH' });
                 setPayTarget(r);
               }}
             >
@@ -1246,11 +1322,6 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
                   variant="solid"
                   icon={<PlusOutlined />}
                   onClick={() => {
-                    planForm.resetFields();
-                    planForm.setFieldsValue({
-                      installments: 3,
-                      first_due_date: dayjs().add(1, 'month'),
-                    });
                     setPlanModal(true);
                   }}
                 >
@@ -1298,46 +1369,13 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
         emptyText="Chưa có lịch trả góp nào"
       />
 
-      <Modal
-        open={planModal}
-        title="Tạo kế hoạch trả góp cho Hóa đơn"
-        okText="Tạo lịch trả góp"
-        cancelText="Hủy"
-        onOk={() => planForm.submit()}
-        onCancel={() => setPlanModal(false)}
-        confirmLoading={createPlanMut.isPending}
-        width={480}
-        forceRender
-      >
-        <Form
-          form={planForm}
-          layout="vertical"
-          onFinish={(v) => createPlanMut.mutate(v)}
-          style={{ marginTop: 12 }}
-        >
-          <Form.Item
-            name="invoice_id"
-            label="ID Hóa đơn cần chia kỳ trả góp"
-            rules={[{ required: true, message: 'Vui lòng nhập ID Hóa đơn' }]}
-          >
-            <InputNumber min={1} style={{ width: '100%' }} placeholder="VD: 101" />
-          </Form.Item>
-          <Form.Item
-            name="installments"
-            label="Số kỳ trả góp (Từ 2 đến 12 kỳ)"
-            rules={[{ required: true, message: 'Nhập số kỳ trả góp' }]}
-          >
-            <InputNumber min={2} max={12} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="first_due_date" label="Ngày đến hạn kỳ đầu tiên">
-            <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
-          </Form.Item>
-        </Form>
-      </Modal>
+      <InstallmentPlanModal open={planModal} onClose={() => setPlanModal(false)} />
 
       <Modal
         open={!!payTarget}
-        title={`Thu tiền kỳ trả góp #${payTarget?.seq} – Số tiền: ${formatMoney(payTarget?.amount)}`}
+        title={`Thu tiền kỳ trả góp #${payTarget?.seq} – Số tiền: ${formatMoney(
+          (payTarget?.amount ?? 0) - (payTarget?.paid_amount ?? 0),
+        )}`}
         okText="Xác nhận thu tiền"
         cancelText="Hủy"
         onOk={() => payForm.submit()}
@@ -1353,11 +1391,11 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
           style={{ marginTop: 12 }}
         >
           <Form.Item
-            name="payment_method"
+            name="method"
             label="Phương thức thanh toán"
-            rules={[{ required: true }]}
+            rules={[{ required: true, message: 'Chọn phương thức thanh toán' }]}
           >
-            <Select options={PAYMENT_METHOD_STATUS_OPTIONS} />
+            <Select options={COUNTER_PAYMENT_METHOD_OPTIONS} />
           </Form.Item>
           <Form.Item name="note" label="Ghi chú phiếu thu">
             <Input placeholder="VD: Thu kỳ trả góp thứ 2..." />
@@ -1433,60 +1471,72 @@ function InstallmentsAndEInvoiceTab({ canManage }: { canManage: boolean }) {
 
 export default function FinancePage() {
   const { can } = usePermission();
-  const canManage = can([PERM.EXPENSE_MANAGE, PERM.CASH_SESSION_MANAGE, PERM.INVOICE_COLLECT]);
 
+  // Chỉ hiện tab user có quyền gọi API tương ứng (lễ tân chỉ có cash_session.manage → chỉ thấy Đối soát ca).
+  const tabs = [
+    {
+      key: 'pnl',
+      allowed: can([PERM.EXPENSE_VIEW, PERM.REPORT_VIEW]),
+      label: (
+        <Space size={6}>
+          <BarChartOutlined />
+          <span>Báo cáo Lãi / Lỗ (P&L)</span>
+        </Space>
+      ),
+      children: <ProfitLossTab />,
+    },
+    {
+      key: 'expenses',
+      allowed: can([PERM.EXPENSE_VIEW, PERM.EXPENSE_MANAGE]),
+      label: (
+        <Space size={6}>
+          <WalletOutlined />
+          <span>Chi phí vận hành</span>
+        </Space>
+      ),
+      children: <OperatingExpensesTab canManage={can(PERM.EXPENSE_MANAGE)} />,
+    },
+    {
+      key: 'cash-sessions',
+      allowed: can([PERM.CASH_SESSION_MANAGE, PERM.EXPENSE_VIEW]),
+      label: (
+        <Space size={6}>
+          <CalculatorOutlined />
+          <span>Đối soát ca thu ngân</span>
+        </Space>
+      ),
+      children: <CashSessionsTab />,
+    },
+    {
+      key: 'installments',
+      allowed: can([PERM.INVOICE_VIEW, PERM.INVOICE_COLLECT]),
+      label: (
+        <Space size={6}>
+          <CreditCardOutlined />
+          <span>Quản lý trả góp & Hóa đơn điện tử</span>
+        </Space>
+      ),
+      children: <InstallmentsAndEInvoiceTab canManage={can(PERM.INVOICE_COLLECT)} />,
+    },
+  ]
+    .filter((t) => t.allowed)
+    .map(({ allowed: _allowed, ...t }) => t);
+
+  // Bố cục chuẩn: Card.page-card (padding 20px như các trang khác).
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <PageTitle
-        title="Chi phí, Đối soát ca, Trả góp & Báo cáo P&L"
-        subtitle="Quản trị báo cáo Lãi/Lỗ (P&L), duyệt chi phí vận hành, đối soát tiền mặt cuối ca và theo dõi công nợ trả góp"
-      />
+    <Card variant="borderless" className="page-card">
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <PageTitle
+          title="Chi phí, Đối soát ca, Trả góp & Báo cáo P&L"
+          subtitle="Quản trị báo cáo Lãi/Lỗ (P&L), duyệt chi phí vận hành, đối soát tiền mặt cuối ca và theo dõi công nợ trả góp"
+        />
 
-      <Tabs
-        defaultActiveKey="pnl"
-        items={[
-          {
-            key: 'pnl',
-            label: (
-              <Space size={6}>
-                <BarChartOutlined />
-                <span>Báo cáo Lãi / Lỗ (P&L)</span>
-              </Space>
-            ),
-            children: <ProfitLossTab />,
-          },
-          {
-            key: 'expenses',
-            label: (
-              <Space size={6}>
-                <WalletOutlined />
-                <span>Chi phí vận hành</span>
-              </Space>
-            ),
-            children: <OperatingExpensesTab canManage={canManage} />,
-          },
-          {
-            key: 'cash-sessions',
-            label: (
-              <Space size={6}>
-                <CalculatorOutlined />
-                <span>Đối soát ca thu ngân</span>
-              </Space>
-            ),
-            children: <CashSessionsTab />,
-          },
-          {
-            key: 'installments',
-            label: (
-              <Space size={6}>
-                <CreditCardOutlined />
-                <span>Quản lý trả góp & Hóa đơn điện tử</span>
-              </Space>
-            ),
-            children: <InstallmentsAndEInvoiceTab canManage={canManage} />,
-          },
-        ]}
-      />
-    </Space>
+        {tabs.length === 0 ? (
+          <Empty description="Bạn chưa được cấp quyền xem mục tài chính nào" />
+        ) : (
+          <Tabs defaultActiveKey={tabs[0].key} items={tabs} />
+        )}
+      </Space>
+    </Card>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import dayjs from 'dayjs';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { FireIcon, SparklesIcon, TrophyIcon } from '@heroicons/react/24/outline';
@@ -67,6 +68,7 @@ export function ChallengesView() {
 
   const challenges = challengesQuery.data ?? [];
   const leaderboard = extractLeaderboardEntries(leaderboardQuery.data);
+  const today = dayjs().format('YYYY-MM-DD');
 
   async function handleJoin(challenge: ChallengeItem) {
     setJoiningId(challenge.id);
@@ -121,6 +123,8 @@ export function ChallengesView() {
               const isCompleted = Boolean(ch.completed || ch.completed_at || progress >= target);
               const isJoining = joiningId === ch.id && joinMutation.isPending;
               const metricType = ch.metric_type || ch.metric || 'CHECKINS';
+              // Đã qua ngày kết thúc → không cho tham gia (API cũng chặn).
+              const isEnded = Boolean(ch.end_date) && ch.end_date.slice(0, 10) < today;
 
               return (
                 <div
@@ -159,13 +163,15 @@ export function ChallengesView() {
                       </span>
                       {isCompleted ? (
                         <Badge variant="success">{t('completedBadge')}</Badge>
+                      ) : isEnded ? (
+                        <Badge variant="neutral">{t('endedBadge')}</Badge>
                       ) : ch.joined ? (
                         <Badge variant="info">{t('joinedBadge')}</Badge>
                       ) : null}
                     </div>
                     <Progress value={percent} />
 
-                    {!ch.joined ? (
+                    {!ch.joined && !isEnded ? (
                       <Button
                         type="button"
                         size="sm"
@@ -210,10 +216,15 @@ export function ChallengesView() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-20">{t('colRank')}</TableHead>
+                <TableHead className="w-14 px-2 sm:w-20 sm:px-4">{t('colRank')}</TableHead>
                 <TableHead>{t('colMember')}</TableHead>
-                <TableHead className="text-right">{t('colCheckins')}</TableHead>
-                <TableHead className="text-right">{t('colPoints')}</TableHead>
+                <TableHead className="hidden text-right sm:table-cell">
+                  {t('colCheckins')}
+                </TableHead>
+                <TableHead className="px-2 text-right whitespace-nowrap sm:px-4">
+                  <span className="hidden sm:inline">{t('colPoints')}</span>
+                  <span className="sm:hidden">{t('colPointsShort')}</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -230,21 +241,29 @@ export function ChallengesView() {
                 const points = entry.points ?? entry.loyalty_points;
                 return (
                   <TableRow key={`${entry.rank}-${entry.member_id}`}>
-                    <TableCell>
+                    <TableCell className="px-2 sm:px-4">
                       <Badge variant={rankVariant}>#{entry.rank}</Badge>
                     </TableCell>
-                    <TableCell>
-                      <div className="grid gap-0.5">
-                        <span className="font-semibold text-primary">{entry.full_name}</span>
+                    <TableCell className="min-w-0 px-2 whitespace-normal sm:px-4">
+                      <div className="grid min-w-0 gap-0.5">
+                        <span className="font-semibold break-words text-primary">
+                          {entry.full_name}
+                        </span>
                         {entry.member_code ? (
                           <span className="text-caption text-tertiary">{entry.member_code}</span>
                         ) : null}
+                        {/* Mobile: gộp lượt tập vào dưới tên thay cho cột riêng. */}
+                        {checkins !== undefined ? (
+                          <span className="text-caption text-secondary sm:hidden">
+                            {t('checkinsInline', { count: formatNumber(checkins) })}
+                          </span>
+                        ) : null}
                       </div>
                     </TableCell>
-                    <TableCell className="text-right font-medium text-primary">
+                    <TableCell className="hidden text-right font-medium text-primary sm:table-cell">
                       {checkins !== undefined ? formatNumber(checkins) : '—'}
                     </TableCell>
-                    <TableCell className="text-right font-semibold text-brand-600">
+                    <TableCell className="px-2 text-right font-semibold whitespace-nowrap text-brand-600 sm:px-4">
                       {points !== undefined ? formatNumber(points) : '—'}
                     </TableCell>
                   </TableRow>

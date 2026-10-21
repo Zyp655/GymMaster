@@ -77,6 +77,7 @@ function ProductsDesktop() {
         title: 'SKU',
         dataIndex: 'sku',
         sorter: true,
+        width: 130,
         render: (v: string, r) => (
           <Space direction="vertical" size={0}>
             <span className="code-text">{v}</span>
@@ -89,9 +90,11 @@ function ProductsDesktop() {
         ),
       },
       {
+        // Độ rộng cố định + xuống dòng: tên dài không đẩy cột giá/tồn/trạng thái ra sau cột thao tác cố định ở 1440px.
         title: 'Tên sản phẩm',
         dataIndex: 'name',
         sorter: true,
+        width: 200,
         render: (name: string, r) => (
           <Button
             type="link"
@@ -106,35 +109,50 @@ function ProductsDesktop() {
       {
         title: 'Danh mục',
         dataIndex: 'category_name',
-        render: (v: string) => v || <Typography.Text type="secondary">Chưa phân loại</Typography.Text>,
+        width: 120,
+        ellipsis: true,
+        render: (v: string) =>
+          v || <Typography.Text type="secondary">Chưa phân loại</Typography.Text>,
       },
       {
-        title: 'Giá vốn',
+        title: (
+          <Tooltip title="Giá vốn bình quân gia quyền – tự tính lại mỗi lần nhập kho, không sửa tay">
+            Giá vốn
+          </Tooltip>
+        ),
         dataIndex: 'cost_price',
         sorter: true,
         align: 'right',
+        width: 105,
         render: (v: number) => <MoneyText value={v} />,
       },
       {
-        title: 'Giá bán',
+        // Giá hội viên hiển thị ngay dưới giá bán (gộp cột để bảng vừa màn hình 1440px).
+        title: 'Giá bán / HV',
         dataIndex: 'sell_price',
         sorter: true,
         align: 'right',
-        render: (v: number) => <MoneyText value={v} strong />,
-      },
-      {
-        title: 'Giá hội viên',
-        dataIndex: 'member_price',
-        align: 'right',
-        render: (v: number | null) =>
-          v === null ? <Typography.Text type="secondary">—</Typography.Text> : <MoneyText value={v} />,
+        width: 115,
+        render: (v: number, r) => (
+          <Space direction="vertical" size={0} align="end">
+            <MoneyText value={v} strong />
+            {r.member_price !== null && (
+              <Tooltip title="Giá hội viên">
+                <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                  HV {formatMoney(r.member_price)}
+                </Typography.Text>
+              </Tooltip>
+            )}
+          </Space>
+        ),
       },
       {
         title: branchName ? `Tồn tại ${branchName}` : 'Tổng tồn',
         key: 'stock',
         align: 'right',
+        width: 125,
         render: (_, r) => (
-          <Space size={4}>
+          <Space size={4} wrap style={{ justifyContent: 'flex-end' }}>
             <span>
               {formatNumber(branchId ? (r.stock ?? 0) : r.total_stock)} {r.unit}
             </span>
@@ -150,13 +168,14 @@ function ProductsDesktop() {
         title: 'Trạng thái',
         dataIndex: 'status',
         sorter: true,
+        width: 115,
         render: (v: string) => <StatusTag status={v} map={PRODUCT_STATUS_MAP} />,
       },
       {
         title: '',
         key: 'actions',
         fixed: 'right',
-        width: 88,
+        width: 80,
         render: (_, r) => (
           <Space size={0}>
             <Tooltip title={can(PERM.PRODUCT_MANAGE) ? 'Sửa' : 'Xem'}>
@@ -226,6 +245,9 @@ function ProductsDesktop() {
         columns={columns}
         rowSelection={can(PERM.PRODUCT_MANAGE) ? selection.rowSelection : undefined}
         emptyText="Chưa có sản phẩm nào"
+        // Bố cục cố định theo độ rộng cột: ở 1440px mọi cột (giá/tồn/trạng thái) nằm trước cột thao tác cố định.
+        tableLayout="fixed"
+        scroll={{ x: 1080 }}
       />
 
       <ProductForm
@@ -296,7 +318,10 @@ function ProductsMobile() {
           ],
           tags: (r) => [
             ...(r.low_stock ? [{ label: 'Tồn thấp', color: 'orange' }] : []),
-            { label: PRODUCT_STATUS_MAP[r.status]?.label, color: PRODUCT_STATUS_MAP[r.status]?.color },
+            {
+              label: PRODUCT_STATUS_MAP[r.status]?.label,
+              color: PRODUCT_STATUS_MAP[r.status]?.color,
+            },
           ],
         }}
         onAdd={() => openForm(null)}

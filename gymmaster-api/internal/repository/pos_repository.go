@@ -119,10 +119,50 @@ func (r *posRepository) SalesTotals(ctx context.Context, f PosSummaryFilter) (*P
 	return &out, err
 }
 
+// posNetItemsCTE: số lượng & doanh thu sản phẩm THUẦN theo sản phẩm trong khoảng thời gian, cùng cơ sở với
+// net_revenue/cost_of_goods của tổng kết ngày:
+//   - bán: dòng PRODUCT của hóa đơn POS (không hủy) LẬP trong khoảng;
+//   - trừ trả hàng: SALE_RETURN phát sinh trong khoảng của hóa đơn POS không hủy (hóa đơn hủy đã bị loại khỏi
+//     phần bán nên phiếu nhập lại kho khi hủy không bị trừ hai lần); giá trị trả = SL trả × đơn giá thực bán
+//     của sản phẩm trên hóa đơn đó (Σ amount / Σ quantity).
+func posNetItemsCTE(f PosSummaryFilter) (string, map[string]any) {
+	branch := ""
+	if f.BranchIDs != nil {
+		branch = " AND i.branch_id IN @branches"
+	}
+	q := `WITH sold AS (
+	SELECT it.ref_id AS product_id, SUM(it.quantity) AS qty, SUM(it.amount) AS amount
+	FROM invoices i JOIN invoice_items it ON it.invoice_id = i.id AND it.item_type = @item_type
+	WHERE i.source = @source AND i.status <> @void AND i.issued_at >= @from AND i.issued_at < @to` + branch + `
+	GROUP BY it.ref_id
+), ret AS (
+	SELECT st.product_id, SUM(st.quantity) AS qty,
+		SUM(st.quantity * COALESCE((SELECT SUM(x.amount) / NULLIF(SUM(x.quantity), 0) FROM invoice_items x
+			WHERE x.invoice_id = i.id AND x.item_type = @item_type AND x.ref_id = st.product_id), 0)) AS amount
+	FROM stock_transactions st JOIN invoices i ON i.id = st.reference_id
+	WHERE st.type = @sale_return AND st.reference_type = @ref_invoice AND st.created_at >= @from AND st.created_at < @to
+		AND i.source = @source AND i.status <> @void` + branch + `
+	GROUP BY st.product_id
+), net AS (
+	SELECT COALESCE(s.product_id, r.product_id) AS product_id,
+		COALESCE(s.qty, 0) - COALESCE(r.qty, 0) AS quantity,
+		COALESCE(s.amount, 0) - COALESCE(r.amount, 0) AS revenue
+	FROM sold s FULL JOIN ret r ON r.product_id = s.product_id
+)`
+	args := map[string]any{"item_type": entity.InvoiceItemProduct, "source": entity.InvoiceSourcePOS,
+		"void": entity.InvoiceStatusVoid, "from": f.From, "to": f.To, "sale_return": entity.StockSaleReturn,
+		"ref_invoice": entity.StockRefInvoice}
+	if f.BranchIDs != nil {
+		args["branches"] = f.BranchIDs
+	}
+	return q, args
+}
+
+// ItemsSold: số lượng sản phẩm bán THUẦN (đã trừ trả hàng trong ngày) – xem posNetItemsCTE.
 func (r *posRepository) ItemsSold(ctx context.Context, f PosSummaryFilter) (int64, error) {
 	var n int64
-	err := r.posInvoices(ctx, f).Joins("JOIN invoice_items it ON it.invoice_id = i.id AND it.item_type = ?", entity.InvoiceItemProduct).
-		Select("COALESCE(SUM(it.quantity), 0)").Scan(&n).Error
+	q, args := posNetItemsCTE(f)
+	err := postgres.Conn(ctx, r.db).Raw(q+` SELECT COALESCE(SUM(quantity), 0) FROM net`, args).Scan(&n).Error
 	return n, err
 }
 
@@ -164,12 +204,16 @@ func (r *posRepository) CostOfGoods(ctx context.Context, f PosSummaryFilter) (fl
 	return v, err
 }
 
+// TopProducts: top sản phẩm theo số lượng THUẦN (đã trừ trả hàng), doanh thu thuần – cùng cơ sở với ItemsSold.
 func (r *posRepository) TopProducts(ctx context.Context, f PosSummaryFilter, limit int) ([]PosTopProduct, error) {
 	var rows []PosTopProduct
-	err := r.posInvoices(ctx, f).
-		Joins("JOIN invoice_items it ON it.invoice_id = i.id AND it.item_type = ?", entity.InvoiceItemProduct).
-		Joins("JOIN products p ON p.id = it.ref_id").
-		Select("p.id AS product_id, p.sku, p.name, SUM(it.quantity) AS quantity, SUM(it.amount) AS revenue").
-		Group("p.id, p.sku, p.name").Order("quantity DESC, revenue DESC").Limit(limit).Scan(&rows).Error
+	q, args := posNetItemsCTE(f)
+	args["limit"] = limit
+	err := postgres.Conn(ctx, r.db).Raw(q+`
+SELECT p.id AS product_id, p.sku, p.name, n.quantity, n.revenue
+FROM net n JOIN products p ON p.id = n.product_id
+WHERE n.quantity > 0
+ORDER BY n.quantity DESC, n.revenue DESC, p.id
+LIMIT @limit`, args).Scan(&rows).Error
 	return rows, err
 }

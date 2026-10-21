@@ -16,7 +16,7 @@ const (
 type AccessDevice struct {
 	BaseEntity
 	BranchID   uint   `gorm:"not null"`
-	Code       string `gorm:"type:varchar(50);not null;unique"`
+	Code       string `gorm:"type:varchar(50);not null"` // duy nhất trong thiết bị chưa xóa (uq_access_devices_code_active)
 	Name       string `gorm:"type:varchar(150);not null"`
 	Type       string `gorm:"type:varchar(20);not null;default:'KIOSK'"`
 	APIKeyHash string `gorm:"column:api_key_hash;type:char(64);not null"`
@@ -51,7 +51,7 @@ type Locker struct {
 	Code       string  `gorm:"type:varchar(30);not null"`
 	Zone       string  `gorm:"type:varchar(50);not null;default:'Khu A'"`
 	Size       string  `gorm:"type:varchar(20);not null;default:'STANDARD'"`
-	MonthlyFee float64 `gorm:"type:numeric(14,2);not null;default:150000"`
+	MonthlyFee float64 `gorm:"type:numeric(14,2);not null"` // không default ở tag: GORM bỏ qua 0 khi Create → tủ miễn phí thành 150000
 	Status     string  `gorm:"type:varchar(20);not null;default:'AVAILABLE'"`
 	Note       string  `gorm:"type:varchar(255);not null;default:''"`
 	CreatedAt  time.Time
@@ -177,12 +177,15 @@ type StaffLeaveRequest struct {
 
 func (StaffLeaveRequest) TableName() string { return "staff_leave_requests" }
 
+// BranchHoliday: ngày lễ của chi nhánh (closed = đóng cả ngày; closed=false + open/close_time = giờ mở cửa đặc biệt).
+// Closed KHÔNG có default:true ở tag GORM: GORM bỏ qua giá trị zero (false) khi Create nếu tag có default → ngày lễ
+// "giờ đặc biệt" bị lưu thành đóng cửa. Cột DB vẫn DEFAULT TRUE cho dữ liệu chèn tay.
 type BranchHoliday struct {
 	ID         uint      `gorm:"primaryKey;autoIncrement"`
 	BranchID   *uint     // nil = toàn hệ thống
 	Date       time.Time `gorm:"type:date;not null"`
 	Name       string    `gorm:"type:varchar(150);not null"`
-	Closed     bool      `gorm:"not null;default:true"`
+	Closed     bool      `gorm:"not null"`
 	OpenTime   *string   `gorm:"type:varchar(5)"`
 	CloseTime  *string   `gorm:"type:varchar(5)"`
 	ExtendSubs bool      `gorm:"not null;default:false"`

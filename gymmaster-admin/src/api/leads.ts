@@ -186,6 +186,11 @@ class LeadsApi {
     return http.put<Lead>(`/admin/leads/${id}`, data);
   }
 
+  /** Chỉ đổi trạng thái (Kanban) – không cần gửi lại toàn bộ thông tin khách. */
+  updateStatus(id: number, status: LeadStatus) {
+    return http.patch<Lead>(`/admin/leads/${id}/status`, { status });
+  }
+
   remove(id: number) {
     return http.delete(`/admin/leads/${id}`);
   }

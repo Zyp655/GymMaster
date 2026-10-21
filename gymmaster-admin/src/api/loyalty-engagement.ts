@@ -147,16 +147,28 @@ export interface BadgeInput {
   };
 }
 
+/** Dòng lịch sử điểm – GET /admin/loyalty-ledgers (lọc theo chi nhánh được phân quyền). */
 export interface LoyaltyLedger {
   id: number;
   member_id: number;
-  member_name?: string;
-  member_code?: string;
+  member_name: string;
+  member_code: string;
+  branch_id: number;
+  branch_name: string;
   points: number;
   reason: LoyaltyReason;
+  ref_type: string;
+  ref_id: number | null;
   note: string;
-  created_by_name?: string;
+  created_by: number | null;
+  created_by_name: string;
   created_at: string;
+}
+
+export interface LoyaltyLedgerListParams extends ListParams {
+  member_id?: number;
+  branch_id?: number;
+  reason?: LoyaltyReason;
 }
 
 class LoyaltyApi {
@@ -227,16 +239,9 @@ class LoyaltyApi {
     );
   }
 
-  async listLedgers(params: ListParams & { member_id?: number } = {}): Promise<Page<LoyaltyLedger>> {
-    try {
-      const res = await http.get<Page<LoyaltyLedger> | LoyaltyLedger[]>(
-        '/admin/loyalty-ledgers',
-        { params },
-      );
-      return normalizePage(res);
-    } catch {
-      return { items: [], total: 0, total_page: 1, current_page: 1, limit: 20 };
-    }
+  /** Lỗi được ném lên để DataTable hiển thị trạng thái lỗi + "Thử lại" (không nuốt lỗi thành danh sách rỗng). */
+  listLedgers(params: LoyaltyLedgerListParams = {}): Promise<Page<LoyaltyLedger>> {
+    return http.get<Page<LoyaltyLedger>>('/admin/loyalty-ledgers', { params });
   }
 }
 

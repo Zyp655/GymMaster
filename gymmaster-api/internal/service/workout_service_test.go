@@ -388,4 +388,14 @@ func TestWorkoutService_MemberLogsAndProgress(t *testing.T) {
 	assert.Equal(t, "2026-10-05", res.Progress[1].Date)
 	assert.Equal(t, 110.0, res.Progress[1].MaxWeight)
 	assert.Equal(t, 2200.0, res.Progress[1].TotalVolume)
+
+	foreignPlanItem := uint(999)
+	_, err = svc.CreateWorkoutLog(memberCtx, &v1.CreateWorkoutLogReq{
+		PlanItemID: &foreignPlanItem,
+		ExerciseID: ex.ID,
+		Sets:       3,
+		Reps:       8,
+		Weight:     80,
+	})
+	assert.Equal(t, rescode.NotFound.Code(), codeOf(err))
 }

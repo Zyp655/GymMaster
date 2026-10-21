@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -145,7 +146,7 @@ func (s *classScheduleService) Create(ctx context.Context, req *v1.CreateSchedul
 		return nil, err
 	}
 	end := start.Add(slot.duration)
-	if err := s.checkSlot(ctx, slot, start, end, 0); err != nil {
+	if err := s.checkSlot(ctx, slot, start, end, 0, slot.trainerID); err != nil {
 		return nil, err
 	}
 	actor := reqctx.UserID(ctx)
@@ -232,6 +233,20 @@ func (s *classScheduleService) CreateRecurring(ctx context.Context, req *v1.Crea
 				skip(classPastMsg)
 				continue
 			}
+			// Ngày lễ đóng cửa / ngoài giờ đặc biệt, hoặc HLV nghỉ phép đã duyệt → bỏ qua buổi này.
+			if h, err := currentScheduleGuard().HolidayOn(ctx, slot.branch.ID, start); err != nil {
+				return err
+			} else if msg := holidaySlotViolation(h, start, end); msg != "" {
+				skip(msg)
+				continue
+			}
+			if err := currentScheduleGuard().CheckTrainerLeave(ctx, slot.trainerID, start, end); err != nil {
+				if gerror.Code(err) == rescode.TrainerOnLeave {
+					skip("HLV nghỉ phép")
+					continue
+				}
+				return err
+			}
 			reason, err := s.slotConflict(ctx, slot, start, end, 0)
 			if err != nil {
 				return err
@@ -310,7 +325,12 @@ func (s *classScheduleService) Update(ctx context.Context, req *v1.UpdateSchedul
 				fmt.Sprintf("Sức chứa không được nhỏ hơn số chỗ đã đặt (%d)", sch.BookedCount))
 		}
 		end := start.Add(slot.duration)
-		if err := s.checkSlot(ctx, slot, start, end, sch.ID); err != nil {
+		// HLV thực dạy: HLV dạy thay (nếu đã phân công và không đổi HLV chính), ngược lại HLV chính.
+		teacherID := slot.trainerID
+		if sch.SubstituteTrainerID != nil && slot.trainerID == sch.TrainerID {
+			teacherID = *sch.SubstituteTrainerID
+		}
+		if err := s.checkSlot(ctx, slot, start, end, sch.ID, teacherID); err != nil {
 			return err
 		}
 		before := *sch
@@ -531,9 +551,17 @@ func (s *classScheduleService) prepare(ctx context.Context, classTypeID, branchI
 	}, nil
 }
 
-// checkSlot dùng cho tạo/sửa một buổi: giờ mở cửa + trùng lịch (phòng, HLV, PT).
-func (s *classScheduleService) checkSlot(ctx context.Context, slot *classSlot, start, end time.Time, excludeID uint) error {
+// checkSlot dùng cho tạo/sửa một buổi: giờ mở cửa, ngày lễ (đóng cửa / giờ đặc biệt), HLV thực dạy (teacherID)
+// không nghỉ phép đã duyệt, trùng lịch (phòng, HLV, PT).
+func (s *classScheduleService) checkSlot(ctx context.Context, slot *classSlot, start, end time.Time, excludeID, teacherID uint) error {
 	if err := classCheckOpeningHours(slot.branch, start, end, s.loc); err != nil {
+		return err
+	}
+	guard := currentScheduleGuard()
+	if err := guard.CheckBranchOpen(ctx, slot.branch.ID, start, end); err != nil {
+		return err
+	}
+	if err := guard.CheckTrainerLeave(ctx, teacherID, start, end); err != nil {
 		return err
 	}
 	reason, err := s.slotConflict(ctx, slot, start, end, excludeID)

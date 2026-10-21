@@ -158,7 +158,7 @@ type FoodLog struct {
 	ID        uint      `gorm:"primaryKey;autoIncrement"`
 	MemberID  uint      `gorm:"not null"`
 	FoodID    uint      `gorm:"not null"`
-	Qty       float64   `gorm:"type:numeric(6,2);not null;default:1"`
+	Qty       float64   `gorm:"type:numeric(10,4);not null;default:1"`
 	Meal      string    `gorm:"type:varchar(20);not null"`
 	EatenAt   time.Time `gorm:"type:date;not null"`
 	CreatedAt time.Time

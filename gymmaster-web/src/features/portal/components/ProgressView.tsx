@@ -34,7 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatDate } from '@/lib/format';
-import { extractWorkoutProgress } from '../api';
+import { extractWorkoutLogs, extractWorkoutProgress, pickDefaultExerciseId } from '../api';
 import { useBodyMetricsQuery, useExercisesQuery, useWorkoutLogsQuery } from '../queries';
 import { PortalPageHeader } from './PortalPageHeader';
 
@@ -270,9 +270,15 @@ export function ProgressView() {
 function WorkoutProgressSection() {
   const t = useTranslations('portal.progress');
   const exercisesQuery = useExercisesQuery();
+  const recentLogsQuery = useWorkoutLogsQuery();
   const [selectedExerciseId, setSelectedExerciseId] = useState<number | undefined>(undefined);
 
-  const effectiveExerciseId = selectedExerciseId ?? exercisesQuery.data?.[0]?.id;
+  // Mặc định chọn bài tập có nhật ký gần nhất (thay vì bài đầu thư viện – thường chưa có log).
+  const defaultExerciseId = pickDefaultExerciseId(
+    extractWorkoutLogs(recentLogsQuery.data),
+    exercisesQuery.data ?? [],
+  );
+  const effectiveExerciseId = selectedExerciseId ?? defaultExerciseId;
   const logsQuery = useWorkoutLogsQuery(effectiveExerciseId, Boolean(effectiveExerciseId));
   const progressData = extractWorkoutProgress(logsQuery.data).map(point => ({
     date: formatDate(point.date, 'DD/MM'),
@@ -291,7 +297,7 @@ function WorkoutProgressSection() {
           {exercisesQuery.data && exercisesQuery.data.length > 0 ? (
             <div className="w-full sm:w-64">
               <Select
-                value={effectiveExerciseId ? String(effectiveExerciseId) : undefined}
+                value={effectiveExerciseId ? String(effectiveExerciseId) : ''}
                 onValueChange={v => setSelectedExerciseId(Number(v))}
               >
                 <SelectTrigger aria-label={t('workoutExerciseLabel')}>
@@ -310,7 +316,7 @@ function WorkoutProgressSection() {
         </div>
       </CardHeader>
 
-      {logsQuery.isLoading || exercisesQuery.isLoading ? (
+      {logsQuery.isLoading || exercisesQuery.isLoading || recentLogsQuery.isLoading ? (
         <Skeleton className="h-72 w-full rounded-xl" />
       ) : progressData.length === 0 ? (
         <EmptyState

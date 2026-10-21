@@ -37,7 +37,7 @@ export function getErrorMessage(error: unknown, fallback = 'Đã có lỗi xảy
  * Dùng trong `onError` của mutation: `onError: (e) => showError(e, 'Không thể lưu')`.
  */
 export function showError(error: unknown, fallback?: string): void {
-  if (isApiError(error) && error.handled) return;
+  if (isApiError(error) && (error.handled || error.code === ErrorCode.CANCELED)) return;
   feedback.message.error(getErrorMessage(error, fallback));
 }
 

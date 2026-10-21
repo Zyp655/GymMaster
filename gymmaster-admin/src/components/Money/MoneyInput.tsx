@@ -23,7 +23,7 @@ export function MoneyInput({ min = 0, step = 1000, style, ...rest }: MoneyInputP
       min={min}
       step={step}
       precision={0}
-      addonAfter="₫"
+      suffix="₫"
       formatter={formatter}
       parser={parser}
       style={{ width: '100%', ...style }}

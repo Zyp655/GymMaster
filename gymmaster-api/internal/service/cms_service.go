@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"gorm.io/gorm"
 
 	v1 "gymmaster-api/api/cms/v1"
@@ -17,6 +18,7 @@ import (
 	"gymmaster-api/internal/pkg/realtime"
 	"gymmaster-api/internal/pkg/reqctx"
 	"gymmaster-api/internal/pkg/rescode"
+	"gymmaster-api/internal/pkg/token"
 	"gymmaster-api/internal/repository"
 )
 
@@ -195,16 +197,27 @@ func (s *CMSService) PublicPosts(ctx context.Context, category, search string) (
 	if err != nil {
 		return nil, err
 	}
-	return mapPosts(list), nil
+	now := time.Now()
+	visible := make([]entity.Post, 0, len(list))
+	for i := range list {
+		if postIsPublic(&list[i], now) {
+			visible = append(visible, list[i])
+		}
+	}
+	return mapPosts(visible), nil
 }
 
 func (s *CMSService) PublicPostDetail(ctx context.Context, slug string) (*v1.PublicPostDetailRes, error) {
-	p, err := s.repo.FindPostBySlug(ctx, slug)
+	p, err := s.repo.FindPostBySlug(ctx, strings.TrimSpace(slug))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, rescode.New(rescode.NotFound, "Không tìm thấy bài viết")
 		}
 		return nil, err
+	}
+	// Bản nháp / lưu trữ / hẹn giờ chưa tới → coi như không tồn tại (không lộ nội dung chưa xuất bản).
+	if !postIsPublic(p, time.Now()) {
+		return nil, rescode.New(rescode.NotFound, "Không tìm thấy bài viết")
 	}
 	return &v1.PublicPostDetailRes{PostItem: toPostItem(*p)}, nil
 }
@@ -307,9 +320,26 @@ func (s *CMSService) AdminListPosts(ctx context.Context, status, category string
 
 func (s *CMSService) AdminCreatePost(ctx context.Context, req *v1.AdminCreatePostReq) (*v1.AdminCreatePostRes, error) {
 	now := time.Now()
-	status := req.Status
+	status := strings.TrimSpace(req.Status)
 	if status == "" {
 		status = entity.PostStatusPublished
+	}
+	slug := strings.TrimSpace(req.Slug)
+	category := strings.TrimSpace(req.Category)
+	if category == "" {
+		category = "TAP_LUYEN"
+	}
+	if err := validatePostSlug(slug); err != nil {
+		return nil, err
+	}
+	if err := validatePostCategory(category); err != nil {
+		return nil, err
+	}
+	if err := validatePostStatus(status); err != nil {
+		return nil, err
+	}
+	if err := s.ensurePostSlugFree(ctx, slug, 0); err != nil {
+		return nil, err
 	}
 	var pubAt *time.Time
 	if status == entity.PostStatusPublished {
@@ -320,17 +350,20 @@ func (s *CMSService) AdminCreatePost(ctx context.Context, req *v1.AdminCreatePos
 		authorID = &auth.UserID
 	}
 	p := &entity.Post{
-		Slug:        strings.TrimSpace(req.Slug),
+		Slug:        slug,
 		Title:       strings.TrimSpace(req.Title),
 		Excerpt:     strings.TrimSpace(req.Excerpt),
 		CoverURL:    strings.TrimSpace(req.CoverURL),
-		Category:    strings.TrimSpace(req.Category),
+		Category:    category,
 		Content:     req.Content,
 		Status:      status,
 		AuthorID:    authorID,
 		PublishedAt: pubAt,
 	}
 	if err := s.repo.CreatePost(ctx, p); err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil, postSlugConflictError()
+		}
 		return nil, err
 	}
 	return &v1.AdminCreatePostRes{PostItem: toPostItem(*p)}, nil
@@ -341,31 +374,61 @@ func (s *CMSService) AdminUpdatePost(ctx context.Context, req *v1.AdminUpdatePos
 	if err != nil {
 		return nil, rescode.New(rescode.NotFound, "Không tìm thấy bài viết")
 	}
-	if req.Slug != "" {
-		p.Slug = strings.TrimSpace(req.Slug)
+	if slug := strings.TrimSpace(req.Slug); slug != "" && slug != p.Slug {
+		if err := validatePostSlug(slug); err != nil {
+			return nil, err
+		}
+		if err := s.ensurePostSlugFree(ctx, slug, p.ID); err != nil {
+			return nil, err
+		}
+		p.Slug = slug
 	}
-	if req.Title != "" {
-		p.Title = strings.TrimSpace(req.Title)
+	if title := strings.TrimSpace(req.Title); title != "" {
+		p.Title = title
 	}
 	p.Excerpt = strings.TrimSpace(req.Excerpt)
 	p.CoverURL = strings.TrimSpace(req.CoverURL)
-	if req.Category != "" {
-		p.Category = req.Category
+	if category := strings.TrimSpace(req.Category); category != "" {
+		if err := validatePostCategory(category); err != nil {
+			return nil, err
+		}
+		p.Category = category
 	}
 	if req.Content != "" {
 		p.Content = req.Content
 	}
-	if req.Status != "" {
-		p.Status = req.Status
-		if req.Status == entity.PostStatusPublished && p.PublishedAt == nil {
+	if status := strings.TrimSpace(req.Status); status != "" {
+		if err := validatePostStatus(status); err != nil {
+			return nil, err
+		}
+		p.Status = status
+		if status == entity.PostStatusPublished && p.PublishedAt == nil {
 			now := time.Now()
 			p.PublishedAt = &now
 		}
 	}
 	if err := s.repo.UpdatePost(ctx, p); err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil, postSlugConflictError()
+		}
 		return nil, err
 	}
 	return &v1.AdminUpdatePostRes{PostItem: toPostItem(*p)}, nil
+}
+
+// ensurePostSlugFree: slug đã thuộc bài viết khác (khác excludeID) → 409.
+func (s *CMSService) ensurePostSlugFree(ctx context.Context, slug string, excludeID uint) error {
+	existing, err := s.repo.FindPostBySlug(ctx, slug)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if existing.ID != excludeID {
+		return postSlugConflictError()
+	}
+	return nil
 }
 
 func (s *CMSService) AdminDeletePost(ctx context.Context, id uint) error {
@@ -401,71 +464,173 @@ func (s *CMSService) AdminUpdateContactMessage(ctx context.Context, req *v1.Admi
 }
 
 // ==================== NHẮN TIN HLV ↔ HỘI VIÊN (MỤC 15.1) ====================
+//
+// Nguồn sự thật về người tham gia hội thoại là HỢP ĐỒNG PT (pt_contracts.member_id / trainer_id): đổi HLV hợp đồng thì
+// HLV mới đọc/gửi được ngay, HLV cũ mất quyền; conversations.trainer_id/member_id chỉ là bản sao được đồng bộ lại.
 
-func (s *CMSService) ListConversations(ctx context.Context) (v1.ListConversationsRes, error) {
+const (
+	conversationDefaultLimit = 50
+	conversationMaxLimit     = 100
+)
+
+// conversationAccess mô tả quyền của người gọi trên một hội thoại PT.
+type conversationAccess struct {
+	participant bool   // là hội viên hoặc HLV của hội thoại
+	role        string // MEMBER | TRAINER (chỉ khi participant)
+}
+
+// isMessagingSupervisor: OWNER/MANAGER được xem (chỉ đọc) hội thoại trong phạm vi chi nhánh.
+func isMessagingSupervisor(auth *token.Payload) bool {
+	return auth.HasRole(consts.RoleOwner) || auth.HasRole(consts.RoleManager)
+}
+
+// messagingAuth lấy người gọi; token chỉ có vai trò MEMBER gọi qua /v1/admin/... bị từ chối (403) – hội viên dùng
+// /v1/member/conversations.
+func messagingAuth(ctx context.Context) (*token.Payload, error) {
 	auth := reqctx.Auth(ctx)
 	if auth == nil {
 		return nil, rescode.New(rescode.Unauthorized, "Bạn chưa đăng nhập")
 	}
+	if r := g.RequestFromCtx(ctx); r != nil && strings.Contains(r.URL.Path, "/admin/") && messagingMemberOnly(auth) {
+		return nil, rescode.New(rescode.PermissionDenied, "Tài khoản hội viên không được dùng API quản trị")
+	}
+	return auth, nil
+}
 
-	var contracts []entity.PTContract
-	q := s.repo.DB().WithContext(ctx).Order("id DESC")
+// messagingMemberOnly: tài khoản chỉ có vai trò MEMBER (hoặc không có vai trò nào).
+func messagingMemberOnly(auth *token.Payload) bool {
+	for _, role := range auth.Roles {
+		if role != consts.RoleMember {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveConversationAccess kiểm tra người gọi có được truy cập hội thoại không (theo hợp đồng PT).
+// Người ngoài cuộc (không phải hội viên/HLV của hợp đồng, không phải quản lý trong phạm vi chi nhánh)
+// nhận 404 để không lộ sự tồn tại của hội thoại.
+func (s *CMSService) resolveConversationAccess(ctx context.Context, auth *token.Payload, contract *entity.PTContract) (*conversationAccess, error) {
+	notFound := rescode.New(rescode.NotFound, "Không tìm thấy cuộc trò chuyện")
+	if auth.HasRole(consts.RoleTrainer) && contract.TrainerID == auth.UserID {
+		return &conversationAccess{participant: true, role: "TRAINER"}, nil
+	}
 	if auth.HasRole(consts.RoleMember) {
+		var member entity.Member
+		if err := s.repo.DB().WithContext(ctx).Where("user_id = ?", auth.UserID).First(&member).Error; err == nil && member.ID == contract.MemberID {
+			return &conversationAccess{participant: true, role: "MEMBER"}, nil
+		}
+	}
+	if isMessagingSupervisor(auth) && reqctx.CanAccessBranch(ctx, contract.BranchID) {
+		return &conversationAccess{participant: false}, nil
+	}
+	return nil, notFound
+}
+
+// loadConversation đọc hội thoại + hợp đồng PT và đồng bộ người tham gia theo hợp đồng nếu lệch (đổi HLV).
+func (s *CMSService) loadConversation(ctx context.Context, id uint) (*entity.Conversation, *entity.PTContract, error) {
+	conv, err := s.repo.FindConversationByID(ctx, id)
+	if err != nil {
+		return nil, nil, rescode.New(rescode.NotFound, "Không tìm thấy cuộc trò chuyện")
+	}
+	var contract entity.PTContract
+	if err := s.repo.DB().WithContext(ctx).First(&contract, conv.PTContractID).Error; err != nil {
+		return nil, nil, rescode.New(rescode.NotFound, "Không tìm thấy cuộc trò chuyện")
+	}
+	if conv.TrainerID != contract.TrainerID || conv.MemberID != contract.MemberID {
+		if err := s.repo.SyncConversationParticipants(ctx, conv.ID, contract.MemberID, contract.TrainerID); err != nil {
+			return nil, nil, err
+		}
+		conv.TrainerID, conv.MemberID = contract.TrainerID, contract.MemberID
+	}
+	return conv, &contract, nil
+}
+
+func (s *CMSService) ListConversations(ctx context.Context, req *v1.ListConversationsReq) (v1.ListConversationsRes, error) {
+	auth, err := messagingAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	limit, page := conversationDefaultLimit, 1
+	if req != nil {
+		if req.Limit > 0 {
+			limit = min(req.Limit, conversationMaxLimit)
+		}
+		if req.Page > 1 {
+			page = req.Page
+		}
+	}
+	f := repository.ConversationListFilter{Offset: (page - 1) * limit, Limit: limit}
+	switch {
+	case isMessagingSupervisor(auth):
+		// Quản lý/chủ: xem hội thoại trong phạm vi chi nhánh được phân quyền.
+		f.BranchIDs = reqctx.AllowedBranches(ctx)
+	case auth.HasRole(consts.RoleTrainer):
+		f.TrainerID = auth.UserID
+	case auth.HasRole(consts.RoleMember):
 		var member entity.Member
 		if err := s.repo.DB().WithContext(ctx).Where("user_id = ?", auth.UserID).First(&member).Error; err != nil {
 			return v1.ListConversationsRes{}, nil
 		}
-		q = q.Where("member_id = ?", member.ID)
-	} else if auth.HasRole(consts.RoleTrainer) && !auth.HasRole(consts.RoleOwner) && !auth.HasRole(consts.RoleManager) {
-		q = q.Where("trainer_id = ?", auth.UserID)
+		f.MemberID = member.ID
+	default:
+		// Vai trò khác (lễ tân, ...) không tham gia nhắn tin PT.
+		return v1.ListConversationsRes{}, nil
 	}
-	if err := q.Limit(30).Find(&contracts).Error; err != nil {
+	rows, err := s.repo.ListConversationContracts(ctx, f)
+	if err != nil {
 		return nil, err
 	}
 
-	res := make(v1.ListConversationsRes, 0, len(contracts))
-	for _, c := range contracts {
-		conv, err := s.repo.EnsureConversation(ctx, c.ID, c.MemberID, c.TrainerID)
+	res := make(v1.ListConversationsRes, 0, len(rows))
+	for _, c := range rows {
+		conv, err := s.repo.EnsureConversation(ctx, c.ContractID, c.MemberID, c.TrainerID)
 		if err != nil {
 			continue
 		}
-		var member entity.Member
-		var trainer entity.User
-		_ = s.repo.DB().WithContext(ctx).First(&member, c.MemberID).Error
-		_ = s.repo.DB().WithContext(ctx).First(&trainer, c.TrainerID).Error
-
-		remaining := c.TotalSessions - c.UsedSessions
-		if remaining < 0 {
-			remaining = 0
+		remaining := max(c.TotalSessions-c.UsedSessions, 0)
+		var unread int64
+		switch {
+		case c.TrainerID == auth.UserID:
+			unread = s.repo.CountUnreadMessages(ctx, conv.ID, auth.UserID, "TRAINER")
+		case c.MemberUserID != nil && *c.MemberUserID == auth.UserID:
+			unread = s.repo.CountUnreadMessages(ctx, conv.ID, auth.UserID, "MEMBER")
 		}
 		res = append(res, &v1.ConversationItem{
 			ID:                 conv.ID,
-			PTContractID:       c.ID,
+			PTContractID:       c.ContractID,
 			MemberID:           c.MemberID,
-			MemberName:         member.FullName,
-			MemberCode:         member.MemberCode,
+			MemberName:         c.MemberName,
+			MemberCode:         c.MemberCode,
 			TrainerID:          c.TrainerID,
-			TrainerName:        trainer.FullName,
+			TrainerName:        c.TrainerName,
 			ContractStatus:     c.Status,
 			RemainingSessions:  remaining,
 			LastMessageAt:      conv.LastMessageAt,
 			LastMessagePreview: conv.LastMessagePreview,
-			UnreadCount:        s.repo.CountUnreadMessages(ctx, conv.ID, auth.UserID),
+			UnreadCount:        unread,
 		})
 	}
 	return res, nil
 }
 
 func (s *CMSService) ListMessages(ctx context.Context, conversationID uint) (v1.ListMessagesRes, error) {
-	auth := reqctx.Auth(ctx)
-	if auth == nil {
-		return nil, rescode.New(rescode.Unauthorized, "Bạn chưa đăng nhập")
-	}
-	conv, err := s.repo.FindConversationByID(ctx, conversationID)
+	auth, err := messagingAuth(ctx)
 	if err != nil {
-		return nil, rescode.New(rescode.NotFound, "Không tìm thấy cuộc trò chuyện")
+		return nil, err
 	}
-	_ = s.repo.MarkMessagesRead(ctx, conv.ID, auth.UserID, time.Now())
+	conv, contract, err := s.loadConversation(ctx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	access, err := s.resolveConversationAccess(ctx, auth, contract)
+	if err != nil {
+		return nil, err
+	}
+	// Chỉ người tham gia hội thoại mới đánh dấu "đã đọc"; quản lý xem giám sát không làm thay đổi trạng thái.
+	if access.participant {
+		_ = s.repo.MarkMessagesRead(ctx, conv.ID, auth.UserID, access.role, time.Now())
+	}
 
 	msgs, err := s.repo.ListMessages(ctx, conv.ID)
 	if err != nil {
@@ -491,40 +656,42 @@ func (s *CMSService) ListMessages(ctx context.Context, conversationID uint) (v1.
 }
 
 func (s *CMSService) SendMessage(ctx context.Context, req *v1.SendMessageReq) (*v1.SendMessageRes, error) {
-	auth := reqctx.Auth(ctx)
-	if auth == nil {
-		return nil, rescode.New(rescode.Unauthorized, "Bạn chưa đăng nhập")
-	}
-	conv, err := s.repo.FindConversationByID(ctx, req.ID)
+	auth, err := messagingAuth(ctx)
 	if err != nil {
-		return nil, rescode.New(rescode.NotFound, "Không tìm thấy cuộc trò chuyện")
+		return nil, err
 	}
-	var contract entity.PTContract
-	if err := s.repo.DB().WithContext(ctx).First(&contract, conv.PTContractID).Error; err != nil {
-		return nil, rescode.New(rescode.NotFound, "Không tìm thấy hợp đồng PT")
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
+		return nil, rescode.New(rescode.BadRequest, "Vui lòng nhập nội dung tin nhắn")
+	}
+	conv, contract, err := s.loadConversation(ctx, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	access, err := s.resolveConversationAccess(ctx, auth, contract)
+	if err != nil {
+		return nil, err
+	}
+	if !access.participant {
+		return nil, rescode.New(rescode.PermissionDenied, "Chỉ hội viên và HLV của hợp đồng PT mới được gửi tin nhắn trong hội thoại này")
 	}
 	if contract.Status != entity.PTContractActive {
 		return nil, rescode.New(rescode.BadRequest, "Chỉ được nhắn tin khi hợp đồng PT còn hiệu lực (ACTIVE)")
 	}
 
-	senderRole := "TRAINER"
-	var recipientUserID uint = conv.TrainerID
-	if auth.HasRole(consts.RoleMember) {
-		senderRole = "MEMBER"
-		recipientUserID = conv.TrainerID
+	senderRole := access.role
+	var recipientUserID uint
+	if senderRole == "MEMBER" {
+		recipientUserID = contract.TrainerID
 	} else {
 		var member entity.Member
-		if err := s.repo.DB().WithContext(ctx).First(&member, conv.MemberID).Error; err == nil && member.UserID != nil {
+		if err := s.repo.DB().WithContext(ctx).First(&member, contract.MemberID).Error; err == nil && member.UserID != nil {
 			recipientUserID = *member.UserID
 		}
 	}
 
 	now := time.Now()
-	content := strings.TrimSpace(req.Content)
-	preview := content
-	if len(preview) > 120 {
-		preview = preview[:120] + "..."
-	}
+	preview := truncateRunes(content, 120)
 	msg := &entity.Message{
 		ConversationID: conv.ID,
 		SenderUserID:   auth.UserID,
@@ -780,4 +947,13 @@ func toContactItem(m entity.ContactMessage) *v1.ContactMessageItem {
 		HandledNote: m.HandledNote,
 		CreatedAt:   m.CreatedAt,
 	}
+}
+
+// truncateRunes cắt chuỗi theo số ký tự (rune) — an toàn với tiếng Việt UTF-8 — và thêm "..." nếu bị cắt.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"gorm.io/gorm"
 
@@ -681,10 +682,24 @@ func (s *ptService) prepareChangeTrainer(ctx context.Context, id uint, in v1.Cha
 		return nil, err
 	}
 	ch := &ptTrainerChange{contract: c, trainerName: name, sessions: sessions, conflicts: []*v1.SessionConflict{}}
+	guard := currentScheduleGuard()
 	for _, ss := range sessions {
 		reason, err := s.trainerConflict(ctx, in.TrainerID, ss.StartAt, ss.EndAt, ss.ID)
 		if err != nil {
 			return nil, err
+		}
+		if reason == "" {
+			// HLV mới phải nhận được buổi: không nghỉ phép đã duyệt, nằm trong lịch rảnh đã đăng ký tại chi nhánh.
+			if err := guard.CheckTrainerSlot(ctx, in.TrainerID, c.BranchID, ss.StartAt, ss.EndAt); err != nil {
+				switch gerror.Code(err) {
+				case rescode.TrainerOnLeave:
+					reason = "HLV mới nghỉ phép"
+				case rescode.PTOutsideAvailability:
+					reason = "ngoài lịch rảnh của HLV mới"
+				default:
+					return nil, err
+				}
+			}
 		}
 		if reason != "" {
 			ch.conflicts = append(ch.conflicts, &v1.SessionConflict{SessionID: ss.ID, StartAt: ss.StartAt, EndAt: ss.EndAt, Reason: reason})
@@ -711,7 +726,7 @@ func ptConflictMessage(conflicts []*v1.SessionConflict) string {
 		}
 		parts = append(parts, fmt.Sprintf("buổi #%d lúc %s (%s)", c.SessionID, ptFmtTime(c.StartAt), c.Reason))
 	}
-	return fmt.Sprintf("Không thể đổi HLV: %d buổi đã đặt bị trùng lịch của HLV mới: %s. Hãy đổi giờ hoặc hủy các buổi này trước",
+	return fmt.Sprintf("Không thể đổi HLV: %d buổi đã đặt không phù hợp lịch của HLV mới (trùng lịch, nghỉ phép hoặc ngoài lịch rảnh): %s. Hãy đổi giờ hoặc hủy các buổi này trước",
 		len(conflicts), strings.Join(parts, "; "))
 }
 

@@ -2,12 +2,7 @@ import { useCallback } from 'react';
 import { Card, Col, DatePicker, Row } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import checkinApi, {
-  CHECKIN_METHOD_LABEL,
-  CHECKIN_METHOD_OPTIONS,
-  CHECKIN_RESULT_MAP,
-  CHECKIN_RESULT_OPTIONS,
-} from '@/api/checkin';
+import checkinApi, { CHECKIN_RESULT_MAP, CHECKIN_RESULT_OPTIONS } from '@/api/checkin';
 import type { CheckinItem, CheckinListParams } from '@/api/checkin';
 import ActionBar from '@/components/ActionBar';
 import DataTable from '@/components/DataTable';
@@ -22,6 +17,7 @@ import { useUrlParams } from '@/hooks/useUrlParams';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
 import { DATE_FORMAT, formatDateTime, toApiDate } from '@/utils/format';
 import { checkinColumns } from './columns';
+import { METHOD_OPTIONS, methodLabel } from './methods';
 
 const TITLE = 'Lịch sử ra vào';
 const SUBTITLE = 'Mọi lượt quét check-in: cho vào, từ chối, checkout';
@@ -56,7 +52,7 @@ function CheckinsDesktop() {
       </Row>
 
       <FilterBar
-        searchPlaceholder="Tên, mã hoặc SĐT hội viên"
+        searchPlaceholder="Tên, mã, SĐT hội viên hoặc mã vé (DP-…, TP-…)"
         colTextSearch={5}
         filters={[
           {
@@ -65,7 +61,7 @@ function CheckinsDesktop() {
             options: branches.map((b) => ({ label: b.name, value: b.id })),
           },
           { name: 'result', placeholder: 'Kết quả', options: CHECKIN_RESULT_OPTIONS, col: 3 },
-          { name: 'method', placeholder: 'Phương thức', options: CHECKIN_METHOD_OPTIONS, col: 3 },
+          { name: 'method', placeholder: 'Phương thức', options: METHOD_OPTIONS, col: 3 },
         ]}
       >
         <Col xs={24} sm={12} md={6}>
@@ -126,7 +122,7 @@ function CheckinsMobile() {
       title={TITLE}
       queryKey={[checkinApi.key, 'list', branchId]}
       fetchPage={fetchPage}
-      searchPlaceholder="Tên, mã, SĐT hội viên"
+      searchPlaceholder="Tên, mã, SĐT hoặc mã vé DP-/TP-"
       emptyText="Chưa có lượt check-in nào"
       filters={[
         {
@@ -135,7 +131,7 @@ function CheckinsMobile() {
           options: branches.map((b) => ({ label: b.name, value: b.id })),
         },
         { name: 'result', label: 'Kết quả', options: CHECKIN_RESULT_OPTIONS },
-        { name: 'method', label: 'Phương thức', options: CHECKIN_METHOD_OPTIONS },
+        { name: 'method', label: 'Phương thức', options: METHOD_OPTIONS },
         { name: 'range', label: 'Khoảng ngày', type: 'daterange' },
       ]}
       row={{
@@ -146,13 +142,14 @@ function CheckinsMobile() {
         meta: (r) => [formatDateTime(r.checked_in_at), r.member_code, r.branch_name],
         tags: (r) => [
           { label: CHECKIN_RESULT_MAP[r.result].label, color: CHECKIN_RESULT_MAP[r.result].color },
-          { label: CHECKIN_METHOD_LABEL[r.method] },
+          { label: methodLabel(r.method) },
         ],
       }}
       details={(r) => [
         ['Thời điểm', formatDateTime(r.checked_in_at)],
         ['Ra về', r.checked_out_at ? formatDateTime(r.checked_out_at) : '—'],
         ['Chi nhánh', r.branch_name],
+        ['Phương thức', methodLabel(r.method)],
         ['Nhân viên', r.staff_name ?? '—'],
         ['Ghi chú', r.note || '—'],
       ]}

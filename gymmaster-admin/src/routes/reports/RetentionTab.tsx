@@ -1,7 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { Button, Card, Col, Progress, Result, Row, Table } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ClockCircleOutlined, RetweetOutlined, TeamOutlined, UserDeleteOutlined } from '@ant-design/icons';
+import {
+  ClockCircleOutlined,
+  RetweetOutlined,
+  TeamOutlined,
+  UserDeleteOutlined,
+} from '@ant-design/icons';
 import reportApi from '@/api/report';
 import type { RetentionRow } from '@/api/report';
 import StatCard from '@/components/StatCard';

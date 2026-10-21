@@ -39,11 +39,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import {
-  DOW_LABELS,
-  DOW_ORDER,
-  trainerSchedulesApi,
-} from '@/api/operations-ext';
+import { DOW_LABELS, DOW_ORDER, trainerSchedulesApi } from '@/api/operations-ext';
 import type {
   BranchHoliday,
   BranchHolidayInput,
@@ -59,7 +55,7 @@ import DataTable from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import PageTitle from '@/components/PageTitle';
 import StatusTag from '@/components/StatusTag';
-import { PERM } from '@/constants/permissions';
+import { PERM, ROLE } from '@/constants/permissions';
 import { LEAVE_STATUS_MAP, LEAVE_STATUS_OPTIONS } from '@/constants/status';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
@@ -67,17 +63,25 @@ import { useTableQuery } from '@/hooks/useTableQuery';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
 import { showError } from '@/utils/errors';
 import { DATE_FORMAT, formatDate, formatDateTime, toApiDate } from '@/utils/format';
+import { holidayImpactSummary, normalizeHHMM } from './time';
 
 /* --------------------------------------------------------------------------
  * TAB 1: Lịch rảnh HLV theo tuần (GET/PUT /admin/trainers/:id/availability)
  * -------------------------------------------------------------------------- */
-function TrainerAvailabilityTab({ canManage }: { canManage: boolean }) {
+function TrainerAvailabilityTab({
+  canManage,
+  selfTrainer,
+}: {
+  canManage: boolean;
+  /** HLV tự quản lý lịch rảnh của chính mình (không chọn HLV khác). */
+  selfTrainer?: { id: number; name: string };
+}) {
   const { message } = App.useApp();
   const qc = useQueryClient();
   const { branchId } = useWorkingBranch();
   const { branches } = useBranchOptions();
 
-  const [selectedTrainer, setSelectedTrainer] = useState<number | undefined>();
+  const [selectedTrainer, setSelectedTrainer] = useState<number | undefined>(selfTrainer?.id);
   const [selectedBranch, setSelectedBranch] = useState<number | undefined>(
     branchId ?? branches[0]?.id ?? 1,
   );
@@ -90,6 +94,7 @@ function TrainerAvailabilityTab({ canManage }: { canManage: boolean }) {
       const trainers = list.filter((s) => s.position === 'TRAINER');
       return trainers.length > 0 ? trainers : list;
     },
+    enabled: !selfTrainer,
   });
 
   useEffect(() => {
@@ -116,17 +121,33 @@ function TrainerAvailabilityTab({ canManage }: { canManage: boolean }) {
   }, [availQuery.data]);
 
   const saveMut = useMutation({
-    mutationFn: () =>
-      trainerSchedulesApi.updateAvailability(
+    mutationFn: () => {
+      // Kiểm tra định dạng giờ trước khi gửi (backend chấp nhận "7:00" và chuẩn hóa thành "07:00").
+      for (const s of slots) {
+        const st = normalizeHHMM(s.start_time);
+        const et = normalizeHHMM(s.end_time);
+        if (!st || !et) {
+          return Promise.reject(
+            new Error(`${DOW_LABELS[s.dow]}: giờ phải có dạng HH:mm (vd 07:00)`),
+          );
+        }
+        if (st >= et) {
+          return Promise.reject(
+            new Error(`${DOW_LABELS[s.dow]}: giờ bắt đầu phải trước giờ kết thúc`),
+          );
+        }
+      }
+      return trainerSchedulesApi.updateAvailability(
         selectedTrainer!,
         slots.map((s) => ({
-          branch_id: s.branch_id || selectedBranch || 1,
+          branch_id: selectedBranch!,
           dow: s.dow,
-          start_time: s.start_time,
-          end_time: s.end_time,
+          start_time: normalizeHHMM(s.start_time) ?? s.start_time,
+          end_time: normalizeHHMM(s.end_time) ?? s.end_time,
         })),
-        selectedBranch,
-      ),
+        selectedBranch!,
+      );
+    },
     onSuccess: () => {
       message.success('Đã lưu lịch rảnh theo tuần của HLV!');
       void qc.invalidateQueries({ queryKey: [trainerSchedulesApi.availabilityKey] });
@@ -160,18 +181,22 @@ function TrainerAvailabilityTab({ canManage }: { canManage: boolean }) {
         <Row justify="space-between" align="middle" gutter={[12, 12]}>
           <Col>
             <Space wrap>
-              <Select
-                showSearch
-                optionFilterProp="label"
-                placeholder="Chọn Huấn luyện viên (HLV)"
-                style={{ width: 260 }}
-                value={selectedTrainer}
-                onChange={(v) => setSelectedTrainer(v)}
-                options={(trainersQuery.data ?? []).map((t) => ({
-                  value: t.id,
-                  label: `${t.full_name} (${t.staff_code})`,
-                }))}
-              />
+              {selfTrainer ? (
+                <Typography.Text strong>Lịch rảnh của tôi: {selfTrainer.name}</Typography.Text>
+              ) : (
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="Chọn Huấn luyện viên (HLV)"
+                  style={{ width: 260 }}
+                  value={selectedTrainer}
+                  onChange={(v) => setSelectedTrainer(v)}
+                  options={(trainersQuery.data ?? []).map((t) => ({
+                    value: t.id,
+                    label: `${t.full_name} (${t.staff_code})`,
+                  }))}
+                />
+              )}
               {!branchId && (
                 <Select
                   placeholder="Chi nhánh"
@@ -185,7 +210,7 @@ function TrainerAvailabilityTab({ canManage }: { canManage: boolean }) {
           </Col>
           <Col>
             <Space>
-              {canManage && selectedTrainer && (
+              {canManage && selectedTrainer && selectedBranch && (
                 <Button
                   color="orange"
                   variant="solid"
@@ -216,84 +241,102 @@ function TrainerAvailabilityTab({ canManage }: { canManage: boolean }) {
           <Empty description="Vui lòng chọn Huấn luyện viên để cấu hình lịch rảnh" />
         </Card>
       ) : (
-        <Row gutter={[12, 12]}>
-          {DOW_ORDER.map((dow) => {
-            const daySlots = slots
-              .map((s, idx) => ({ ...s, _idx: idx }))
-              .filter((s) => s.dow === dow);
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message={
+              slots.length === 0
+                ? 'Chưa cấu hình lịch rảnh tại chi nhánh này: HLV nhận lịch PT trong mọi giờ mở cửa (không giới hạn).'
+                : 'Đã cấu hình lịch rảnh: HLV chỉ nhận lịch PT trong các ca bên dưới; ngày không có ca = không nhận lịch PT.'
+            }
+            description="Lịch rảnh áp dụng riêng cho từng chi nhánh. Xóa hết ca rồi lưu = bỏ giới hạn giờ nhận PT."
+          />
+          <Row gutter={[12, 12]}>
+            {DOW_ORDER.map((dow) => {
+              const daySlots = slots
+                .map((s, idx) => ({ ...s, _idx: idx }))
+                .filter((s) => s.dow === dow);
 
-            return (
-              <Col xs={24} sm={12} md={8} lg={6} key={dow}>
-                <Card
-                  size="small"
-                  title={<Typography.Text strong>{DOW_LABELS[dow]}</Typography.Text>}
-                  extra={
-                    canManage && (
-                      <Button
-                        size="small"
-                        type="link"
-                        icon={<PlusOutlined />}
-                        onClick={() => addSlotForDow(dow)}
-                      >
-                        Thêm ca
-                      </Button>
-                    )
-                  }
-                  style={{ height: '100%' }}
-                >
-                  {daySlots.length === 0 ? (
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      Nghỉ / Không nhận lịch PT
-                    </Typography.Text>
-                  ) : (
-                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                      {daySlots.map((slot) => (
-                        <div
-                          key={slot._idx}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            background: '#f8fafc',
-                            padding: '6px 8px',
-                            borderRadius: 6,
-                          }}
+              return (
+                <Col xs={24} sm={12} md={8} lg={6} key={dow}>
+                  <Card
+                    size="small"
+                    title={<Typography.Text strong>{DOW_LABELS[dow]}</Typography.Text>}
+                    extra={
+                      canManage && (
+                        <Button
+                          size="small"
+                          type="link"
+                          icon={<PlusOutlined />}
+                          onClick={() => addSlotForDow(dow)}
                         >
-                          <Input
-                            size="small"
-                            value={slot.start_time}
-                            disabled={!canManage}
-                            onChange={(e) => updateSlotTime(slot._idx, 'start_time', e.target.value)}
-                            placeholder="08:00"
-                            style={{ width: 70 }}
-                          />
-                          <span>→</span>
-                          <Input
-                            size="small"
-                            value={slot.end_time}
-                            disabled={!canManage}
-                            onChange={(e) => updateSlotTime(slot._idx, 'end_time', e.target.value)}
-                            placeholder="17:00"
-                            style={{ width: 70 }}
-                          />
-                          {canManage && (
-                            <Button
+                          Thêm ca
+                        </Button>
+                      )
+                    }
+                    style={{ height: '100%' }}
+                  >
+                    {daySlots.length === 0 ? (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {slots.length === 0
+                          ? 'Không giới hạn (mọi giờ mở cửa)'
+                          : 'Không nhận lịch PT'}
+                      </Typography.Text>
+                    ) : (
+                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                        {daySlots.map((slot) => (
+                          <div
+                            key={slot._idx}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              background: 'var(--gm-hover, #f8fafc)',
+                              padding: '6px 8px',
+                              borderRadius: 6,
+                            }}
+                          >
+                            <Input
                               size="small"
-                              type="text"
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={() => removeSlot(slot._idx)}
+                              value={slot.start_time}
+                              disabled={!canManage}
+                              onChange={(e) =>
+                                updateSlotTime(slot._idx, 'start_time', e.target.value)
+                              }
+                              placeholder="08:00"
+                              style={{ width: 70 }}
                             />
-                          )}
-                        </div>
-                      ))}
-                    </Space>
-                  )}
-                </Card>
-              </Col>
-            );
-          })}
-        </Row>
+                            <span>→</span>
+                            <Input
+                              size="small"
+                              value={slot.end_time}
+                              disabled={!canManage}
+                              onChange={(e) =>
+                                updateSlotTime(slot._idx, 'end_time', e.target.value)
+                              }
+                              placeholder="17:00"
+                              style={{ width: 70 }}
+                            />
+                            {canManage && (
+                              <Button
+                                size="small"
+                                type="text"
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={() => removeSlot(slot._idx)}
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </Space>
+                    )}
+                  </Card>
+                </Col>
+              );
+            })}
+          </Row>
+        </Space>
       )}
     </Space>
   );
@@ -302,7 +345,15 @@ function TrainerAvailabilityTab({ canManage }: { canManage: boolean }) {
 /* --------------------------------------------------------------------------
  * TAB 2: Đơn xin nghỉ phép & Lịch bị ảnh hưởng (/admin/leave-requests, /impacts)
  * -------------------------------------------------------------------------- */
-function LeaveRequestsTab({ canManage }: { canManage: boolean }) {
+function LeaveRequestsTab({
+  canManage,
+  self,
+}: {
+  /** Quản lý: duyệt/từ chối, xem lịch bị ảnh hưởng, phân công dạy thay. */
+  canManage: boolean;
+  /** Nhân viên/HLV không phải quản lý: chỉ xem & gửi đơn của chính mình. */
+  self?: { id: number; name: string };
+}) {
   const { message } = App.useApp();
   const qc = useQueryClient();
   const { branchId } = useWorkingBranch();
@@ -321,6 +372,7 @@ function LeaveRequestsTab({ canManage }: { canManage: boolean }) {
   const staffQuery = useQuery({
     queryKey: [staffApi.key, 'options', 'leave', branchId],
     queryFn: () => staffApi.options(branchId),
+    enabled: canManage,
   });
 
   const table = useTableQuery<
@@ -338,7 +390,7 @@ function LeaveRequestsTab({ canManage }: { canManage: boolean }) {
   const impactsQuery = useQuery({
     queryKey: [trainerSchedulesApi.leaveKey, 'impacts', inspectLeave?.id],
     queryFn: () => trainerSchedulesApi.getLeaveImpacts(inspectLeave!.id),
-    enabled: !!inspectLeave,
+    enabled: !!inspectLeave && canManage,
   });
 
   const createMut = useMutation({
@@ -349,7 +401,7 @@ function LeaveRequestsTab({ canManage }: { canManage: boolean }) {
       reason: string;
     }) =>
       trainerSchedulesApi.createLeaveRequest({
-        staff_id: v.staff_id,
+        staff_id: self ? self.id : v.staff_id,
         branch_id: v.branch_id ?? branchId ?? null,
         from_at: v.range[0].toISOString(),
         to_at: v.range[1].toISOString(),
@@ -445,12 +497,12 @@ function LeaveRequestsTab({ canManage }: { canManage: boolean }) {
             icon={<ExclamationCircleOutlined />}
             onClick={() => setInspectLeave(r)}
           >
-            Xem lịch ảnh hưởng & Duyệt
+            {canManage ? 'Xem lịch ảnh hưởng & Duyệt' : 'Xem chi tiết'}
           </Button>
         ),
       },
     ],
-    [],
+    [canManage],
   );
 
   const trainerOptions = (staffQuery.data ?? []).map((s) => ({
@@ -472,8 +524,8 @@ function LeaveRequestsTab({ canManage }: { canManage: boolean }) {
               });
               setCreateOpen(true);
             }}
-            addPerm={PERM.LEAVE_MANAGE}
-            addText="Tạo đơn xin nghỉ phép"
+            addPerm={self ? [PERM.LEAVE_MANAGE, PERM.PT_SCHEDULE] : PERM.LEAVE_MANAGE}
+            addText={self ? 'Gửi đơn xin nghỉ phép' : 'Tạo đơn xin nghỉ phép'}
             onRefresh={() => table.refetch()}
             refreshing={table.isFetching}
           />
@@ -526,13 +578,19 @@ function LeaveRequestsTab({ canManage }: { canManage: boolean }) {
           onFinish={(v) => createMut.mutate(v)}
           style={{ marginTop: 12 }}
         >
-          <Form.Item
-            name="staff_id"
-            label="Nhân viên / HLV xin nghỉ"
-            rules={[{ required: true, message: 'Vui lòng chọn nhân sự' }]}
-          >
-            <Select showSearch optionFilterProp="label" options={trainerOptions} />
-          </Form.Item>
+          {self ? (
+            <Form.Item label="Nhân viên / HLV xin nghỉ">
+              <Typography.Text strong>{self.name}</Typography.Text>
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="staff_id"
+              label="Nhân viên / HLV xin nghỉ"
+              rules={[{ required: true, message: 'Vui lòng chọn nhân sự' }]}
+            >
+              <Select showSearch optionFilterProp="label" options={trainerOptions} />
+            </Form.Item>
+          )}
           <Form.Item
             name="range"
             label="Khoảng thời gian nghỉ"
@@ -598,125 +656,133 @@ function LeaveRequestsTab({ canManage }: { canManage: boolean }) {
               description={`Lý do: ${inspectLeave.reason || 'Không ghi chú'}`}
             />
 
-            <Divider orientation="left" style={{ margin: '4px 0' }}>
-              Các ca Lớp học nhóm bị ảnh hưởng ({impactsQuery.data?.classes.length ?? 0})
-            </Divider>
+            {canManage && (
+              <>
+                <Divider orientation="left" style={{ margin: '4px 0' }}>
+                  Các ca Lớp học nhóm bị ảnh hưởng ({impactsQuery.data?.classes.length ?? 0})
+                </Divider>
 
-            <Table
-              size="small"
-              rowKey="id"
-              loading={impactsQuery.isLoading}
-              pagination={false}
-              dataSource={impactsQuery.data?.classes ?? []}
-              locale={{ emptyText: 'Không có lịch lớp học nào bị trùng' }}
-              columns={[
-                {
-                  title: 'Lớp học',
-                  key: 'name',
-                  render: (_, r) => r.class_type_name || r.title || `Lớp #${r.id}`,
-                },
-                {
-                  title: 'Thời gian',
-                  dataIndex: 'start_at',
-                  render: (v: string) => formatDateTime(v),
-                },
-                {
-                  title: 'Phân công HLV dạy thay',
-                  key: 'sub',
-                  render: (_, r) => (
-                    <Space>
-                      <Select
-                        size="small"
-                        placeholder="Chọn HLV thay"
-                        style={{ width: 170 }}
-                        value={subMap[`class_${r.id}`] ?? r.substitute_trainer_id ?? undefined}
-                        onChange={(val) =>
-                          setSubMap((prev) => ({ ...prev, [`class_${r.id}`]: val }))
-                        }
-                        options={trainerOptions.filter((o) => o.value !== inspectLeave.staff_id)}
-                      />
-                      {canManage && (
-                        <Button
-                          size="small"
-                          type="primary"
-                          icon={<SwapOutlined />}
-                          disabled={!subMap[`class_${r.id}`]}
-                          loading={substituteClassMut.isPending}
-                          onClick={() =>
-                            substituteClassMut.mutate({
-                              scheduleId: r.id,
-                              trainerId: subMap[`class_${r.id}`],
-                            })
-                          }
-                        >
-                          Gán thay
-                        </Button>
-                      )}
-                    </Space>
-                  ),
-                },
-              ]}
-            />
+                <Table
+                  size="small"
+                  rowKey="id"
+                  loading={impactsQuery.isLoading}
+                  pagination={false}
+                  dataSource={impactsQuery.data?.classes ?? []}
+                  locale={{ emptyText: 'Không có lịch lớp học nào bị trùng' }}
+                  columns={[
+                    {
+                      title: 'Lớp học',
+                      key: 'name',
+                      render: (_, r) => r.class_type_name || r.title || `Lớp #${r.id}`,
+                    },
+                    {
+                      title: 'Thời gian',
+                      dataIndex: 'start_at',
+                      render: (v: string) => formatDateTime(v),
+                    },
+                    {
+                      title: 'Phân công HLV dạy thay',
+                      key: 'sub',
+                      render: (_, r) => (
+                        <Space>
+                          <Select
+                            size="small"
+                            placeholder="Chọn HLV thay"
+                            style={{ width: 170 }}
+                            value={subMap[`class_${r.id}`] ?? r.substitute_trainer_id ?? undefined}
+                            onChange={(val) =>
+                              setSubMap((prev) => ({ ...prev, [`class_${r.id}`]: val }))
+                            }
+                            options={trainerOptions.filter(
+                              (o) => o.value !== inspectLeave.staff_id,
+                            )}
+                          />
+                          {canManage && (
+                            <Button
+                              size="small"
+                              type="primary"
+                              icon={<SwapOutlined />}
+                              disabled={!subMap[`class_${r.id}`]}
+                              loading={substituteClassMut.isPending}
+                              onClick={() =>
+                                substituteClassMut.mutate({
+                                  scheduleId: r.id,
+                                  trainerId: subMap[`class_${r.id}`],
+                                })
+                              }
+                            >
+                              Gán thay
+                            </Button>
+                          )}
+                        </Space>
+                      ),
+                    },
+                  ]}
+                />
 
-            <Divider orientation="left" style={{ margin: '4px 0' }}>
-              Các buổi dạy PT 1-1 bị ảnh hưởng ({impactsQuery.data?.pt_sessions.length ?? 0})
-            </Divider>
+                <Divider orientation="left" style={{ margin: '4px 0' }}>
+                  Các buổi dạy PT 1-1 bị ảnh hưởng ({impactsQuery.data?.pt_sessions.length ?? 0})
+                </Divider>
 
-            <Table
-              size="small"
-              rowKey="id"
-              loading={impactsQuery.isLoading}
-              pagination={false}
-              dataSource={impactsQuery.data?.pt_sessions ?? []}
-              locale={{ emptyText: 'Không có buổi PT nào bị trùng' }}
-              columns={[
-                {
-                  title: 'Hội viên',
-                  key: 'member',
-                  render: (_, r) => r.member_name || `Hội viên #${r.member_id ?? r.id}`,
-                },
-                {
-                  title: 'Thời gian',
-                  dataIndex: 'start_at',
-                  render: (v: string) => formatDateTime(v),
-                },
-                {
-                  title: 'Bàn giao HLV thay thế',
-                  key: 'reassign',
-                  render: (_, r) => (
-                    <Space>
-                      <Select
-                        size="small"
-                        placeholder="Chọn HLV nhận"
-                        style={{ width: 170 }}
-                        value={subMap[`pt_${r.id}`]}
-                        onChange={(val) =>
-                          setSubMap((prev) => ({ ...prev, [`pt_${r.id}`]: val }))
-                        }
-                        options={trainerOptions.filter((o) => o.value !== inspectLeave.staff_id)}
-                      />
-                      {canManage && (
-                        <Button
-                          size="small"
-                          type="primary"
-                          icon={<SwapOutlined />}
-                          disabled={!subMap[`pt_${r.id}`]}
-                          loading={reassignPtMut.isPending}
-                          onClick={() =>
-                            reassignPtMut.mutate({
-                              sessionId: r.id,
-                              trainerId: subMap[`pt_${r.id}`],
-                            })
-                          }
-                        >
-                          Bàn giao
-                        </Button>
-                      )}
-                    </Space>
-                  ),
-                },
-              ]}
-            />
+                <Table
+                  size="small"
+                  rowKey="id"
+                  loading={impactsQuery.isLoading}
+                  pagination={false}
+                  dataSource={impactsQuery.data?.pt_sessions ?? []}
+                  locale={{ emptyText: 'Không có buổi PT nào bị trùng' }}
+                  columns={[
+                    {
+                      title: 'Hội viên',
+                      key: 'member',
+                      render: (_, r) => r.member_name || `Hội viên #${r.member_id ?? r.id}`,
+                    },
+                    {
+                      title: 'Thời gian',
+                      dataIndex: 'start_at',
+                      render: (v: string) => formatDateTime(v),
+                    },
+                    {
+                      title: 'Bàn giao HLV thay thế',
+                      key: 'reassign',
+                      render: (_, r) => (
+                        <Space>
+                          <Select
+                            size="small"
+                            placeholder="Chọn HLV nhận"
+                            style={{ width: 170 }}
+                            value={subMap[`pt_${r.id}`]}
+                            onChange={(val) =>
+                              setSubMap((prev) => ({ ...prev, [`pt_${r.id}`]: val }))
+                            }
+                            options={trainerOptions.filter(
+                              (o) => o.value !== inspectLeave.staff_id,
+                            )}
+                          />
+                          {canManage && (
+                            <Button
+                              size="small"
+                              type="primary"
+                              icon={<SwapOutlined />}
+                              disabled={!subMap[`pt_${r.id}`]}
+                              loading={reassignPtMut.isPending}
+                              onClick={() =>
+                                reassignPtMut.mutate({
+                                  sessionId: r.id,
+                                  trainerId: subMap[`pt_${r.id}`],
+                                })
+                              }
+                            >
+                              Bàn giao
+                            </Button>
+                          )}
+                        </Space>
+                      ),
+                    },
+                  ]}
+                />
+              </>
+            )}
           </Space>
         )}
       </Drawer>
@@ -728,7 +794,7 @@ function LeaveRequestsTab({ canManage }: { canManage: boolean }) {
  * TAB 3: Lịch nghỉ lễ phòng tập (/admin/branch-holidays)
  * -------------------------------------------------------------------------- */
 function BranchHolidaysTab({ canManage }: { canManage: boolean }) {
-  const { message } = App.useApp();
+  const { message, modal: modalApi } = App.useApp();
   const qc = useQueryClient();
   const { branchId } = useWorkingBranch();
   const { branches } = useBranchOptions();
@@ -749,14 +815,16 @@ function BranchHolidaysTab({ canManage }: { canManage: boolean }) {
 
   const isClosed = Form.useWatch('closed', form) ?? true;
 
-  const table = useTableQuery<BranchHoliday, { branch_id?: number; page?: number; limit?: number }>({
-    queryKey: [trainerSchedulesApi.holidayKey, 'list'],
-    queryFn: (p) => trainerSchedulesApi.listHolidays(p),
-    filterKeys: ['branch_id'],
-    numberKeys: ['branch_id'],
-    defaults: { order_by: 'date', order_dir: 'DESC' },
-    extraParams: branchId ? { branch_id: branchId } : {},
-  });
+  const table = useTableQuery<BranchHoliday, { branch_id?: number; page?: number; limit?: number }>(
+    {
+      queryKey: [trainerSchedulesApi.holidayKey, 'list'],
+      queryFn: (p) => trainerSchedulesApi.listHolidays(p),
+      filterKeys: ['branch_id'],
+      numberKeys: ['branch_id'],
+      defaults: { order_by: 'date', order_dir: 'DESC' },
+      extraParams: branchId ? { branch_id: branchId } : {},
+    },
+  );
 
   useEffect(() => {
     if (!modal.open) return;
@@ -798,20 +866,45 @@ function BranchHolidaysTab({ canManage }: { canManage: boolean }) {
         date: toApiDate(v.date) ?? dayjs().format('YYYY-MM-DD'),
         name: v.name.trim(),
         closed: !!v.closed,
-        open_time: v.closed ? null : v.open_time || '08:00',
-        close_time: v.closed ? null : v.close_time || '17:00',
+        open_time: v.closed ? null : (normalizeHHMM(v.open_time) ?? v.open_time ?? null),
+        close_time: v.closed ? null : (normalizeHHMM(v.close_time) ?? v.close_time ?? null),
         extend_subs: !!v.extend_subs,
       };
       return modal.record
         ? trainerSchedulesApi.updateHoliday(modal.record.id, payload)
         : trainerSchedulesApi.createHoliday(payload);
     },
-    onSuccess: (_, v) => {
+    onSuccess: (saved, v) => {
       message.success(
         modal.record
           ? 'Đã cập nhật lịch nghỉ lễ'
-          : `Đã thêm ngày nghỉ lễ${v.extend_subs ? ' và kích hoạt cộng bù ngày cho gói tập' : ''}!`,
+          : `Đã thêm ngày nghỉ lễ${v.extend_subs && v.closed ? ' và kích hoạt cộng bù ngày cho gói tập' : ''}!`,
       );
+      const impact = saved ? holidayImpactSummary(saved) : null;
+      if (saved && impact) {
+        modalApi.warning({
+          title: 'Có lịch đã xếp rơi vào ngày nghỉ / ngoài giờ đặc biệt',
+          width: 560,
+          content: (
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Typography.Text>
+                {impact.classes} buổi lớp và {impact.pt} buổi PT không tự hủy – hãy dời lịch, phân
+                công lại hoặc hủy và báo hội viên:
+              </Typography.Text>
+              {(saved.affected_class_schedules ?? []).slice(0, 10).map((c) => (
+                <Typography.Text key={`c${c.id}`} type="secondary">
+                  • Lớp {c.class_type_name || `#${c.id}`} – {formatDateTime(c.start_at)}
+                </Typography.Text>
+              ))}
+              {(saved.affected_pt_sessions ?? []).slice(0, 10).map((p) => (
+                <Typography.Text key={`p${p.id}`} type="secondary">
+                  • PT {p.member_name || `#${p.id}`} – {formatDateTime(p.start_at)}
+                </Typography.Text>
+              ))}
+            </Space>
+          ),
+        });
+      }
       void qc.invalidateQueries({ queryKey: [trainerSchedulesApi.holidayKey] });
       setModal({ open: false, record: null });
     },
@@ -877,7 +970,7 @@ function BranchHolidaysTab({ canManage }: { canManage: boolean }) {
                 onClick={() => setModal({ open: true, record: r })}
               />
               <ConfirmButton
-                perm={[PERM.HOLIDAY_MANAGE, PERM.LEAVE_MANAGE]}
+                perm={PERM.HOLIDAY_MANAGE}
                 type="text"
                 size="small"
                 danger
@@ -901,7 +994,7 @@ function BranchHolidaysTab({ canManage }: { canManage: boolean }) {
         <Col>
           <ActionBar
             onAdd={() => setModal({ open: true, record: null })}
-            addPerm={[PERM.HOLIDAY_MANAGE, PERM.LEAVE_MANAGE]}
+            addPerm={PERM.HOLIDAY_MANAGE}
             addText="Thêm ngày nghỉ lễ"
             onRefresh={() => table.refetch()}
             refreshing={table.isFetching}
@@ -982,21 +1075,60 @@ function BranchHolidaysTab({ canManage }: { canManage: boolean }) {
           {!isClosed && (
             <Row gutter={12}>
               <Col xs={12}>
-                <Form.Item name="open_time" label="Giờ mở cửa đặc biệt">
+                <Form.Item
+                  name="open_time"
+                  label="Giờ mở cửa đặc biệt"
+                  rules={[
+                    { required: true, message: 'Nhập giờ mở cửa' },
+                    {
+                      validator: (_, v: string) =>
+                        !v || normalizeHHMM(v)
+                          ? Promise.resolve()
+                          : Promise.reject(new Error('Giờ dạng HH:mm, vd 07:00')),
+                    },
+                  ]}
+                >
                   <Input placeholder="08:00" />
                 </Form.Item>
               </Col>
               <Col xs={12}>
-                <Form.Item name="close_time" label="Giờ đóng cửa đặc biệt">
+                <Form.Item
+                  name="close_time"
+                  label="Giờ đóng cửa đặc biệt"
+                  dependencies={['open_time']}
+                  rules={[
+                    { required: true, message: 'Nhập giờ đóng cửa' },
+                    ({ getFieldValue }) => ({
+                      validator: (_, v: string) => {
+                        if (!v) return Promise.resolve();
+                        const c = normalizeHHMM(v);
+                        if (!c) return Promise.reject(new Error('Giờ dạng HH:mm, vd 17:00'));
+                        const o = normalizeHHMM(getFieldValue('open_time'));
+                        return o && o >= c
+                          ? Promise.reject(new Error('Giờ đóng cửa phải sau giờ mở cửa'))
+                          : Promise.resolve();
+                      },
+                    }),
+                  ]}
+                >
                   <Input placeholder="17:00" />
                 </Form.Item>
               </Col>
             </Row>
           )}
 
-          <Form.Item name="extend_subs" valuePropName="checked">
-            <Checkbox>
-              Tự động cộng bù +1 ngày hạn sử dụng cho toàn bộ gói tập theo thời gian (TIME) đang ACTIVE
+          <Form.Item
+            name="extend_subs"
+            valuePropName="checked"
+            extra={
+              modal.record
+                ? 'Cộng bù chỉ chạy một lần khi tạo ngày lễ, không đổi khi sửa.'
+                : 'Chỉ áp dụng cho ngày đóng cửa cả ngày.'
+            }
+          >
+            <Checkbox disabled={!!modal.record || !isClosed}>
+              Tự động cộng bù +1 ngày hạn sử dụng cho toàn bộ gói tập theo thời gian (TIME) đang
+              ACTIVE
             </Checkbox>
           </Form.Item>
         </Form>
@@ -1006,51 +1138,66 @@ function BranchHolidaysTab({ canManage }: { canManage: boolean }) {
 }
 
 export default function TrainerSchedulesPage() {
-  const { can } = usePermission();
-  const canLeave = can([PERM.LEAVE_MANAGE, PERM.HOLIDAY_MANAGE]);
+  const { can, user, roles } = usePermission();
+  const canHolidayManage = can(PERM.HOLIDAY_MANAGE);
+  const canViewHolidays = can([PERM.HOLIDAY_MANAGE, PERM.BRANCH_VIEW]);
+  // HLV (không có quyền quản lý lịch) tự quản lý lịch rảnh và đơn nghỉ phép của chính mình.
+  const self = !can(PERM.LEAVE_MANAGE) && user ? { id: user.id, name: user.full_name } : undefined;
+  const isTrainer = roles.includes(ROLE.TRAINER);
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <PageTitle
-        title="Lịch rảnh HLV, Nghỉ phép & Ngày lễ"
-        subtitle="Thiết lập khung giờ rảnh hàng tuần của HLV, duyệt đơn nghỉ phép kèm phân công dạy thay và quản lý lịch nghỉ lễ phòng tập"
-      />
+    <Card variant="borderless" className="page-card">
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <PageTitle
+          title="Lịch rảnh HLV, Nghỉ phép & Ngày lễ"
+          subtitle="Thiết lập khung giờ rảnh hàng tuần của HLV, duyệt đơn nghỉ phép kèm phân công dạy thay và quản lý lịch nghỉ lễ phòng tập"
+        />
 
-      <Tabs
-        defaultActiveKey="availability"
-        items={[
-          {
-            key: 'availability',
-            label: (
-              <Space size={6}>
-                <ScheduleOutlined />
-                <span>Lịch rảnh HLV theo tuần</span>
-              </Space>
-            ),
-            children: <TrainerAvailabilityTab canManage={canLeave} />,
-          },
-          {
-            key: 'leave-requests',
-            label: (
-              <Space size={6}>
-                <SwapOutlined />
-                <span>Đơn xin nghỉ phép & Lịch bị ảnh hưởng</span>
-              </Space>
-            ),
-            children: <LeaveRequestsTab canManage={canLeave} />,
-          },
-          {
-            key: 'holidays',
-            label: (
-              <Space size={6}>
-                <CalendarOutlined />
-                <span>Lịch nghỉ lễ phòng tập</span>
-              </Space>
-            ),
-            children: <BranchHolidaysTab canManage={canLeave} />,
-          },
-        ]}
-      />
-    </Space>
+        <Tabs
+          defaultActiveKey="availability"
+          items={[
+            {
+              key: 'availability',
+              label: (
+                <Space size={6}>
+                  <ScheduleOutlined />
+                  <span>Lịch rảnh HLV theo tuần</span>
+                </Space>
+              ),
+              children: (
+                <TrainerAvailabilityTab
+                  canManage={can(PERM.LEAVE_MANAGE) || (!!self && isTrainer)}
+                  selfTrainer={self}
+                />
+              ),
+            },
+            {
+              key: 'leave-requests',
+              label: (
+                <Space size={6}>
+                  <SwapOutlined />
+                  <span>Đơn xin nghỉ phép & Lịch bị ảnh hưởng</span>
+                </Space>
+              ),
+              children: <LeaveRequestsTab canManage={can(PERM.LEAVE_MANAGE)} self={self} />,
+            },
+            {
+              key: 'holidays',
+              label: (
+                <Space size={6}>
+                  <CalendarOutlined />
+                  <span>Lịch nghỉ lễ phòng tập</span>
+                </Space>
+              ),
+              children: <BranchHolidaysTab canManage={canHolidayManage} />,
+            },
+          ].filter((t) => {
+            if (t.key === 'availability') return !self || isTrainer;
+            if (t.key === 'holidays') return canViewHolidays;
+            return true;
+          })}
+        />
+      </Space>
+    </Card>
   );
 }

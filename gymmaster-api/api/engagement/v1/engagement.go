@@ -320,11 +320,20 @@ type MemberFoodLogsRes struct {
 type CreateFoodLogReq struct {
 	g.Meta  `path:"/food-logs" method:"post" tags:"Cổng hội viên" summary:"Ghi nhật ký ăn uống" role:"MEMBER"`
 	FoodID  uint    `json:"food_id"  v:"required|min:1#Vui lòng chọn thực phẩm"`
-	Qty     float64 `json:"qty"      d:"1" v:"required|min:0.1#Khẩu phần phải lớn hơn 0"`
+	Qty     float64 `json:"qty"      d:"1" v:"required|min:0.0001|max:100#Vui lòng nhập khẩu phần|Khẩu phần phải lớn hơn 0|Khẩu phần tối đa 100 (VD: món 100g tối đa 10.000g)"`
 	Meal    string  `json:"meal"     d:"BREAKFAST" v:"required|in:BREAKFAST,LUNCH,DINNER,SNACK#Bữa ăn không hợp lệ"`
 	EatenAt string  `json:"eaten_at"`
 }
 type CreateFoodLogRes = FoodLogItem
+
+type UpdateFoodLogReq struct {
+	g.Meta `path:"/food-logs/{id}" method:"put" tags:"Cổng hội viên" summary:"Sửa bản ghi ăn uống" role:"MEMBER"`
+	ID     uint    `json:"id"      in:"path" v:"required|min:1"`
+	FoodID uint    `json:"food_id" v:"required|min:1#Vui lòng chọn thực phẩm"`
+	Qty    float64 `json:"qty"     v:"required|min:0.0001|max:100#Vui lòng nhập khẩu phần|Khẩu phần phải lớn hơn 0|Khẩu phần tối đa 100 (VD: món 100g tối đa 10.000g)"`
+	Meal   string  `json:"meal"    v:"required|in:BREAKFAST,LUNCH,DINNER,SNACK#Vui lòng chọn bữa ăn|Bữa ăn không hợp lệ"`
+}
+type UpdateFoodLogRes = FoodLogItem
 
 type DeleteFoodLogReq struct {
 	g.Meta `path:"/food-logs/{id}" method:"delete" tags:"Cổng hội viên" summary:"Xóa bản ghi ăn uống" role:"MEMBER"`

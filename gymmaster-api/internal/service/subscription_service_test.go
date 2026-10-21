@@ -210,23 +210,65 @@ func TestSubUpgrade(t *testing.T) {
 	// SESSION: còn 6/12 buổi, giá 600.000 → khấu trừ 300.000; gói mới đắt hơn giá trị → thu chênh lệch.
 	sess := fx.addSub(entity.Subscription{MemberID: 2, PlanID: 4, BranchID: 1, StartDate: subD(10, 1), EndDate: subD(11, 29),
 		Price: 600000, Status: entity.SubStatusActive, TotalSessions: subIntPtr(12), RemainingSessions: subIntPtr(6)})
-	q, err = fx.svc.UpgradeQuote(ctx, sess.ID, 1)
+	q, err = fx.svc.UpgradeQuote(ctx, sess.ID, 2)
 	require.NoError(t, err)
 	assert.Equal(t, 300000.0, q.RemainingValue)
-	assert.Equal(t, 200000.0, q.AmountDue)
+	assert.Equal(t, 1050000.0, q.AmountDue)
 
-	// Giá trị còn lại ≥ giá gói mới → hóa đơn 0đ, gói mới ACTIVE ngay.
+	// Gói mới rẻ hơn gói hiện tại → từ chối (tránh mất giá trị còn lại).
+	_, err = fx.svc.UpgradeQuote(ctx, sess.ID, 1)
+	assert.Equal(t, rescode.BadRequest.Code(), subCode(err), "S12 600.000 → M1 500.000 là hạ cấp")
 	big := fx.addSub(entity.Subscription{MemberID: 2, PlanID: 3, BranchID: 1, StartDate: subD(10, 14), EndDate: subD(10, 13).AddDate(1, 0, 0),
 		Price: 4800000, Status: entity.SubStatusActive})
-	got, err = fx.svc.Upgrade(ctx, big.ID, v1.UpgradeInput{PlanID: 2})
-	require.NoError(t, err)
-	assert.Equal(t, 0.0, got.Invoice.Total)
-	assert.Equal(t, entity.SubStatusActive, got.Status)
+	_, err = fx.svc.Upgrade(ctx, big.ID, v1.UpgradeInput{PlanID: 2})
+	assert.Equal(t, rescode.BadRequest.Code(), subCode(err))
+	assert.Equal(t, entity.SubStatusActive, fx.repo.subs[big.ID].Status)
 
 	// Chỉ nâng cấp gói ACTIVE.
 	fx.repo.subs[sess.ID].Status = entity.SubStatusFrozen
-	_, err = fx.svc.UpgradeQuote(ctx, sess.ID, 1)
+	_, err = fx.svc.UpgradeQuote(ctx, sess.ID, 2)
 	assert.Equal(t, rescode.BadRequest.Code(), subCode(err))
+}
+
+func TestSubUpgradeCreditExcludesRefund(t *testing.T) {
+	fx := newSubFixture()
+	ctx := subOwnerCtx()
+	// Bán M1 500.000 thu đủ, sau đó hoàn 200.000 → giá trị thực trả 300.000.
+	sub, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 1, PlanID: 1, BranchID: 1}, &v1.PaymentInput{Amount: 500000, Method: "CASH"})
+	require.NoError(t, err)
+	_, err = fx.inv.Refund(ctx, *sub.InvoiceID, RefundInput{Amount: 200000, Method: "CASH", Reason: "Giảm giá bù"})
+	require.NoError(t, err)
+	q, err := fx.svc.UpgradeQuote(ctx, sub.ID, 2)
+	require.NoError(t, err)
+	// 30/30 ngày còn lại × 300.000 (không phải 500.000).
+	assert.Equal(t, 300000.0, q.RemainingValue)
+	assert.Equal(t, 1050000.0, q.AmountDue)
+}
+
+func TestSubCancelPartialClosesDebt(t *testing.T) {
+	fx := newSubFixture()
+	ctx := subOwnerCtx()
+	sub, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 1, PlanID: 2, BranchID: 1}, &v1.PaymentInput{Amount: 500000, Method: "CASH"})
+	require.NoError(t, err)
+	require.Equal(t, entity.InvoiceStatusPartial, fx.invRep.invoices[*sub.InvoiceID].Status)
+
+	_, err = fx.svc.Cancel(ctx, sub.ID, v1.CancelInput{Reason: "Không tập nữa"})
+	require.NoError(t, err)
+	inv := fx.invRep.invoices[*sub.InvoiceID]
+	assert.Equal(t, entity.SubStatusCancelled, fx.repo.subs[sub.ID].Status)
+	assert.Equal(t, 500000.0, inv.Total, "phần nợ còn lại được khóa sổ")
+	assert.Equal(t, 0.0, roundMoneyVND(inv.Total-inv.PaidAmount))
+	assert.Equal(t, entity.InvoiceStatusPaid, inv.Status)
+	_, err = fx.inv.AddPayment(ctx, inv.ID, PaymentInput{Amount: 100000, Method: "CASH"})
+	assert.Equal(t, rescode.BadRequest.Code(), subCode(err), "không thu tiếp hóa đơn của gói đã hủy")
+
+	// Dữ liệu cũ: gói đã CANCELLED nhưng hóa đơn vẫn PARTIAL → guard chặn thu tiền.
+	sub2, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 2, PlanID: 2, BranchID: 1}, &v1.PaymentInput{Amount: 500000, Method: "CASH"})
+	require.NoError(t, err)
+	fx.repo.subs[sub2.ID].Status = entity.SubStatusCancelled
+	_, err = fx.inv.AddPayment(ctx, *sub2.InvoiceID, PaymentInput{Amount: 100000, Method: "CASH"})
+	assert.Equal(t, rescode.BadRequest.Code(), subCode(err))
+	assert.Equal(t, 500000.0, fx.invRep.invoices[*sub2.InvoiceID].PaidAmount)
 }
 
 func TestSubRenew(t *testing.T) {

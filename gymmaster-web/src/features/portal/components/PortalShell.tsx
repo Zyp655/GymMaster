@@ -11,6 +11,7 @@ import {
   ArrowRightStartOnRectangleIcon,
   Bars3Icon,
   BellIcon,
+  ChevronDownIcon,
   CalendarDaysIcon,
   ChartBarIcon,
   ChatBubbleLeftRightIcon,
@@ -18,6 +19,7 @@ import {
   CreditCardIcon,
   DocumentCheckIcon,
   DocumentTextIcon,
+  EllipsisHorizontalCircleIcon,
   FireIcon,
   GiftIcon,
   HomeIcon,
@@ -98,10 +100,12 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
         try {
           const data = JSON.parse(String(event.data)) as {
             title?: string;
+            body?: string;
             content?: string;
           } | null;
           if (data?.title) {
-            toast.info(data.title, data.content ? { description: data.content } : undefined);
+            const desc = data.body || data.content;
+            toast.info(data.title, desc ? { description: desc } : undefined);
           }
         } catch {
           // Heartbeat or non-JSON payload
@@ -110,6 +114,15 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
 
       es.addEventListener('message', handleEvent);
       es.addEventListener('notification', handleEvent as EventListener);
+      es.addEventListener('auth_expired', () => {
+        es?.close();
+        if (!cancelled) {
+          setTimeout(() => void connect(), 2000);
+        }
+      });
+      es.addEventListener('auth_revoked', () => {
+        es?.close();
+      });
       es.onerror = () => {
         // Fallback to polling (already handled by useUnreadCountQuery refetchInterval: 60_000)
         es?.close();
@@ -124,11 +137,23 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
     };
   }, [isMember, queryClient]);
 
-  const navItems = [
+  const navItems: {
+    href: string;
+    label: string;
+    icon: typeof HomeIcon;
+    exact?: boolean;
+    aliases?: string[];
+  }[] = [
     { href: '/me', label: t('nav.overview'), icon: HomeIcon, exact: true },
     { href: '/me/qr', label: t('nav.qr'), icon: QrCodeIcon },
     { href: '/me/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon },
-    { href: '/me/classes', label: t('nav.classes'), icon: CalendarDaysIcon },
+    {
+      href: '/me/classes',
+      label: t('nav.classes'),
+      icon: CalendarDaysIcon,
+      // /me/bookings là tab "Lịch đã đặt" của cùng màn lớp học.
+      aliases: ['/me/bookings'],
+    },
     { href: '/me/pt', label: t('nav.pt'), icon: UserGroupIcon },
     { href: '/me/messages', label: t('nav.messages'), icon: ChatBubbleLeftRightIcon },
     { href: '/me/workout', label: t('nav.workout'), icon: FireIcon },
@@ -141,15 +166,24 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
   ];
 
   const bottomNavItems = navItems.slice(0, 5);
+  // Header desktop chỉ hiện các mục chính, phần còn lại gom vào menu "Thêm" để không tràn ngang.
+  const primaryNavItems = navItems.slice(0, 5);
+  const moreNavItems = navItems.slice(5);
 
-  const isActive = (href: string, exact?: boolean) =>
-    exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+  const matchPath = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string, exact?: boolean, aliases: string[] = []) =>
+    exact ? pathname === href : matchPath(href) || aliases.some(matchPath);
+  // Trang tài khoản trong menu người dùng (không nằm trong navItems).
+  const accountNavItems = [
+    { href: '/me/account', label: t('nav.account'), icon: UserCircleIcon },
+    { href: '/me/history', label: t('nav.history'), icon: ClockIcon },
+  ];
 
   return (
     <div className="flex min-h-dvh flex-col bg-canvas pb-16 lg:pb-0">
       <header className="sticky top-0 z-40 border-b border-line bg-surface/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-3">
             {isMember ? (
               <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
                 <SheetTrigger asChild>
@@ -171,11 +205,32 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
                   <nav className="grid gap-1">
                     {navItems.map(item => {
                       const Icon = item.icon;
-                      const active = isActive(item.href, item.exact);
+                      const active = isActive(item.href, item.exact, item.aliases);
                       return (
                         <SheetClose asChild key={item.href}>
                           <Link
                             href={item.href}
+                            className={cn(
+                              'flex items-center gap-3 rounded-xl px-3 py-2.5 text-body font-medium transition-colors',
+                              active
+                                ? 'bg-brand-50 text-brand-700'
+                                : 'text-secondary hover:bg-subtle hover:text-primary',
+                            )}
+                          >
+                            <Icon className="size-5 shrink-0" />
+                            <span>{item.label}</span>
+                          </Link>
+                        </SheetClose>
+                      );
+                    })}
+                    {accountNavItems.map(item => {
+                      const Icon = item.icon;
+                      const active = isActive(item.href);
+                      return (
+                        <SheetClose asChild key={item.href}>
+                          <Link
+                            href={item.href}
+                            aria-current={active ? 'page' : undefined}
                             className={cn(
                               'flex items-center gap-3 rounded-xl px-3 py-2.5 text-body font-medium transition-colors',
                               active
@@ -221,10 +276,10 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
           </div>
 
           {isMember ? (
-            <nav aria-label={t('nav.menu')} className="hidden items-center gap-1 lg:flex">
-              {navItems.map(item => {
+            <nav aria-label={t('nav.menu')} className="hidden min-w-0 items-center gap-1 lg:flex">
+              {primaryNavItems.map(item => {
                 const Icon = item.icon;
-                const active = isActive(item.href, item.exact);
+                const active = isActive(item.href, item.exact, item.aliases);
                 return (
                   <Link
                     key={item.href}
@@ -237,14 +292,49 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
                     )}
                   >
                     <Icon className="size-4 shrink-0" />
-                    <span>{item.label}</span>
+                    <span className="whitespace-nowrap">{item.label}</span>
                   </Link>
                 );
               })}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      'inline-flex cursor-pointer items-center gap-1.5 rounded-button px-3 py-2 text-body font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                      moreNavItems.some(item => isActive(item.href, item.exact, item.aliases))
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-secondary hover:bg-subtle hover:text-primary',
+                    )}
+                  >
+                    <EllipsisHorizontalCircleIcon className="size-4 shrink-0" />
+                    <span>{t('nav.more')}</span>
+                    <ChevronDownIcon className="size-3.5 shrink-0" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  {moreNavItems.map(item => {
+                    const Icon = item.icon;
+                    const active = isActive(item.href, item.exact, item.aliases);
+                    return (
+                      <DropdownMenuItem
+                        key={item.href}
+                        asChild
+                        className={cn(active && 'bg-brand-50 text-brand-700')}
+                      >
+                        <Link href={item.href} aria-current={active ? 'page' : undefined}>
+                          <Icon />
+                          <span>{item.label}</span>
+                        </Link>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </nav>
           ) : null}
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {isMember ? (
               <Button
                 variant="ghost"
@@ -280,7 +370,7 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
                     ) : null}
                     <AvatarFallback>{initials(user.full_name)}</AvatarFallback>
                   </Avatar>
-                  <span className="hidden max-w-36 truncate pr-2 text-body font-medium text-primary sm:inline">
+                  <span className="hidden max-w-36 truncate pr-2 text-body font-medium text-primary sm:inline lg:hidden xl:inline">
                     {user.full_name}
                   </span>
                 </button>
@@ -295,18 +385,22 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
                 <DropdownMenuSeparator />
                 {isMember ? (
                   <>
-                    <DropdownMenuItem asChild>
-                      <Link href="/me/account">
-                        <UserCircleIcon />
-                        <span>{t('nav.account')}</span>
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <Link href="/me/history">
-                        <ClockIcon />
-                        <span>{t('nav.history')}</span>
-                      </Link>
-                    </DropdownMenuItem>
+                    {accountNavItems.map(item => {
+                      const Icon = item.icon;
+                      const active = isActive(item.href);
+                      return (
+                        <DropdownMenuItem
+                          key={item.href}
+                          asChild
+                          className={cn(active && 'bg-brand-50 text-brand-700')}
+                        >
+                          <Link href={item.href} aria-current={active ? 'page' : undefined}>
+                            <Icon />
+                            <span>{item.label}</span>
+                          </Link>
+                        </DropdownMenuItem>
+                      );
+                    })}
                   </>
                 ) : null}
                 <DropdownMenuItem asChild>
@@ -335,7 +429,10 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
+      <main
+        data-portal-main
+        className="mx-auto w-full max-w-6xl min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8"
+      >
         {isMember ? (
           children
         ) : (
@@ -374,7 +471,7 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
           <div className="grid grid-cols-5">
             {bottomNavItems.map(item => {
               const Icon = item.icon;
-              const active = isActive(item.href, item.exact);
+              const active = isActive(item.href, item.exact, item.aliases);
               return (
                 <Link
                   key={item.href}

@@ -63,6 +63,8 @@ import { usePermission } from '@/hooks/usePermission';
 import { useTableQuery } from '@/hooks/useTableQuery';
 import { getErrorMessage } from '@/utils/errors';
 import { formatDateTime, formatPhone } from '@/utils/format';
+import { isMfaCodeComplete, mfaInputProps, normalizeMfaCode } from '../auth/mfaCode';
+import type { MfaCodeMode } from '../auth/mfaCode';
 
 /* ============================================================================
  * Tab 1: Xác thực 2 lớp (2FA TOTP)
@@ -75,6 +77,7 @@ function MfaSecurityTab() {
   const [setupData, setSetupData] = useState<MFASetupData | null>(null);
   const [otpCode, setOtpCode] = useState('');
   const [disableCode, setDisableCode] = useState('');
+  const [disableMode, setDisableMode] = useState<MfaCodeMode>('totp');
   const [disableModalOpen, setDisableModalOpen] = useState(false);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
@@ -138,6 +141,7 @@ function MfaSecurityTab() {
     <Row gutter={[16, 16]}>
       <Col xs={24} lg={14}>
         <Card
+          className="gm-card-wrap-head"
           loading={mfaQuery.isLoading}
           title={
             <Space>
@@ -213,7 +217,7 @@ function MfaSecurityTab() {
                       display: 'inline-block',
                       padding: 12,
                       background: '#fff',
-                      border: '1px solid #f0f0f0',
+                      border: '1px solid var(--gm-border)',
                       borderRadius: 8,
                     }}
                   >
@@ -257,11 +261,9 @@ function MfaSecurityTab() {
                     <Space.Compact style={{ width: '100%', maxWidth: 340 }}>
                       <Input
                         value={otpCode}
-                        onChange={(e) =>
-                          setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                        }
+                        onChange={(e) => setOtpCode(normalizeMfaCode(e.target.value, 'totp'))}
+                        {...mfaInputProps('totp')}
                         placeholder="VD: 123456"
-                        maxLength={6}
                         style={{ letterSpacing: 4, fontWeight: 600, fontSize: 16 }}
                         onPressEnter={() => {
                           if (otpCode.length === 6) enableMut.mutate(otpCode);
@@ -293,7 +295,11 @@ function MfaSecurityTab() {
               <Button
                 danger
                 icon={<UnlockOutlined />}
-                onClick={() => setDisableModalOpen(true)}
+                onClick={() => {
+                  setDisableCode('');
+                  setDisableMode('totp');
+                  setDisableModalOpen(true);
+                }}
               >
                 Tắt xác thực 2 lớp (2FA)
               </Button>
@@ -304,10 +310,11 @@ function MfaSecurityTab() {
 
       <Col xs={24} lg={10}>
         <Card
+          className="gm-card-wrap-head"
           title={
             <Space>
               <KeyOutlined />
-              <span>Mã khôi phục dự phòng (Recovery Codes)</span>
+              <span>Mã khôi phục dự phòng</span>
             </Space>
           }
         >
@@ -324,8 +331,8 @@ function MfaSecurityTab() {
                   gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
                   gap: 8,
                   padding: 12,
-                  background: '#f8fafc',
-                  border: '1px dashed #cbd5e1',
+                  background: 'var(--gm-hover)',
+                  border: '1px dashed var(--gm-border)',
                   borderRadius: 8,
                   marginBottom: 12,
                 }}
@@ -372,10 +379,14 @@ function MfaSecurityTab() {
         title="Xác nhận tắt xác thực 2 lớp (2FA)"
         okText="Tắt 2FA"
         cancelText="Hủy"
-        okButtonProps={{ danger: true, loading: disableMut.isPending }}
+        okButtonProps={{
+          danger: true,
+          loading: disableMut.isPending,
+          disabled: !isMfaCodeComplete(disableCode, disableMode),
+        }}
         onCancel={() => setDisableModalOpen(false)}
-        onOk={() => disableMut.mutate(disableCode.trim())}
-        destroyOnClose
+        onOk={() => disableMut.mutate(disableCode)}
+        destroyOnHidden
       >
         <Alert
           type="warning"
@@ -384,14 +395,34 @@ function MfaSecurityTab() {
           style={{ marginBottom: 16 }}
         />
         <Typography.Text style={{ display: 'block', marginBottom: 8 }}>
-          Nhập mã OTP 6 chữ số hiện tại (hoặc mã khôi phục) để xác nhận:
+          {disableMode === 'totp'
+            ? 'Nhập mã OTP 6 chữ số hiện tại để xác nhận:'
+            : 'Nhập một mã khôi phục (dạng XXXX-XXXX) để xác nhận:'}
         </Typography.Text>
         <Input
+          // Đổi key theo chế độ → remount để bàn phím điện thoại đổi theo inputMode.
+          key={disableMode}
           value={disableCode}
-          onChange={(e) => setDisableCode(e.target.value)}
-          placeholder="Nhập mã OTP 6 số..."
-          maxLength={12}
+          onChange={(e) => setDisableCode(normalizeMfaCode(e.target.value, disableMode))}
+          onPressEnter={() => {
+            if (isMfaCodeComplete(disableCode, disableMode) && !disableMut.isPending) {
+              disableMut.mutate(disableCode);
+            }
+          }}
+          {...mfaInputProps(disableMode)}
+          autoFocus
         />
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0, marginTop: 8 }}
+          onClick={() => {
+            setDisableMode((m) => (m === 'totp' ? 'recovery' : 'totp'));
+            setDisableCode('');
+          }}
+        >
+          {disableMode === 'totp' ? 'Dùng mã khôi phục' : 'Dùng mã 6 số từ ứng dụng'}
+        </Button>
       </Modal>
     </Row>
   );
@@ -458,7 +489,10 @@ function ActiveSessionsTab() {
                 {isCurrent && <Tag color="green">Phiên hiện tại</Tag>}
               </Space>
               {r.user_agent && (
-                <div style={{ fontSize: 12, color: '#64748b', maxWidth: 460 }} className="truncate">
+                <div
+                  style={{ fontSize: 12, color: 'var(--gm-text-secondary)', maxWidth: 460 }}
+                  className="truncate"
+                >
                   {r.user_agent}
                 </div>
               )}
@@ -584,7 +618,8 @@ interface ProcessFormValues {
 function DataPrivacyRequestsTab() {
   const { message } = App.useApp();
   const { can } = usePermission();
-  const canManage = can([PERM.PRIVACY_MANAGE, PERM.SETTING_MANAGE]);
+  // Duyệt/từ chối: API yêu cầu `data_request.process` (OWNER/MANAGER được cấp ở migration 000036).
+  const canManage = can(PERM.DATA_REQUEST_PROCESS);
   const qc = useQueryClient();
 
   const [processingRow, setProcessingRow] = useState<DataRequest | null>(null);
@@ -632,7 +667,7 @@ function DataPrivacyRequestsTab() {
       render: (_, r) => (
         <div>
           <div style={{ fontWeight: 600 }}>{r.member_name || `Hội viên #${r.member_id}`}</div>
-          <div style={{ fontSize: 12, color: '#64748b' }}>
+          <div style={{ fontSize: 12, color: 'var(--gm-text-secondary)' }}>
             {r.member_code ? `${r.member_code} · ` : ''}
             {r.member_phone ? formatPhone(r.member_phone) : ''}
           </div>
@@ -711,7 +746,9 @@ function DataPrivacyRequestsTab() {
         <div>
           {v ? <div>{v}</div> : '—'}
           {r?.handled_by_name && (
-            <div style={{ fontSize: 11, color: '#64748b' }}>Bởi: {r.handled_by_name}</div>
+            <div style={{ fontSize: 11, color: 'var(--gm-text-secondary)' }}>
+              Bởi: {r.handled_by_name}
+            </div>
           )}
         </div>
       ),
@@ -786,11 +823,7 @@ function DataPrivacyRequestsTab() {
         </Button>
       </Space>
 
-      <DataTable<DataRequest>
-        table={table}
-        columns={columns}
-        scroll={{ x: 1320 }}
-      />
+      <DataTable<DataRequest> table={table} columns={columns} scroll={{ x: 1320 }} />
 
       <Modal
         open={Boolean(processingRow)}
@@ -806,7 +839,7 @@ function DataPrivacyRequestsTab() {
         confirmLoading={processMut.isPending}
         onCancel={() => setProcessingRow(null)}
         onOk={() => form.submit()}
-        destroyOnClose
+        destroyOnHidden
       >
         {processingRow && (
           <div style={{ marginBottom: 16 }}>
@@ -843,7 +876,8 @@ function DataPrivacyRequestsTab() {
           >
             <Radio.Group>
               <Radio.Button value="DONE">
-                Phê duyệt & Thực thi ({processingRow?.type === 'DELETE' ? 'Ẩn danh hóa' : 'Xuất file'})
+                Phê duyệt & Thực thi (
+                {processingRow?.type === 'DELETE' ? 'Ẩn danh hóa' : 'Xuất file'})
               </Radio.Button>
               <Radio.Button value="REJECTED">Từ chối yêu cầu</Radio.Button>
             </Radio.Group>
@@ -866,8 +900,12 @@ function DataPrivacyRequestsTab() {
  * ============================================================================ */
 
 export default function SecurityPrivacyPage() {
+  const { can } = usePermission();
+  // 2FA & phiên đăng nhập: mọi nhân viên (API không yêu cầu quyền). Yêu cầu dữ liệu cá nhân:
+  // API: xem danh sách cần `privacy.manage` hoặc `data_request.process`; xử lý cần `data_request.process`.
+  const canPrivacy = can([PERM.PRIVACY_MANAGE, PERM.DATA_REQUEST_PROCESS]);
   return (
-    <div>
+    <Card variant="borderless" className="page-card">
       <PageTitle
         title="Bảo mật 2FA, Phiên đăng nhập & Dữ liệu cá nhân"
         subtitle="Thiết lập xác thực 2 lớp (TOTP), giám sát thiết bị đăng nhập và xử lý yêu cầu dữ liệu theo Nghị định 13/2023/NĐ-CP"
@@ -896,18 +934,22 @@ export default function SecurityPrivacyPage() {
             ),
             children: <ActiveSessionsTab />,
           },
-          {
-            key: 'privacy',
-            label: (
-              <Space>
-                <FileProtectOutlined />
-                <span>Yêu cầu dữ liệu cá nhân (NĐ 13/2023)</span>
-              </Space>
-            ),
-            children: <DataPrivacyRequestsTab />,
-          },
+          ...(canPrivacy
+            ? [
+                {
+                  key: 'privacy',
+                  label: (
+                    <Space>
+                      <FileProtectOutlined />
+                      <span>Yêu cầu dữ liệu cá nhân (NĐ 13/2023)</span>
+                    </Space>
+                  ),
+                  children: <DataPrivacyRequestsTab />,
+                },
+              ]
+            : []),
         ]}
       />
-    </div>
+    </Card>
   );
 }

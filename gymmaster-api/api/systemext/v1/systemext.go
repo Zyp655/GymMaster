@@ -17,8 +17,8 @@ type SearchHit struct {
 }
 
 type GlobalSearchReq struct {
-	g.Meta `path:"/search" method:"get" tags:"Hệ thống – Tiện ích" summary:"Tìm kiếm nhanh toàn hệ thống (Ctrl+K)"`
-	Q      string `json:"q" in:"query" v:"required|min:1"`
+	g.Meta `path:"/search" method:"get" perm:"member.view,invoice.view,product.view,plan.view" tags:"Hệ thống – Tiện ích" summary:"Tìm kiếm nhanh toàn hệ thống (Ctrl+K)"`
+	Q      string `json:"q" in:"query" v:"required|length:1,100#Vui lòng nhập từ khóa tìm kiếm|Từ khóa tìm kiếm tối đa 100 ký tự"`
 }
 
 type GlobalSearchRes struct {

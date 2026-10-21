@@ -12,10 +12,11 @@ export interface ResetPasswordInput {
 }
 
 class AuthApi {
-  login(email: string, password: string) {
+  /** `mfaCode`: mã TOTP 6 số hoặc mã khôi phục – chỉ gửi khi server trả 40107 (tài khoản đã bật 2FA). */
+  login(email: string, password: string, mfaCode?: string) {
     return http.post<LoginResult>(
       '/auth/login',
-      { email, password },
+      mfaCode ? { email, password, mfa_code: mfaCode } : { email, password },
       { skipAuthRefresh: true, silent: false },
     );
   }
@@ -24,6 +25,7 @@ class AuthApi {
     return http.get<AuthUser>('/auth/me');
   }
 
+  /** Server thu hồi theo chính refresh token – không cần access token còn hạn. */
   logout(refreshToken: string) {
     return http.post<null>(
       '/auth/logout',

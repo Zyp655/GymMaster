@@ -33,6 +33,13 @@ const (
 	checkinDisplayDateLayout     = "02/01/2006"
 	checkinDisplayTimeLayout     = "15:04"
 	checkinListDefaultOrderField = "c.checked_in_at"
+
+	// checkinDefaultInstallmentGraceDays: kỳ trả góp chưa trả quá số ngày này sau hạn → chặn check-in (PLAN mục trả góp).
+	checkinDefaultInstallmentGraceDays = 7
+	// SettingCheckinRequireSignedContract = 1: bắt buộc hội viên ký hợp đồng điện tử trước khi check-in.
+	SettingCheckinRequireSignedContract = "checkin.require_signed_contract"
+	// SettingCheckinInstallmentGraceDays: số ngày ân hạn kỳ trả góp trước khi chặn check-in.
+	SettingCheckinInstallmentGraceDays = "checkin.installment_grace_days"
 )
 
 // checkinDenyMessages: thông điệp mặc định (tiếng Việt) cho từng lý do từ chối.
@@ -67,6 +74,8 @@ type (
 		IssueQR(ctx context.Context, memberID uint) (token string, expiresAt time.Time, err error)
 		MemberQR(ctx context.Context, memberID uint) (*v1.MemberQRRes, error)
 		Scan(ctx context.Context, token string, branchID uint) (*v1.ScanResult, error)
+		// ScanDevice: quét từ thiết bị kiểm soát ra vào (method DEVICE, gắn device_id, không gắn nhân viên).
+		ScanDevice(ctx context.Context, token string, branchID, deviceID uint) (*v1.ScanResult, error)
 		Manual(ctx context.Context, memberID, branchID uint, note string) (*v1.ScanResult, error)
 		Checkout(ctx context.Context, id uint) (*v1.CheckinItem, error)
 		Present(ctx context.Context, branchID uint) (v1.PresentRes, error)
@@ -148,14 +157,19 @@ func checkinHasSessions(sub *entity.CheckinSubscriptionView) bool {
 	return sub.PlanType != entity.PlanTypeSession || (sub.RemainingSessions != nil && *sub.RemainingSessions > 0)
 }
 
-// checkinPickSubscription chọn gói dùng để vào tại branchID trong ngày today (YYYY-MM-DD, giờ VN).
+// checkinPickSubscription chọn gói dùng để vào tại branchID trong ngày today (YYYY-MM-DD, giờ VN) lúc now (giờ VN).
 //
-// Gói hợp lệ: ACTIVE, start_date ≤ today ≤ end_date, đúng phạm vi chi nhánh, gói SESSION còn buổi.
-// Ưu tiên: gói TIME trước gói SESSION, rồi gói hết hạn sớm nhất, rồi id nhỏ nhất.
-// Không có gói hợp lệ: FROZEN → SUBSCRIPTION_FROZEN; gói đúng hạn/đúng chi nhánh hết buổi →
-// NO_SESSIONS_LEFT; gói đúng hạn nhưng khác chi nhánh → WRONG_BRANCH; còn lại NO_ACTIVE_SUBSCRIPTION.
-func checkinPickSubscription(subs []entity.CheckinSubscriptionView, branchID uint, today string) checkinPick {
+// Gói hợp lệ: ACTIVE, start_date ≤ today ≤ end_date, đúng phạm vi chi nhánh, gói SESSION còn buổi và – với gói Off-Peak
+// (access_hours) – now nằm trong khung giờ được phép (now.IsZero() = bỏ qua kiểm tra khung giờ). Mọi gói được xét: gói
+// Off-Peak ngoài giờ KHÔNG che mất gói thường còn hiệu lực.
+// Ưu tiên: gói TIME trước gói SESSION, rồi gói không giới hạn khung giờ, rồi gói hết hạn sớm nhất, rồi id nhỏ nhất.
+// Không có gói hợp lệ: gói chỉ vướng khung giờ Off-Peak → OUTSIDE_ACCESS_HOURS; FROZEN → SUBSCRIPTION_FROZEN; gói đúng
+// hạn/đúng chi nhánh hết buổi → NO_SESSIONS_LEFT; gói đúng hạn nhưng khác chi nhánh → WRONG_BRANCH; còn lại
+// NO_ACTIVE_SUBSCRIPTION.
+func checkinPickSubscription(subs []entity.CheckinSubscriptionView, branchID uint, today string, now time.Time) checkinPick {
 	var valid []*entity.CheckinSubscriptionView
+	var offPeak *entity.CheckinSubscriptionView
+	var offPeakViolation *CheckinRuleViolation
 	var frozen, exhausted, wrongBranch, future *entity.CheckinSubscriptionView
 	for i := range subs {
 		sub := &subs[i]
@@ -179,6 +193,15 @@ func checkinPickSubscription(subs []entity.CheckinSubscriptionView, branchID uin
 				exhausted = sub
 			}
 		default:
+			if !now.IsZero() {
+				if v := EvaluateCheckinRules(context.Background(), &CheckinRuleInput{Now: now, AccessHoursJSON: sub.AccessHours},
+					OffPeakHoursRule{}); v != nil {
+					if offPeak == nil {
+						offPeak, offPeakViolation = sub, v
+					}
+					continue
+				}
+			}
 			valid = append(valid, sub)
 		}
 	}
@@ -191,6 +214,13 @@ func checkinPickSubscription(subs []entity.CheckinSubscriptionView, branchID uin
 				}
 				return 1
 			}
+			ua, ub := checkinUnrestricted(a), checkinUnrestricted(b)
+			if ua != ub {
+				if ua {
+					return -1
+				}
+				return 1
+			}
 			if c := a.EndDate.Compare(b.EndDate); c != 0 {
 				return c
 			}
@@ -199,6 +229,8 @@ func checkinPickSubscription(subs []entity.CheckinSubscriptionView, branchID uin
 		return checkinPick{chosen: valid[0]}
 	}
 	switch {
+	case offPeak != nil:
+		return checkinPick{reason: offPeakViolation.DenyReason, related: offPeak, message: offPeakViolation.Message}
 	case frozen != nil:
 		return checkinPick{reason: entity.CheckinDenySubscriptionFrozen, related: frozen,
 			message: fmt.Sprintf("Gói tập \"%s\" đang bảo lưu, chưa thể vào tập", frozen.PlanName)}
@@ -215,6 +247,12 @@ func checkinPickSubscription(subs []entity.CheckinSubscriptionView, branchID uin
 		return checkinPick{reason: entity.CheckinDenyNoActiveSubscription,
 			message: "Hội viên không có gói tập còn hiệu lực, vui lòng mua hoặc gia hạn gói"}
 	}
+}
+
+// checkinUnrestricted: gói không giới hạn khung giờ vào tập (access_hours rỗng / []).
+func checkinUnrestricted(sub *entity.CheckinSubscriptionView) bool {
+	ah := strings.TrimSpace(sub.AccessHours)
+	return ah == "" || ah == "[]" || ah == "null"
 }
 
 // checkinBranchOpen: giờ hiện tại (VN, HH:MM) nằm trong [open_time, close_time).
@@ -263,157 +301,254 @@ func (s *checkinService) Scan(ctx context.Context, token string, branchID uint) 
 	if err != nil {
 		return nil, err
 	}
+	return s.scan(ctx, token, branch, checkinAttempt{method: entity.CheckinMethodQR, staffID: reqctx.UserID(ctx)})
+}
+
+// ScanDevice: thiết bị kiểm soát ra vào (cổng/Kiosk) đã xác thực bằng device key quét mã tại chi nhánh của thiết bị.
+// Lượt check-in được ghi với method = DEVICE, device_id và không gắn nhân viên.
+func (s *checkinService) ScanDevice(ctx context.Context, token string, branchID, deviceID uint) (*v1.ScanResult, error) {
+	b, err := s.repo.FindBranch(ctx, branchID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, rescode.New(rescode.NotFound, "Không tìm thấy chi nhánh")
+		}
+		return nil, err
+	}
+	if b.Status != consts.StatusActive {
+		return nil, rescode.New(rescode.BadRequest, "Chi nhánh đã ngừng hoạt động")
+	}
+	dev := deviceID
+	return s.scan(ctx, token, b, checkinAttempt{method: entity.CheckinMethodDevice, deviceID: &dev})
+}
+
+func (s *checkinService) scan(ctx context.Context, token string, branch *entity.Branch, a checkinAttempt) (*v1.ScanResult, error) {
 	trimmed := strings.TrimSpace(token)
+	a.branch = branch
 	if strings.HasPrefix(trimmed, "TP-") {
-		return s.scanTrialPass(ctx, trimmed, branch)
+		return s.scanTrialPass(ctx, trimmed, a)
 	}
 	if strings.HasPrefix(trimmed, "DP-") {
-		return s.scanDayPass(ctx, trimmed, branch)
+		return s.scanDayPass(ctx, trimmed, a)
 	}
 	memberID, err := qrtoken.ParseMemberID(token)
 	if err != nil {
 		// QR hỏng hoàn toàn: không xác định được hội viên → không ghi DB.
 		return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
 	}
-	return s.process(ctx, checkinAttempt{method: entity.CheckinMethodQR, branch: branch, memberID: memberID, token: token})
+	a.memberID, a.token = memberID, token
+	return s.process(ctx, a)
 }
 
-func (s *checkinService) scanTrialPass(ctx context.Context, token string, branch *entity.Branch) (*v1.ScanResult, error) {
+// checkinPass là dữ liệu chung của vé ngày / vé tập thử để quyết định cho vào.
+type checkinPass struct {
+	kind        string // DAY | TRIAL
+	id          uint
+	branchID    uint
+	branchName  string
+	validDate   time.Time
+	usedAt      *time.Time
+	qrToken     string
+	member      *v1.CheckinMember
+	usedReason  string
+	expReason   string
+	wrongBranch string
+	expMessage  string
+	warning     string
+}
+
+// processPass quyết định cho vào bằng vé trong MỘT transaction: khóa dòng vé → kiểm tra nghỉ lễ / giờ mở cửa /
+// chi nhánh / đã dùng / ngày hiệu lực → đánh dấu đã dùng có điều kiện (used_at IS NULL) → ghi checkins.
+// Hai lần quét đồng thời cùng một vé: lần sau chờ khóa, đọc lại used_at và bị từ chối (không thể dùng lại vé).
+func (s *checkinService) processPass(ctx context.Context, a checkinAttempt, load func(ctx context.Context) (*checkinPass, error),
+	markUsed func(ctx context.Context, id uint, at time.Time) (bool, error)) (*v1.ScanResult, error) {
+	now := s.now()
+	today := checkinDate(now.In(checkinVNLoc))
+	var res *v1.ScanResult
+	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
+		p, err := load(ctx)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				res = checkinDeniedNoMember(entity.CheckinDenyQRInvalid)
+				return nil
+			}
+			return err
+		}
+		reason, message := s.branchGateReason(ctx, a.branch, now, today)
+		switch {
+		case reason != "":
+		case p.branchID != a.branch.ID:
+			reason, message = entity.CheckinDenyWrongBranch, fmt.Sprintf(p.wrongBranch, p.branchName)
+		case p.usedAt != nil:
+			reason = p.usedReason
+		case checkinDate(p.validDate) != today:
+			reason, message = p.expReason, fmt.Sprintf(p.expMessage, p.validDate.Format(checkinDisplayDateLayout))
+		default:
+			ok, err := markUsed(ctx, p.id, now)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				reason = p.usedReason
+			}
+		}
+		rec := &repository.CheckinPassRecord{
+			BranchID: a.branch.ID, DeviceID: a.deviceID, CheckedInAt: now, Method: a.method,
+			Result: entity.CheckinAllowed, StaffID: a.staffID, Note: p.qrToken,
+		}
+		if p.kind == "DAY" {
+			rec.DayPassID = &p.id
+		} else {
+			rec.TrialPassID = &p.id
+		}
+		if reason != "" {
+			rec.Result, rec.DenyReason = entity.CheckinDenied, reason
+			if message == "" {
+				message = checkinDenyMessages[reason]
+			}
+			rec.DenyMessage = message
+		}
+		id, err := s.passRepo().CreatePassCheckin(ctx, rec)
+		if err != nil {
+			return err
+		}
+		res = &v1.ScanResult{
+			Result:      rec.Result,
+			DenyReason:  reason,
+			DenyMessage: message,
+			Member:      p.member,
+			Checkin:     &v1.CheckinRef{ID: id, CheckedInAt: now, BranchID: a.branch.ID, BranchName: a.branch.Name},
+			Warnings:    []string{},
+		}
+		if reason == "" {
+			res.Warnings = []string{p.warning}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// passRepo: repo thật luôn cài CheckinPassRepository; repo giả trong test có thể không → bỏ qua ghi lịch sử.
+func (s *checkinService) passRepo() repository.CheckinPassRepository {
+	if r, ok := s.repo.(repository.CheckinPassRepository); ok {
+		return r
+	}
+	return checkinNoopPassRepo{}
+}
+
+type checkinNoopPassRepo struct{}
+
+func (checkinNoopPassRepo) CreatePassCheckin(context.Context, *repository.CheckinPassRecord) (uint, error) {
+	return 0, nil
+}
+
+func (s *checkinService) scanTrialPass(ctx context.Context, token string, a checkinAttempt) (*v1.ScanResult, error) {
 	tpRepo, ok := s.repo.(repository.CheckinTrialPassRepository)
 	if !ok {
 		return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
 	}
-	tp, err := tpRepo.FindTrialPassByToken(ctx, token)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
+	return s.processPass(ctx, a, func(ctx context.Context) (*checkinPass, error) {
+		tp, err := tpRepo.FindTrialPassByToken(ctx, token)
+		if err != nil {
+			return nil, err
 		}
-		return nil, err
-	}
-	now := s.now()
-	today := checkinDate(now.In(checkinVNLoc))
-	memberInfo := &v1.CheckinMember{
-		ID:       tp.LeadID,
-		Code:     fmt.Sprintf("TRIAL-%d", tp.ID),
-		FullName: tp.FullName + " (Tập thử)",
-		Phone:    tp.Phone,
-		Status:   "TRIAL",
-	}
-	deny := func(reason, msg string) *v1.ScanResult {
-		if msg == "" {
-			msg = checkinDenyMessages[reason]
-		}
-		return &v1.ScanResult{
-			Result:      entity.CheckinDenied,
-			DenyReason:  reason,
-			DenyMessage: msg,
-			Member:      memberInfo,
-			Checkin: &v1.CheckinRef{
-				ID:          tp.ID,
-				CheckedInAt: now,
-				BranchID:    branch.ID,
-				BranchName:  branch.Name,
+		return &checkinPass{
+			kind: "TRIAL", id: tp.ID, branchID: tp.BranchID, branchName: tp.BranchName, validDate: tp.ValidDate,
+			usedAt: tp.UsedAt, qrToken: tp.QRToken,
+			member: &v1.CheckinMember{
+				ID: tp.LeadID, Code: fmt.Sprintf("TRIAL-%d", tp.ID), FullName: tp.FullName + " (Tập thử)",
+				Phone: tp.Phone, Status: "TRIAL",
 			},
-			Warnings: []string{},
-		}
-	}
-	if !checkinBranchOpen(branch, now) {
-		return deny(entity.CheckinDenyBranchClosed, fmt.Sprintf("Ngoài giờ mở cửa của chi nhánh (%s - %s)", branch.OpenTime, branch.CloseTime)), nil
-	}
-	if tp.BranchID != branch.ID {
-		return deny(entity.CheckinDenyWrongBranch, fmt.Sprintf("Vé tập thử chỉ áp dụng tại chi nhánh %s", tp.BranchName)), nil
-	}
-	if tp.UsedAt != nil {
-		return deny(entity.CheckinDenyTrialPassUsed, ""), nil
-	}
-	if checkinDate(tp.ValidDate) != today {
-		return deny(entity.CheckinDenyTrialPassExpired, fmt.Sprintf("Vé tập thử chỉ có hiệu lực ngày %s", tp.ValidDate.Format(checkinDisplayDateLayout))), nil
-	}
-	if err := tpRepo.MarkTrialPassUsed(ctx, tp.ID, now); err != nil {
-		return nil, err
-	}
-	return &v1.ScanResult{
-		Result: entity.CheckinAllowed,
-		Member: memberInfo,
-		Checkin: &v1.CheckinRef{
-			ID:          tp.ID,
-			CheckedInAt: now,
-			BranchID:    branch.ID,
-			BranchName:  branch.Name,
-		},
-		Warnings: []string{"Khách tập thử 1 ngày theo vé " + tp.QRToken},
-	}, nil
+			usedReason: entity.CheckinDenyTrialPassUsed, expReason: entity.CheckinDenyTrialPassExpired,
+			wrongBranch: "Vé tập thử chỉ áp dụng tại chi nhánh %s", expMessage: "Vé tập thử chỉ có hiệu lực ngày %s",
+			warning: "Khách tập thử 1 ngày theo vé " + tp.QRToken,
+		}, nil
+	}, tpRepo.MarkTrialPassUsed)
 }
 
-func (s *checkinService) scanDayPass(ctx context.Context, token string, branch *entity.Branch) (*v1.ScanResult, error) {
+func (s *checkinService) scanDayPass(ctx context.Context, token string, a checkinAttempt) (*v1.ScanResult, error) {
 	dpRepo, ok := s.repo.(repository.CheckinDayPassRepository)
 	if !ok {
 		return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
 	}
-	dp, err := dpRepo.FindDayPassByToken(ctx, token)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return checkinDeniedNoMember(entity.CheckinDenyQRInvalid), nil
+	return s.processPass(ctx, a, func(ctx context.Context) (*checkinPass, error) {
+		dp, err := dpRepo.FindDayPassByToken(ctx, token)
+		if err != nil {
+			return nil, err
 		}
-		return nil, err
-	}
-	now := s.now()
-	today := checkinDate(now.In(checkinVNLoc))
-	label := "Vé ngày"
-	if dp.Type == entity.DayPassTypeGuest {
-		label = "Khách mời"
-	}
-	memberInfo := &v1.CheckinMember{
-		ID:       dp.ID,
-		Code:     fmt.Sprintf("DP-%d", dp.ID),
-		FullName: fmt.Sprintf("%s (%s)", dp.BuyerName, label),
-		Phone:    dp.Phone,
-		Status:   dp.Type,
-	}
-	deny := func(reason, msg string) *v1.ScanResult {
-		if msg == "" {
-			msg = checkinDenyMessages[reason]
+		label := "Vé ngày"
+		if dp.Type == entity.DayPassTypeGuest {
+			label = "Khách mời"
 		}
-		return &v1.ScanResult{
-			Result:      entity.CheckinDenied,
-			DenyReason:  reason,
-			DenyMessage: msg,
-			Member:      memberInfo,
-			Checkin: &v1.CheckinRef{
-				ID:          dp.ID,
-				CheckedInAt: now,
-				BranchID:    branch.ID,
-				BranchName:  branch.Name,
+		return &checkinPass{
+			kind: "DAY", id: dp.ID, branchID: dp.BranchID, branchName: dp.BranchName, validDate: dp.ValidDate,
+			usedAt: dp.UsedAt, qrToken: dp.QRToken,
+			member: &v1.CheckinMember{
+				ID: dp.ID, Code: fmt.Sprintf("DP-%d", dp.ID), FullName: fmt.Sprintf("%s (%s)", dp.BuyerName, label),
+				Phone: dp.Phone, Status: dp.Type,
 			},
-			Warnings: []string{},
+			usedReason: entity.CheckinDenyDayPassUsed, expReason: entity.CheckinDenyDayPassExpired,
+			wrongBranch: "Vé chỉ áp dụng tại chi nhánh %s", expMessage: "Vé chỉ có hiệu lực ngày %s",
+			warning: fmt.Sprintf("%s theo mã %s", label, dp.QRToken),
+		}, nil
+	}, dpRepo.MarkDayPassUsed)
+}
+
+// branchGateReason kiểm tra chi nhánh có mở cửa cho check-in lúc now không:
+// lịch nghỉ lễ đóng cửa (BranchHolidayClosedRule) và giờ mở cửa (giờ đặc biệt của ngày lễ nếu có).
+func (s *checkinService) branchGateReason(ctx context.Context, branch *entity.Branch, now time.Time, today string) (string, string) {
+	open, closeT := branch.OpenTime, branch.CloseTime
+	holidayName := ""
+	if rr, ok := s.repo.(repository.CheckinRulesRepository); ok {
+		if h, err := rr.FindBranchHoliday(ctx, branch.ID, today); err == nil && h != nil {
+			if v := EvaluateCheckinRules(ctx, &CheckinRuleInput{
+				Now: now, BranchID: branch.ID, BranchHolidayClosed: h.Closed, BranchHolidayName: h.Name,
+			}, BranchHolidayClosedRule{}); v != nil {
+				return v.DenyReason, v.Message + ", không thể check-in"
+			}
+			if h.OpenTime != nil && h.CloseTime != nil && *h.OpenTime != "" && *h.CloseTime != "" {
+				open, closeT, holidayName = *h.OpenTime, *h.CloseTime, h.Name
+			}
 		}
 	}
-	if !checkinBranchOpen(branch, now) {
-		return deny(entity.CheckinDenyBranchClosed, fmt.Sprintf("Ngoài giờ mở cửa của chi nhánh (%s - %s)", branch.OpenTime, branch.CloseTime)), nil
+	hm := now.In(checkinVNLoc).Format(checkinDisplayTimeLayout)
+	if hm < open || hm >= closeT {
+		if holidayName != "" {
+			return entity.CheckinDenyBranchClosed, fmt.Sprintf("Ngoài giờ mở cửa ngày lễ %s (%s - %s)", holidayName, open, closeT)
+		}
+		return entity.CheckinDenyBranchClosed, fmt.Sprintf("Ngoài giờ mở cửa của chi nhánh (%s - %s)", open, closeT)
 	}
-	if dp.BranchID != branch.ID {
-		return deny(entity.CheckinDenyWrongBranch, fmt.Sprintf("Vé chỉ áp dụng tại chi nhánh %s", dp.BranchName)), nil
+	return "", ""
+}
+
+// memberRuleViolation chạy các CheckinRule cấp hội viên: hợp đồng điện tử bắt buộc, kỳ trả góp quá hạn.
+func (s *checkinService) memberRuleViolation(ctx context.Context, m *entity.Member, now time.Time) (*CheckinRuleViolation, error) {
+	rr, ok := s.repo.(repository.CheckinRulesRepository)
+	if !ok {
+		return nil, nil
 	}
-	if dp.UsedAt != nil {
-		return deny(entity.CheckinDenyDayPassUsed, ""), nil
+	in := &CheckinRuleInput{Now: now, Member: m}
+	if s.settings.Int(ctx, SettingCheckinRequireSignedContract, 0) == 1 {
+		in.RequireSignedContract = true
+		signed, err := rr.HasSignedContract(ctx, m.ID)
+		if err != nil {
+			return nil, err
+		}
+		in.HasSignedContract = signed
 	}
-	if checkinDate(dp.ValidDate) != today {
-		return deny(entity.CheckinDenyDayPassExpired, fmt.Sprintf("Vé chỉ có hiệu lực ngày %s", dp.ValidDate.Format(checkinDisplayDateLayout))), nil
+	grace := s.settings.Int(ctx, SettingCheckinInstallmentGraceDays, checkinDefaultInstallmentGraceDays)
+	if grace < 0 {
+		grace = 0
 	}
-	if err := dpRepo.MarkDayPassUsed(ctx, dp.ID, now); err != nil {
+	overdueBefore := checkinDate(now.In(checkinVNLoc).AddDate(0, 0, -grace))
+	overdue, err := rr.HasOverdueInstallment(ctx, m.ID, overdueBefore)
+	if err != nil {
 		return nil, err
 	}
-	return &v1.ScanResult{
-		Result: entity.CheckinAllowed,
-		Member: memberInfo,
-		Checkin: &v1.CheckinRef{
-			ID:          dp.ID,
-			CheckedInAt: now,
-			BranchID:    branch.ID,
-			BranchName:  branch.Name,
-		},
-		Warnings: []string{fmt.Sprintf("%s theo mã %s", label, dp.QRToken)},
-	}, nil
+	in.HasOverdueInstallment = overdue
+	return EvaluateCheckinRules(ctx, in, ContractSignedRule{}, InstallmentNotOverdueRule{}), nil
 }
 
 func (s *checkinService) Manual(ctx context.Context, memberID, branchID uint, note string) (*v1.ScanResult, error) {
@@ -423,6 +558,7 @@ func (s *checkinService) Manual(ctx context.Context, memberID, branchID uint, no
 	}
 	return s.process(ctx, checkinAttempt{
 		method: entity.CheckinMethodManual, branch: branch, memberID: memberID, note: strings.TrimSpace(note),
+		staffID: reqctx.UserID(ctx),
 	})
 }
 
@@ -432,6 +568,8 @@ type checkinAttempt struct {
 	memberID uint
 	token    string
 	note     string
+	staffID  *uint
+	deviceID *uint
 }
 
 // process chạy toàn bộ quy trình quyết định trong MỘT transaction:
@@ -446,7 +584,7 @@ func (s *checkinService) process(ctx context.Context, a checkinAttempt) (*v1.Sca
 		m, err := s.repo.LockMember(ctx, a.memberID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				if a.method == entity.CheckinMethodQR {
+				if a.token != "" {
 					res = checkinDeniedNoMember(entity.CheckinDenyQRInvalid)
 					return nil
 				}
@@ -464,7 +602,7 @@ func (s *checkinService) process(ctx context.Context, a checkinAttempt) (*v1.Sca
 			pick            checkinPick
 			prev            *repository.CheckinRow
 		)
-		if a.method == entity.CheckinMethodQR {
+		if a.token != "" {
 			switch err := qrtoken.Verify(a.token, m.QRSecret, now); {
 			case errors.Is(err, qrtoken.ErrExpired):
 				reason = entity.CheckinDenyQRExpired
@@ -472,9 +610,8 @@ func (s *checkinService) process(ctx context.Context, a checkinAttempt) (*v1.Sca
 				reason = entity.CheckinDenyQRInvalid
 			}
 		}
-		if reason == "" && !checkinBranchOpen(a.branch, now) {
-			reason = entity.CheckinDenyBranchClosed
-			message = fmt.Sprintf("Ngoài giờ mở cửa của chi nhánh (%s - %s)", a.branch.OpenTime, a.branch.CloseTime)
+		if reason == "" {
+			reason, message = s.branchGateReason(ctx, a.branch, now, today)
 		}
 		if reason == "" && m.Status != entity.MemberStatusActive {
 			reason = entity.CheckinDenyMemberInactive
@@ -485,11 +622,20 @@ func (s *checkinService) process(ctx context.Context, a checkinAttempt) (*v1.Sca
 			}
 		}
 		if reason == "" {
+			v, err := s.memberRuleViolation(ctx, m, now)
+			if err != nil {
+				return err
+			}
+			if v != nil {
+				reason, message = v.DenyReason, v.Message
+			}
+		}
+		if reason == "" {
 			subs, err := s.repo.LockSubscriptions(ctx, m.ID)
 			if err != nil {
 				return err
 			}
-			pick = checkinPickSubscription(subs, a.branch.ID, today)
+			pick = checkinPickSubscription(subs, a.branch.ID, today, now.In(checkinVNLoc))
 
 			window := s.settings.Int(ctx, SettingCheckinDuplicateWindowMinutes, checkinDefaultDuplicateMins)
 			if window > 0 {
@@ -504,13 +650,14 @@ func (s *checkinService) process(ctx context.Context, a checkinAttempt) (*v1.Sca
 				message = fmt.Sprintf("Hội viên đã check-in lúc %s tại %s (trong vòng %d phút), không cần quét lại",
 					prev.CheckedInAt.In(checkinVNLoc).Format(checkinDisplayTimeLayout), prev.BranchName, window)
 			case pick.chosen == nil:
+				// Gồm cả trường hợp chỉ có gói Off-Peak ngoài khung giờ (OUTSIDE_ACCESS_HOURS) – đã xét mọi gói.
 				reason, message = pick.reason, pick.message
 			}
 		}
 
 		rec := &entity.Checkin{
 			MemberID: m.ID, BranchID: a.branch.ID, CheckedInAt: now, Method: a.method,
-			StaffID: reqctx.UserID(ctx), Note: a.note,
+			StaffID: a.staffID, DeviceID: a.deviceID, Note: a.note,
 		}
 		if reason == "" {
 			rec.Result = entity.CheckinAllowed
@@ -520,6 +667,14 @@ func (s *checkinService) process(ctx context.Context, a checkinAttempt) (*v1.Sca
 		}
 		if err := s.repo.Create(ctx, rec); err != nil {
 			return err
+		}
+		// Lưu thông điệp chi tiết (nghỉ lễ, giờ đặc biệt, giờ check-in trước…) để lịch sử hiển thị đúng lý do.
+		if reason != "" && message != "" && message != checkinDenyMessages[reason] {
+			if w, ok := s.repo.(repository.CheckinDenyMessageWriter); ok {
+				if err := w.SetDenyMessage(ctx, rec.ID, message); err != nil {
+					return err
+				}
+			}
 		}
 
 		sub := pick.chosen
@@ -645,13 +800,23 @@ func (s *checkinService) Present(ctx context.Context, branchID uint) (v1.Present
 // ---- Lịch sử / thống kê --------------------------------------------------------
 
 func checkinToItem(r repository.CheckinRow) *v1.CheckinItem {
+	denyMsg := checkinDenyMessages[r.DenyReason]
+	switch {
+	case r.DenyReason == "":
+		denyMsg = ""
+	case r.StoredDenyMessage != "":
+		denyMsg = r.StoredDenyMessage
+	case r.HolidayDenyMessage != nil && *r.HolidayDenyMessage != "":
+		denyMsg = *r.HolidayDenyMessage
+	}
 	return &v1.CheckinItem{
 		ID: r.ID, MemberID: r.MemberID, MemberCode: r.MemberCode, MemberName: r.MemberName, MemberPhone: r.MemberPhone,
 		MemberAvatarURL: r.MemberAvatarURL, BranchID: r.BranchID, BranchName: r.BranchName,
 		SubscriptionID: r.SubscriptionID, PlanName: r.PlanName, PlanType: r.PlanType,
 		CheckedInAt: r.CheckedInAt, CheckedOutAt: r.CheckedOutAt, Method: r.Method, Result: r.Result,
-		DenyReason: r.DenyReason, DenyMessage: checkinDenyMessages[r.DenyReason],
+		DenyReason: r.DenyReason, DenyMessage: denyMsg,
 		StaffID: r.StaffID, StaffName: r.StaffName, Note: r.Note,
+		DeviceID: r.DeviceID, DayPassID: r.DayPassID, TrialPassID: r.TrialPassID,
 	}
 }
 

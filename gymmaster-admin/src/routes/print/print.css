@@ -141,6 +141,41 @@
   margin: 6px 0;
 }
 
+/* Màn hình hẹp (điện thoại): khổ giấy co theo màn hình, không tràn ngang. */
+@media screen and (max-width: 640px) {
+  .inv-print-page {
+    padding: 8px;
+    overflow-x: hidden;
+  }
+  .inv-paper {
+    box-sizing: border-box;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  .inv-paper.a5 {
+    width: 100%;
+    min-height: 0;
+    padding: 12px;
+    font-size: 11px;
+  }
+  .inv-paper.r80 {
+    width: 100%;
+    max-width: 80mm;
+  }
+  .inv-paper.a5 .inv-totals {
+    width: 100%;
+  }
+  .inv-paper th,
+  .inv-paper td {
+    padding: 3px 2px;
+  }
+  .inv-paper .num {
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: keep-all;
+  }
+}
+
 @media print {
   body {
     background: #fff !important;

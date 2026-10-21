@@ -12,6 +12,7 @@ import { PricingSection } from '@/features/landing/components/PricingSection';
 import { PTSection } from '@/features/landing/components/PTSection';
 import { PublicScheduleSection } from '@/features/landing/components/PublicScheduleSection';
 import { TrialLeadSection } from '@/features/landing/components/TrialLeadSection';
+import { normalizeReferralCode } from '@/features/landing/referral';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations('common.landing');
@@ -19,7 +20,13 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /** Trang công khai: bảng giá, gói PT, lịch lớp, HLV, cảm nhận, blog, chi nhánh, đăng ký tập thử. */
-export default async function LandingPage() {
+export default async function LandingPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // Đọc ?ref= phía server rồi truyền xuống: tránh lệch HTML server/client (hydration error).
+  const referralCode = normalizeReferralCode((await searchParams).ref);
   const [session, plans, branches, schedules, trainers, testimonials, posts] = await Promise.all([
     getCachedSession(),
     landingApi.plans(),
@@ -62,13 +69,9 @@ export default async function LandingPage() {
         <PricingSection result={plans.ok ? { ok: true, data: planList } : { ok: false }} />
         <PTSection result={plans.ok ? { ok: true, data: ptList } : { ok: false }} />
         <PublicScheduleSection branches={branchList} initialSchedules={scheduleList} />
-        <CommunitySection
-          trainers={trainerList}
-          testimonials={testimonialList}
-          posts={postList}
-        />
+        <CommunitySection trainers={trainerList} testimonials={testimonialList} posts={postList} />
         <BranchesSection result={branches} />
-        <TrialLeadSection branches={branchList} plans={planList} />
+        <TrialLeadSection branches={branchList} plans={planList} referralCode={referralCode} />
       </main>
       <LandingFooter />
     </div>

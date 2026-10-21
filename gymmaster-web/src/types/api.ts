@@ -33,6 +33,10 @@ export const ApiCode = {
   REFRESH_TOKEN_INVALID: 40103,
   RESET_TOKEN_INVALID: 40104,
   TOO_MANY_ATTEMPTS: 40105,
+  /** Tài khoản bật 2FA – cần gửi kèm mfa_code. */
+  MFA_REQUIRED: 40107,
+  /** Mã 2FA (TOTP/mã khôi phục) không đúng. */
+  MFA_INVALID_CODE: 40108,
   PERMISSION_DENIED: 40300,
   ACCOUNT_LOCKED: 40301,
   NOT_FOUND: 40400,

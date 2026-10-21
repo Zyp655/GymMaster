@@ -2,6 +2,7 @@ import { Select } from 'antd';
 import type { SelectProps } from 'antd';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { normalizeText } from '@/utils/format';
+import { ALL_BRANCHES, fromSelectValue, toSelectValue } from './value';
 
 export interface BranchSelectProps extends Omit<
   SelectProps<number | number[] | null>,
@@ -17,12 +18,21 @@ export interface BranchSelectProps extends Omit<
  * Ô chọn chi nhánh trong phạm vi người dùng được phép (theo `branch_ids`).
  *   <Form.Item name="branch_id" label="Chi nhánh"><BranchSelect /></Form.Item>
  */
-export function BranchSelect({ allowAll, activeOnly, placeholder, ...rest }: BranchSelectProps) {
+export function BranchSelect({
+  allowAll,
+  activeOnly,
+  placeholder,
+  value,
+  onChange,
+  ...rest
+}: BranchSelectProps) {
   const { branches, isGlobal, isLoading } = useBranchOptions();
   const list = activeOnly ? branches.filter((b) => b.status !== 'INACTIVE') : branches;
+  // "Tất cả chi nhánh" (value null) chỉ có khi allowAll và user làm việc toàn hệ thống.
+  const showAll = !!allowAll && isGlobal;
 
   const options: SelectProps['options'] = [
-    ...(allowAll && isGlobal ? [{ label: 'Tất cả chi nhánh', value: null }] : []),
+    ...(showAll ? [{ label: 'Tất cả chi nhánh', value: ALL_BRANCHES }] : []),
     ...list.map((b) => ({
       label: b.status === 'INACTIVE' ? `${b.name} (ngừng hoạt động)` : b.name,
       value: b.id,
@@ -40,6 +50,10 @@ export function BranchSelect({ allowAll, activeOnly, placeholder, ...rest }: Bra
       }
       style={{ width: '100%' }}
       {...rest}
+      value={toSelectValue(value, showAll)}
+      onChange={(v, option) =>
+        onChange?.(fromSelectValue(v, showAll) as number | number[] | null, option)
+      }
     />
   );
 }

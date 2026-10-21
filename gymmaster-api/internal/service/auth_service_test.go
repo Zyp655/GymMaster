@@ -84,6 +84,7 @@ func (f *fakeRefreshRepo) Revoke(_ context.Context, id uint, at time.Time) error
 	for _, t := range f.tokens {
 		if t.ID == id {
 			t.RevokedAt = &at
+			t.LastUsedAt = &at
 		}
 	}
 	return nil
@@ -153,7 +154,7 @@ func codeOf(err error) int {
 func TestLogin_Success(t *testing.T) {
 	svc, users, refresh := newAuthFixture(t)
 
-	res, err := svc.Login(context.Background(), "lt@gm.vn", testPassword, ClientInfo{IP: "127.0.0.1"})
+	res, err := svc.Login(context.Background(), "lt@gm.vn", testPassword, "", ClientInfo{IP: "127.0.0.1"})
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, res.AccessToken)
@@ -172,7 +173,7 @@ func TestLogin_Success(t *testing.T) {
 
 func TestLogin_OwnerHasGlobalScope(t *testing.T) {
 	svc, _, _ := newAuthFixture(t)
-	res, err := svc.Login(context.Background(), "owner@gm.vn", testPassword, ClientInfo{})
+	res, err := svc.Login(context.Background(), "owner@gm.vn", testPassword, "", ClientInfo{})
 	require.NoError(t, err)
 	assert.Empty(t, res.User.BranchIDs)
 }
@@ -181,13 +182,13 @@ func TestLogin_Failures(t *testing.T) {
 	svc, _, _ := newAuthFixture(t)
 	ctx := context.Background()
 
-	_, err := svc.Login(ctx, "khongton@tai.vn", testPassword, ClientInfo{})
+	_, err := svc.Login(ctx, "khongton@tai.vn", testPassword, "", ClientInfo{})
 	assert.Equal(t, rescode.InvalidCredentials.Code(), codeOf(err))
 
-	_, err = svc.Login(ctx, "lt@gm.vn", "sai-mat-khau", ClientInfo{})
+	_, err = svc.Login(ctx, "lt@gm.vn", "sai-mat-khau", "", ClientInfo{})
 	assert.Equal(t, rescode.InvalidCredentials.Code(), codeOf(err))
 
-	_, err = svc.Login(ctx, "locked@gm.vn", testPassword, ClientInfo{})
+	_, err = svc.Login(ctx, "locked@gm.vn", testPassword, "", ClientInfo{})
 	assert.Equal(t, rescode.AccountLocked.Code(), codeOf(err))
 }
 
@@ -195,7 +196,7 @@ func TestRefresh_RotatesToken(t *testing.T) {
 	svc, _, refresh := newAuthFixture(t)
 	ctx := context.Background()
 
-	first, err := svc.Login(ctx, "lt@gm.vn", testPassword, ClientInfo{})
+	first, err := svc.Login(ctx, "lt@gm.vn", testPassword, "", ClientInfo{})
 	require.NoError(t, err)
 
 	second, err := svc.Refresh(ctx, first.RefreshToken, ClientInfo{})
@@ -208,7 +209,7 @@ func TestRefresh_ReuseRevokesAllSessions(t *testing.T) {
 	svc, _, refresh := newAuthFixture(t)
 	ctx := context.Background()
 
-	first, err := svc.Login(ctx, "lt@gm.vn", testPassword, ClientInfo{})
+	first, err := svc.Login(ctx, "lt@gm.vn", testPassword, "", ClientInfo{})
 	require.NoError(t, err)
 	_, err = svc.Refresh(ctx, first.RefreshToken, ClientInfo{})
 	require.NoError(t, err)
@@ -219,6 +220,30 @@ func TestRefresh_ReuseRevokesAllSessions(t *testing.T) {
 	assert.Equal(t, 0, refresh.activeCount(2), "phát hiện dùng lại → thu hồi toàn bộ phiên")
 }
 
+func TestRefresh_RemotelyRevokedSessionDoesNotRevokeActiveSessions(t *testing.T) {
+	svc, _, refresh := newAuthFixture(t)
+	ctx := context.Background()
+
+	devA, err := svc.Login(ctx, "lt@gm.vn", testPassword, "", ClientInfo{UserAgent: "Desktop"})
+	require.NoError(t, err)
+	devB, err := svc.Login(ctx, "lt@gm.vn", testPassword, "", ClientInfo{UserAgent: "Mobile"})
+	require.NoError(t, err)
+	require.Equal(t, 2, refresh.activeCount(2))
+
+	// Thiết bị B bị thu hồi từ xa (hoặc đăng xuất) → chỉ có RevokedAt, không có LastUsedAt.
+	require.NoError(t, svc.Logout(ctx, devB.RefreshToken))
+	require.Equal(t, 1, refresh.activeCount(2))
+
+	// Thiết bị B tự động gọi Refresh → bị từ chối nhưng KHÔNG làm văng phiên của Thiết bị A.
+	_, err = svc.Refresh(ctx, devB.RefreshToken, ClientInfo{UserAgent: "Mobile"})
+	assert.Equal(t, rescode.RefreshTokenInvalid.Code(), codeOf(err))
+	assert.Equal(t, 1, refresh.activeCount(2), "phiên của Thiết bị A vẫn phải còn hiệu lực")
+
+	rotatedA, err := svc.Refresh(ctx, devA.RefreshToken, ClientInfo{UserAgent: "Desktop"})
+	require.NoError(t, err)
+	assert.NotEmpty(t, rotatedA.AccessToken)
+}
+
 func TestRefresh_UnknownOrExpired(t *testing.T) {
 	svc, _, _ := newAuthFixture(t)
 	ctx := context.Background()
@@ -226,7 +251,7 @@ func TestRefresh_UnknownOrExpired(t *testing.T) {
 	_, err := svc.Refresh(ctx, "khong-ton-tai", ClientInfo{})
 	assert.Equal(t, rescode.RefreshTokenInvalid.Code(), codeOf(err))
 
-	res, err := svc.Login(ctx, "lt@gm.vn", testPassword, ClientInfo{})
+	res, err := svc.Login(ctx, "lt@gm.vn", testPassword, "", ClientInfo{})
 	require.NoError(t, err)
 	svc.now = func() time.Time { return time.Now().Add(2 * time.Hour) } // quá RefreshTTL
 	_, err = svc.Refresh(ctx, res.RefreshToken, ClientInfo{})
@@ -237,7 +262,7 @@ func TestChangePassword(t *testing.T) {
 	svc, users, refresh := newAuthFixture(t)
 	ctx := reqctx.WithAuth(context.Background(), &token.Payload{UserID: 2})
 
-	_, err := svc.Login(context.Background(), "lt@gm.vn", testPassword, ClientInfo{})
+	_, err := svc.Login(context.Background(), "lt@gm.vn", testPassword, "", ClientInfo{})
 	require.NoError(t, err)
 
 	err = svc.ChangePassword(ctx, "sai", "MatKhauMoi@1")

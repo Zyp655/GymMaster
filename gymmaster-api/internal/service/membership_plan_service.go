@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
 	v1 "gymmaster-api/api/plan/v1"
@@ -215,6 +218,23 @@ func normalizePlanInput(in v1.PlanInput) (v1.PlanInput, error) {
 	if in.MaxFreezeDays > in.DurationDays {
 		return in, rescode.New(rescode.BadRequest, "Số ngày bảo lưu tối đa không được vượt quá thời hạn gói")
 	}
+	// Sao chép slice để chuẩn hóa không ghi đè dữ liệu của caller.
+	in.AccessHours = append([]v1.AccessHoursSlot(nil), in.AccessHours...)
+	for i, sl := range in.AccessHours {
+		from, ok1 := parseHHMM(sl.From)
+		to, ok2 := parseHHMM(sl.To)
+		if !ok1 || !ok2 || from >= to {
+			return in, rescode.New(rescode.BadRequest, "Khung giờ vào tập không hợp lệ (HH:MM, giờ bắt đầu phải trước giờ kết thúc)")
+		}
+		// Chuẩn hóa "8:00" → "08:00" (so khớp khung giờ khi check-in/hiển thị dùng dạng HH:MM).
+		in.AccessHours[i].From = fmt.Sprintf("%02d:%02d", from/60, from%60)
+		in.AccessHours[i].To = fmt.Sprintf("%02d:%02d", to/60, to%60)
+		for _, d := range sl.Dow {
+			if d < 0 || d > 7 {
+				return in, rescode.New(rescode.BadRequest, "Thứ trong khung giờ vào tập không hợp lệ")
+			}
+		}
+	}
 	in.Price = roundMoneyVND(in.Price)
 	in.TransferFee = roundMoneyVND(in.TransferFee)
 	return in, nil
@@ -233,30 +253,63 @@ func applyPlanInput(p *entity.MembershipPlan, in v1.PlanInput) {
 	p.MaxFreezeTimes = in.MaxFreezeTimes
 	p.IncludesClasses = in.IncludesClasses
 	p.TransferFee = in.TransferFee
+	p.GuestPassesPerMonth = in.GuestPassesPerMonth
+	p.AccessHours = planAccessHoursJSON(in.AccessHours)
 	p.Status = in.Status
 	p.SortOrder = in.SortOrder
 }
 
 func toPlanRes(p entity.MembershipPlan) *v1.Plan {
 	return &v1.Plan{
-		ID:              p.ID,
-		Code:            p.Code,
-		Name:            p.Name,
-		Description:     p.Description,
-		Type:            p.Type,
-		DurationDays:    p.DurationDays,
-		SessionCount:    p.SessionCount,
-		Price:           p.Price,
-		AccessScope:     p.AccessScope,
-		MaxFreezeDays:   p.MaxFreezeDays,
-		MaxFreezeTimes:  p.MaxFreezeTimes,
-		IncludesClasses: p.IncludesClasses,
-		TransferFee:     p.TransferFee,
-		Status:          p.Status,
-		SortOrder:       p.SortOrder,
-		CreatedAt:       p.CreatedAt,
-		UpdatedAt:       p.UpdatedAt,
+		ID:                  p.ID,
+		Code:                p.Code,
+		Name:                p.Name,
+		Description:         p.Description,
+		Type:                p.Type,
+		DurationDays:        p.DurationDays,
+		SessionCount:        p.SessionCount,
+		Price:               p.Price,
+		AccessScope:         p.AccessScope,
+		MaxFreezeDays:       p.MaxFreezeDays,
+		MaxFreezeTimes:      p.MaxFreezeTimes,
+		IncludesClasses:     p.IncludesClasses,
+		TransferFee:         p.TransferFee,
+		GuestPassesPerMonth: p.GuestPassesPerMonth,
+		AccessHours:         planAccessHours(p.AccessHours),
+		Status:              p.Status,
+		SortOrder:           p.SortOrder,
+		CreatedAt:           p.CreatedAt,
+		UpdatedAt:           p.UpdatedAt,
 	}
+}
+
+func planAccessHoursJSON(slots []v1.AccessHoursSlot) datatypes.JSON {
+	if len(slots) == 0 {
+		return datatypes.JSON("[]")
+	}
+	b, _ := json.Marshal(slots)
+	return datatypes.JSON(b)
+}
+
+// planAccessHours đọc access_hours; dữ liệu cũ dạng ["HH:MM-HH:MM"] được quy về khung mọi ngày.
+func planAccessHours(raw datatypes.JSON) []v1.AccessHoursSlot {
+	out := []v1.AccessHoursSlot{}
+	if len(raw) == 0 {
+		return out
+	}
+	if err := json.Unmarshal(raw, &out); err == nil {
+		return out
+	}
+	var windows []string
+	if err := json.Unmarshal(raw, &windows); err != nil {
+		return []v1.AccessHoursSlot{}
+	}
+	for _, w := range windows {
+		if from, to, ok := strings.Cut(w, "-"); ok {
+			out = append(out, v1.AccessHoursSlot{From: strings.TrimSpace(from), To: strings.TrimSpace(to)})
+		}
+	}
+	return out
 }
 
 // roundMoneyVND làm tròn số tiền về đồng (VND không có phần lẻ).

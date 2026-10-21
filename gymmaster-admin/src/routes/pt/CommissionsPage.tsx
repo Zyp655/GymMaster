@@ -20,7 +20,7 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import ptApi from '@/api/pt';
 import type { Commission, CommissionStatus, CommissionSummaryItem } from '@/api/pt';
-import BranchSelect from '@/components/BranchSelect';
+import BranchFilterSelect from '@/routes/classes/BranchFilterSelect';
 import ConfirmButton from '@/components/ConfirmButton';
 import MoneyText from '@/components/Money/MoneyText';
 import PageTitle from '@/components/PageTitle';
@@ -297,10 +297,9 @@ export default function CommissionsPage() {
           />
         </Col>
         <Col xs={12} sm={8} lg={5}>
-          <BranchSelect
-            allowAll
+          <BranchFilterSelect
             value={branchId ?? null}
-            onChange={(v) => set({ branch_id: v === null ? 'all' : (v as number) })}
+            onChange={(v) => set({ branch_id: v === null ? 'all' : v })}
           />
         </Col>
       </Row>

@@ -36,15 +36,22 @@ type (
 		shiftRepo repository.ShiftRepository
 		tx        postgres.TxManager
 		loc       *time.Location
+		audit     AuditService
 	}
 )
 
-func NewShiftService(shiftRepo repository.ShiftRepository, tx postgres.TxManager) ShiftService {
+const (
+	auditEntityShift = "shift"
+	auditShiftCopy   = "COPY_WEEK"
+)
+
+// NewShiftService: audit tùy chọn (test đơn vị có thể bỏ qua).
+func NewShiftService(shiftRepo repository.ShiftRepository, tx postgres.TxManager, audit ...AuditService) ShiftService {
 	loc, err := time.LoadLocation(consts.TimeZone)
 	if err != nil {
 		loc = time.FixedZone("ICT", 7*3600)
 	}
-	return &shiftService{shiftRepo: shiftRepo, tx: tx, loc: loc}
+	return &shiftService{shiftRepo: shiftRepo, tx: tx, loc: loc, audit: optionalAudit(audit)}
 }
 
 func (s *shiftService) List(ctx context.Context, req *v1.ListReq) ([]*v1.Shift, error) {
@@ -89,7 +96,12 @@ func (s *shiftService) Create(ctx context.Context, in v1.ShiftInput) (*v1.Shift,
 	if err := s.shiftRepo.Create(ctx, sh); err != nil {
 		return nil, mapShiftErr(err)
 	}
-	return s.get(ctx, sh.ID)
+	res, err := s.get(ctx, sh.ID)
+	if err != nil {
+		return nil, err
+	}
+	auditLogSafe(s.audit, ctx, AuditCreate, auditEntityShift, sh.ID, nil, res)
+	return res, nil
 }
 
 func (s *shiftService) Update(ctx context.Context, id uint, in v1.ShiftInput) (*v1.Shift, error) {
@@ -107,14 +119,24 @@ func (s *shiftService) Update(ctx context.Context, id uint, in v1.ShiftInput) (*
 	if err := s.shiftRepo.Update(ctx, sh); err != nil {
 		return nil, mapShiftErr(err)
 	}
-	return s.get(ctx, id)
+	res, err := s.get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	auditLogSafe(s.audit, ctx, AuditUpdate, auditEntityShift, id, toShiftRes(cur), res)
+	return res, nil
 }
 
 func (s *shiftService) Delete(ctx context.Context, id uint) error {
-	if _, err := s.find(ctx, id); err != nil {
+	cur, err := s.find(ctx, id)
+	if err != nil {
 		return err
 	}
-	return s.shiftRepo.Delete(ctx, id)
+	if err := s.shiftRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	auditLogSafe(s.audit, ctx, AuditDelete, auditEntityShift, id, toShiftRes(cur), nil)
+	return nil
 }
 
 func (s *shiftService) CopyWeek(ctx context.Context, req *v1.CopyWeekReq) (*v1.CopyWeekRes, error) {
@@ -189,6 +211,9 @@ func (s *shiftService) CopyWeek(ctx context.Context, req *v1.CopyWeekReq) (*v1.C
 	if err != nil {
 		return nil, err
 	}
+	auditLogSafe(s.audit, ctx, auditShiftCopy, auditEntityShift, 0,
+		map[string]any{"branch_id": req.BranchID, "from_week_start": req.FromWeekStart},
+		map[string]any{"to_week_start": req.ToWeekStart, "created": res.Created, "skipped": res.Skipped})
 	return res, nil
 }
 

@@ -23,15 +23,13 @@ import (
 )
 
 type fakeDeviceRepo struct {
-	nextID          uint
-	devs            map[uint]*entity.AccessDevice
-	attachedCheckin map[uint]uint
+	nextID uint
+	devs   map[uint]*entity.AccessDevice
 }
 
 func newFakeDeviceRepo() *fakeDeviceRepo {
 	return &fakeDeviceRepo{
-		devs:            map[uint]*entity.AccessDevice{},
-		attachedCheckin: map[uint]uint{},
+		devs: map[uint]*entity.AccessDevice{},
 	}
 }
 
@@ -99,11 +97,6 @@ func (f *fakeDeviceRepo) TouchSeen(_ context.Context, id uint, seenAt time.Time)
 	return nil
 }
 
-func (f *fakeDeviceRepo) AttachDeviceToCheckin(_ context.Context, checkinID, deviceID uint) error {
-	f.attachedCheckin[checkinID] = deviceID
-	return nil
-}
-
 func (f *fakeDeviceRepo) ListStaleActiveDevices(_ context.Context, cutoff time.Time) ([]repository.AccessDeviceRow, error) {
 	var out []repository.AccessDeviceRow
 	for _, d := range f.devs {
@@ -126,7 +119,15 @@ func (f *fakeDeviceRepo) MarkDevicesOffline(_ context.Context, ids []uint) error
 type fakeDeviceCheckinSvc struct {
 	lastToken    string
 	lastBranchID uint
+	lastDeviceID uint
 	result       *checkinv1.ScanResult
+}
+
+func (f *fakeDeviceCheckinSvc) ScanDevice(_ context.Context, tok string, branchID, deviceID uint) (*checkinv1.ScanResult, error) {
+	f.lastToken = tok
+	f.lastBranchID = branchID
+	f.lastDeviceID = deviceID
+	return f.result, nil
 }
 
 func (f *fakeDeviceCheckinSvc) IssueQR(context.Context, uint) (string, time.Time, error) {
@@ -219,7 +220,8 @@ func TestDeviceService_CreateRotateCheckinAndHeartbeat(t *testing.T) {
 	assert.Equal(t, "Nguyễn Văn A", chkRes.MemberName)
 	assert.Equal(t, "Gói 12 Tháng VIP", chkRes.PlanName)
 	assert.Equal(t, uint(1), checkinFake.lastBranchID)
-	assert.Equal(t, created.Device.ID, repo.attachedCheckin[99])
+	// Lượt check-in được ghi trực tiếp với device_id trong ScanDevice, không cập nhật lại bản ghi sau khi quét.
+	assert.Equal(t, created.Device.ID, checkinFake.lastDeviceID)
 
 	// 4. Stale heartbeat check (>10m) marks OFFLINE and sends notification
 	n, err := svc.CheckOfflineDevices(ctx, fixedNow.Add(15*time.Minute))

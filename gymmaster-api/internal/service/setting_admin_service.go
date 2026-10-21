@@ -50,6 +50,8 @@ var settingRules = map[string]settingRule{
 	SettingBookingBlockDays:              {min: 1, max: 365},
 	SettingSubscriptionRemindBeforeDays:  {isSlice: true, min: 1, max: 90, maxItems: 10},
 	SettingPTCancelBeforeMinutes:         {min: 1, max: 10080},
+	SettingCheckinRequireSignedContract:  {min: 0, max: 1},
+	SettingCheckinInstallmentGraceDays:   {min: 0, max: 90},
 }
 
 func (s *settingAdminService) List(ctx context.Context) ([]*v1.Setting, error) {

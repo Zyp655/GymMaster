@@ -4,7 +4,7 @@ Base URL (dev): `http://localhost:8000/v1`. Mọi endpoint cần `Authorization:
 Envelope, mã lỗi, phân trang: xem `sprint-01-auth-rbac-branch.md`. Tóm tắt:
 
 - Thành công: `{ "code": 0, "message": "OK", "data": ... }`.
-- Lỗi: `code` 5 chữ số, HTTP = code/100, `message` tiếng Việt hiển thị thẳng cho người dùng.
+- Lỗi: `code` 5 chữ số, HTTP status chuẩn theo bảng trong `sprint-01-auth-rbac-branch.md`, `message` tiếng Việt hiển thị thẳng cho người dùng.
   Lỗi validate tag: `code = 51` (HTTP 400). Nghiệp vụ: `40000` (400), `40300` (403), `40400` (404), `40900` (409).
 - Ngày `"YYYY-MM-DD"` (lịch Việt Nam, `Asia/Ho_Chi_Minh`). Thời điểm RFC3339. Tiền là `number` VND, đã làm tròn đến đồng.
 - Danh sách: `data = {items, total, total_page, current_page, limit}`; query chung `page`, `limit` (≤100), `keyword`, `order_by`, `order_dir`.

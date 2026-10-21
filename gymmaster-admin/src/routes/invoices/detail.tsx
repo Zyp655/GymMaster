@@ -18,23 +18,32 @@ import {
   DollarOutlined,
   PrinterOutlined,
   RollbackOutlined,
+  ScheduleOutlined,
 } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import invoiceApi, { INVOICE_ITEM_TYPE_LABEL, INVOICE_SOURCE_LABEL } from '@/api/invoice';
 import type { InvoiceItem, Payment, Refund } from '@/api/invoice';
+import { financeExtApi } from '@/api/payroll-finance';
+import type { InstallmentSchedule } from '@/api/payroll-finance';
 import MoneyText from '@/components/Money/MoneyText';
 import PageTitle from '@/components/PageTitle';
 import StatusTag from '@/components/StatusTag';
 import { PERM } from '@/constants/permissions';
-import { INVOICE_STATUS_MAP, PAYMENT_METHOD_MAP } from '@/constants/status';
+import { INSTALLMENT_STATUS_MAP, INVOICE_STATUS_MAP, PAYMENT_METHOD_MAP } from '@/constants/status';
 import { usePermission } from '@/hooks/usePermission';
 import { openInvoicePrint } from '@/routes/subscriptions/utils';
 import { getErrorMessage } from '@/utils/errors';
-import { formatDateTime, formatPhone } from '@/utils/format';
+import { formatDate, formatDateTime, formatPhone } from '@/utils/format';
+import InstallmentPlanModal from './InstallmentPlanModal';
 import { CollectModal, RefundModal, VoidModal } from './InvoiceActionModals';
 import { canCollect, canRefund, canVoid } from './utils';
 
-type ModalKey = 'collect' | 'refund' | 'void' | null;
+type ModalKey = 'collect' | 'refund' | 'void' | 'installment' | null;
+
+/** Nhãn dòng xóa nợ khi hủy gói (ghi riêng, không phải giảm giá). */
+const writeOffLabel = (reason?: string) =>
+  reason ? `Xóa nợ (${reason.replace(/^Hủy gói tập:\s*/, 'hủy gói – ')})` : 'Xóa nợ do hủy gói';
 
 /** Mục cuối chiếm phần còn lại của hàng (tránh cảnh báo tổng span lệch số cột). */
 const fillLast = <T extends object>(items: T[]) =>
@@ -54,6 +63,12 @@ export default function InvoiceDetailPage() {
     enabled: Number.isInteger(id) && id > 0,
   });
   const inv = query.data;
+  const schedulesQuery = useQuery({
+    queryKey: [financeExtApi.installmentKey, 'invoice', id],
+    queryFn: () => financeExtApi.listInstallments({ invoice_id: id }),
+    enabled: Number.isInteger(id) && id > 0 && can(PERM.INVOICE_VIEW),
+  });
+  const schedules = schedulesQuery.data?.items ?? [];
 
   if (query.isLoading) {
     return (
@@ -107,6 +122,11 @@ export default function InvoiceDetailPage() {
                   onClick={() => setModal('collect')}
                 >
                   Thu tiền
+                </Button>
+              )}
+              {can(PERM.INVOICE_COLLECT) && canCollect(inv) && inv.member && !schedules.length && (
+                <Button icon={<ScheduleOutlined />} onClick={() => setModal('installment')}>
+                  Chia kỳ trả góp
                 </Button>
               )}
               {can(PERM.INVOICE_REFUND) && canRefund(inv) && (
@@ -219,7 +239,17 @@ export default function InvoiceDetailPage() {
             <>
               {[
                 ['Tạm tính', inv.subtotal],
-                ['Giảm giá', -inv.discount],
+                ...(inv.discount
+                  ? [
+                      [
+                        `Giảm giá${inv.promotion_code ? ` (${inv.promotion_code})` : ''}`,
+                        -inv.discount,
+                      ] as const,
+                    ]
+                  : []),
+                ...(inv.write_off_amount
+                  ? [[writeOffLabel(inv.write_off_reason), -inv.write_off_amount] as const]
+                  : []),
                 ['Tổng cộng', inv.total],
                 ['Đã thanh toán', inv.paid_amount],
                 ...(inv.refunded_amount ? [['Đã hoàn', -inv.refunded_amount] as const] : []),
@@ -248,6 +278,52 @@ export default function InvoiceDetailPage() {
           )}
         />
       </Card>
+
+      {schedules.length > 0 && (
+        <Card
+          variant="borderless"
+          className="page-card"
+          style={{ marginTop: 16 }}
+          title="Kế hoạch trả góp"
+          extra={<Link to="/app/finance">Quản lý trả góp</Link>}
+        >
+          <Table<InstallmentSchedule>
+            size="small"
+            rowKey="id"
+            pagination={false}
+            dataSource={schedules}
+            scroll={{ x: 'max-content' }}
+            columns={[
+              { title: 'Kỳ', dataIndex: 'seq', render: (v: number) => `Kỳ ${v}` },
+              { title: 'Đến hạn', dataIndex: 'due_date', render: (v: string) => formatDate(v) },
+              {
+                title: 'Số tiền',
+                dataIndex: 'amount',
+                align: 'right',
+                render: (v: number) => <MoneyText value={v} />,
+              },
+              {
+                title: 'Đã thu',
+                dataIndex: 'paid_amount',
+                align: 'right',
+                render: (v: number) => <MoneyText value={v || 0} />,
+              },
+              {
+                title: 'Trạng thái',
+                dataIndex: 'status',
+                render: (v: string, r) => (
+                  <StatusTag
+                    status={
+                      v === 'PENDING' && dayjs(r.due_date).isBefore(dayjs(), 'day') ? 'OVERDUE' : v
+                    }
+                    map={INSTALLMENT_STATUS_MAP}
+                  />
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
 
       <Row gutter={16}>
         <Col xs={24} lg={14}>
@@ -334,6 +410,11 @@ export default function InvoiceDetailPage() {
       <CollectModal open={modal === 'collect'} invoice={inv} onClose={() => setModal(null)} />
       <RefundModal open={modal === 'refund'} invoice={inv} onClose={() => setModal(null)} />
       <VoidModal open={modal === 'void'} invoice={inv} onClose={() => setModal(null)} />
+      <InstallmentPlanModal
+        open={modal === 'installment'}
+        invoice={inv}
+        onClose={() => setModal(null)}
+      />
     </>
   );
 }

@@ -2,17 +2,20 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Alert,
+  App,
   Button,
   Card,
   Col,
   DatePicker,
-  Popconfirm,
+  Form,
+  Input,
+  Modal,
   Row,
   Segmented,
   Space,
   Tag,
   Typography,
-  message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -42,6 +45,7 @@ import DataTable from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import MobileList from '@/components/MobileList';
 import type { MobileFetchArgs } from '@/components/MobileList';
+import MoneyInput from '@/components/Money/MoneyInput';
 import MoneyText from '@/components/Money/MoneyText';
 import PageTitle from '@/components/PageTitle';
 import StatCard from '@/components/StatCard';
@@ -58,6 +62,7 @@ import { usePermission } from '@/hooks/usePermission';
 import { useTableQuery } from '@/hooks/useTableQuery';
 import { useUrlParams } from '@/hooks/useUrlParams';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
+import { setFormError, showError } from '@/utils/errors';
 import { DATE_FORMAT, formatDateTime, formatMoney, formatNumber, toApiDate } from '@/utils/format';
 
 const TITLE = 'Sổ thu tiền & Giao dịch VNPay';
@@ -122,12 +127,23 @@ function OnlinePaymentsSection() {
   const { branches } = useBranchOptions();
   const { can } = usePermission();
 
+  const { message } = App.useApp();
+  const [refundTxn, setRefundTxn] = useState<OnlinePaymentTxn | null>(null);
+  const [refundForm] = Form.useForm<{ amount: number; reason: string }>();
+  const refundable = (r: OnlinePaymentTxn) =>
+    r.refundable ?? Math.max(0, r.amount - (r.refunded_amount ?? 0));
+
   const refundMut = useMutation({
-    mutationFn: (id: number) =>
-      cmsSystemApi.refundOnlineTxn(id, { reason: 'Hoàn tiền giao dịch VNPay trực tuyến' }),
+    mutationFn: (v: { id: number; amount: number; reason: string }) =>
+      cmsSystemApi.refundOnlineTxn(v.id, { amount: v.amount, reason: v.reason.trim() }),
     onSuccess: (res) => {
       message.success(`Đã hoàn tiền VNPay thành công (${res.gateway_ref})`);
-      qc.invalidateQueries({ queryKey: [invoiceApi.key] });
+      setRefundTxn(null);
+      void qc.invalidateQueries({ queryKey: [invoiceApi.key] });
+    },
+    onError: (err) => {
+      if (!setFormError(refundForm, err, { amount: /số tiền|vượt/i, reason: /lý do/i }))
+        showError(err, 'Không thể hoàn tiền giao dịch VNPay');
     },
   });
 
@@ -214,24 +230,75 @@ function OnlinePaymentsSection() {
         render: (v: string | null) => (v ? formatDateTime(v) : '—'),
       },
       {
+        title: 'Ghi nhận / Đã hoàn',
+        key: 'recorded',
+        align: 'right',
+        render: (_, r) =>
+          r.status === 'SUCCESS' || r.status === 'NEEDS_REFUND' || r.status === 'REFUNDED' ? (
+            <Space direction="vertical" size={0} style={{ alignItems: 'flex-end' }}>
+              <span>
+                Vào HĐ: <MoneyText value={r.recorded_amount ?? r.amount} />
+              </span>
+              {(r.refunded_amount ?? 0) > 0 && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  Đã hoàn: <MoneyText value={r.refunded_amount ?? 0} />
+                </Typography.Text>
+              )}
+            </Space>
+          ) : (
+            '—'
+          ),
+      },
+      {
+        title: 'Ghi chú',
+        dataIndex: 'note',
+        width: 220,
+        render: (v: string | undefined, r) =>
+          v ? (
+            <Typography.Text
+              type={r.status === 'NEEDS_REFUND' ? 'danger' : 'secondary'}
+              style={{ fontSize: 12 }}
+            >
+              {v}
+            </Typography.Text>
+          ) : (
+            '—'
+          ),
+      },
+      {
         title: 'Thao tác',
         key: 'actions',
         render: (_, r) =>
-          r.status === 'SUCCESS' && can(PERM.INVOICE_REFUND) ? (
-            <Popconfirm
-              title="Hoàn tiền giao dịch VNPay trực tuyến này?"
-              onConfirm={() => refundMut.mutate(r.id)}
+          (r.status === 'SUCCESS' || r.status === 'NEEDS_REFUND') &&
+          refundable(r) > 0 &&
+          can(PERM.INVOICE_REFUND) ? (
+            <Button
+              size="small"
+              danger
+              icon={<RollbackOutlined />}
+              onClick={() => {
+                refundForm.resetFields();
+                // Giao dịch cần hoàn: gợi ý đúng phần chưa ghi vào hóa đơn; còn lại: toàn bộ số có thể hoàn.
+                const unrecorded = Math.max(
+                  0,
+                  r.amount - (r.recorded_amount ?? r.amount) - (r.refunded_amount ?? 0),
+                );
+                refundForm.setFieldsValue({
+                  amount: r.status === 'NEEDS_REFUND' && unrecorded > 0 ? unrecorded : refundable(r),
+                  reason: '',
+                });
+                setRefundTxn(r);
+              }}
             >
-              <Button size="small" danger icon={<RollbackOutlined />}>
-                Hoàn tiền Online
-              </Button>
-            </Popconfirm>
+              Hoàn tiền
+            </Button>
           ) : (
             '—'
           ),
       },
     ],
-    [can, refundMut],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [can],
   );
 
   return (
@@ -258,6 +325,68 @@ function OnlinePaymentsSection() {
         columns={columns}
         emptyText="Chưa có giao dịch VNPay trực tuyến nào"
       />
+      <Modal
+        open={!!refundTxn}
+        title={`Hoàn tiền giao dịch VNPay ${refundTxn?.txn_ref ?? ''}`}
+        okText="Xác nhận hoàn tiền"
+        okButtonProps={{ danger: true }}
+        cancelText="Hủy"
+        confirmLoading={refundMut.isPending}
+        onOk={() => refundForm.submit()}
+        onCancel={() => setRefundTxn(null)}
+        forceRender
+      >
+        {refundTxn && (
+          <Space direction="vertical" style={{ width: '100%', marginTop: 8 }}>
+            {refundTxn.status === 'NEEDS_REFUND' && refundTxn.note && (
+              <Alert type="warning" showIcon message={refundTxn.note} />
+            )}
+            <Typography.Text type="secondary">
+              Số tiền giao dịch <MoneyText value={refundTxn.amount} /> · đã hoàn{' '}
+              <MoneyText value={refundTxn.refunded_amount ?? 0} /> · còn có thể hoàn{' '}
+              <MoneyText value={refundable(refundTxn)} strong />. Phần chưa ghi vào hóa đơn được hoàn
+              trước; phần đã ghi nhận sẽ hoàn qua hóa đơn (hoàn một phần hóa đơn vẫn giữ trạng thái đã
+              thanh toán).
+            </Typography.Text>
+          </Space>
+        )}
+        <Form
+          form={refundForm}
+          layout="vertical"
+          style={{ marginTop: 12 }}
+          onFinish={(v) => refundTxn && refundMut.mutate({ id: refundTxn.id, ...v })}
+        >
+          <Form.Item
+            name="amount"
+            label="Số tiền hoàn"
+            rules={[
+              { required: true, message: 'Nhập số tiền hoàn' },
+              {
+                validator: (_, v?: number) => {
+                  if (!v || v <= 0) return Promise.reject(new Error('Số tiền hoàn phải lớn hơn 0'));
+                  if (refundTxn && v > refundable(refundTxn))
+                    return Promise.reject(
+                      new Error(`Tối đa ${formatMoney(refundable(refundTxn))}`),
+                    );
+                  return Promise.resolve();
+                },
+              },
+            ]}
+          >
+            <MoneyInput />
+          </Form.Item>
+          <Form.Item
+            name="reason"
+            label="Lý do hoàn tiền"
+            rules={[
+              { required: true, whitespace: true, message: 'Nhập lý do hoàn tiền' },
+              { min: 3, max: 255, message: 'Lý do từ 3 đến 255 ký tự' },
+            ]}
+          >
+            <Input.TextArea rows={2} maxLength={255} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   );
 }
@@ -268,7 +397,7 @@ function PaymentsDesktop() {
   const { branches } = useBranchOptions();
   const staffOptions = useStaffOptions();
   const urlBranch = url.get('branch_id');
-  const [tab, setTab] = useState<'ledger' | 'online'>('ledger');
+  const [tab, setTab] = useState<'ledger' | 'online'>(url.get('status') ? 'online' : 'ledger');
 
   const table = useTableQuery<PaymentItem, PaymentListParams>({
     queryKey: [invoiceApi.key, 'payments'],

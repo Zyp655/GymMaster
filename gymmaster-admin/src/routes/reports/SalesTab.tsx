@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Button, Card, Col, Progress, Result, Row, Table } from 'antd';
+import { Button, Card, Col, Progress, Result, Row, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   DollarOutlined,
@@ -11,7 +11,9 @@ import {
 import reportApi from '@/api/report';
 import type { SalesProductRow } from '@/api/report';
 import MoneyText from '@/components/Money/MoneyText';
+import HelpLabel from '@/components/HelpLabel';
 import StatCard from '@/components/StatCard';
+import { REVENUE_HELP } from '@/constants/revenueBasis';
 import { getErrorMessage } from '@/utils/errors';
 import { formatNumber } from '@/utils/format';
 import { rangeParams } from './types';
@@ -39,14 +41,27 @@ export default function SalesTab(f: ReportFilters) {
 
   const productColumns: ColumnsType<SalesProductRow> = [
     {
-      title: 'SKU',
-      dataIndex: 'sku',
-      render: (v: string) => <span className="code-text">{v}</span>,
+      title: 'Sản phẩm',
+      dataIndex: 'name',
+      width: 300,
+      render: (v: string, r) => (
+        <div style={{ maxWidth: 284 }}>
+          <Typography.Text
+            strong
+            ellipsis={{ tooltip: v }}
+            style={{ maxWidth: 284, display: 'block' }}
+          >
+            {v}
+          </Typography.Text>
+          <span className="code-text" style={{ fontSize: 12, color: 'var(--gm-text-secondary)' }}>
+            {r.sku}
+          </span>
+        </div>
+      ),
     },
-    { title: 'Sản phẩm', dataIndex: 'name', render: (v: string) => <b>{v}</b> },
-    { title: 'Danh mục', dataIndex: 'category_name' },
+    { title: 'Danh mục', dataIndex: 'category_name', width: 150, render: (v: string) => v || '—' },
     {
-      title: 'SL bán',
+      title: 'SL bán (thuần)',
       dataIndex: 'quantity',
       align: 'right',
       render: (v: number) => <b>{formatNumber(v)}</b>,
@@ -55,7 +70,12 @@ export default function SalesTab(f: ReportFilters) {
       title: 'Doanh thu',
       dataIndex: 'revenue',
       align: 'right',
-      render: (v: number) => <MoneyText value={v} strong />,
+      width: 140,
+      render: (v: number) => (
+        <span style={{ whiteSpace: 'nowrap' }}>
+          <MoneyText value={v} strong />
+        </span>
+      ),
     },
     {
       title: 'Giá vốn',
@@ -82,7 +102,7 @@ export default function SalesTab(f: ReportFilters) {
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         <Col xs={12} sm={8} lg={5}>
           <StatCard
-            label="Tổng SL sản phẩm bán"
+            label={<HelpLabel help={REVENUE_HELP.sales}>SL bán thuần (đã trừ trả)</HelpLabel>}
             value={t?.quantity ?? 0}
             caption={`${formatNumber(d?.product_count ?? 0)} mặt hàng phát sinh`}
             icon={<ShoppingOutlined />}
@@ -91,7 +111,7 @@ export default function SalesTab(f: ReportFilters) {
         </Col>
         <Col xs={12} sm={8} lg={5}>
           <StatCard
-            label="Doanh thu sản phẩm"
+            label={<HelpLabel help={REVENUE_HELP.sales}>Doanh thu sản phẩm (đã trừ trả)</HelpLabel>}
             value={t?.revenue ?? 0}
             currency
             icon={<ShoppingCartOutlined />}
@@ -129,7 +149,7 @@ export default function SalesTab(f: ReportFilters) {
       </Row>
 
       <Row gutter={[12, 12]}>
-        <Col xs={24} lg={15}>
+        <Col xs={24} xxl={15}>
           <Card size="small" title="Top sản phẩm bán chạy" loading={query.isLoading}>
             <Table<SalesProductRow>
               size="small"
@@ -142,7 +162,7 @@ export default function SalesTab(f: ReportFilters) {
             />
           </Card>
         </Col>
-        <Col xs={24} lg={9}>
+        <Col xs={24} xxl={9}>
           <Card size="small" title="Theo danh mục sản phẩm" loading={query.isLoading}>
             <Table
               size="small"

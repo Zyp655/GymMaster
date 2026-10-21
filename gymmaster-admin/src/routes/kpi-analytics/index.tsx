@@ -44,13 +44,16 @@ import type {
   KPIMetric,
   KPIReportItem,
   OccupancyLevel,
+  SalesTarget,
   SalesTargetInput,
 } from '@/api/operations-ext';
 import staffApi from '@/api/staff';
 import BranchSelect from '@/components/BranchSelect';
 import ConfirmButton from '@/components/ConfirmButton';
+import HelpLabel from '@/components/HelpLabel';
 import PageTitle from '@/components/PageTitle';
 import { PERM } from '@/constants/permissions';
+import { REVENUE_HELP } from '@/constants/revenueBasis';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
@@ -75,7 +78,8 @@ function OccupancyRealtimeTab() {
       <Row justify="space-between" align="middle">
         <Col>
           <Typography.Text type="secondary">
-            Dữ liệu cập nhật tự động mỗi 60 giây dựa trên lượt hội viên đang tập (Check-in trong 2 giờ gần nhất chưa Check-out).
+            Dữ liệu cập nhật tự động mỗi 60 giây dựa trên lượt hội viên đang tập (Check-in trong 3
+            giờ gần nhất chưa Check-out).
           </Typography.Text>
         </Col>
         <Col>
@@ -99,15 +103,16 @@ function OccupancyRealtimeTab() {
       ) : (
         <Row gutter={[16, 16]}>
           {items.map((b) => {
-            const present = Number(b.present ?? b.current_count ?? 0);
+            const present = Number(b.present_count ?? 0);
             const capacity = Number(b.capacity || 120);
             const pct = Math.min(
               100,
-              Math.round(Number(b.pct ?? b.occupancy_pct ?? (capacity > 0 ? (present / capacity) * 100 : 0))),
+              Math.round(
+                Number(b.occupancy_pct ?? (capacity > 0 ? (present / capacity) * 100 : 0)),
+              ),
             );
             const level: OccupancyLevel =
-              b.level ||
-              (pct >= 90 ? 'FULL' : pct >= 70 ? 'BUSY' : pct >= 35 ? 'NORMAL' : 'QUIET');
+              b.level || (pct >= 90 ? 'FULL' : pct >= 65 ? 'BUSY' : pct >= 30 ? 'NORMAL' : 'QUIET');
             const meta = OCCUPANCY_LEVEL_META[level] ?? OCCUPANCY_LEVEL_META.QUIET;
 
             return (
@@ -125,12 +130,21 @@ function OccupancyRealtimeTab() {
                   extra={<Tag color={meta.color}>{meta.label}</Tag>}
                 >
                   <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'baseline',
+                      }}
+                    >
                       <div>
-                        <span style={{ fontSize: 28, fontWeight: 700, color: '#0A3150' }}>
+                        {/* Màu theo biến CSS sáng/tối (custom.css) – không cố định navy (khó đọc ở chế độ tối). */}
+                        <span
+                          style={{ fontSize: 28, fontWeight: 700, color: 'var(--gm-tone-navy-fg)' }}
+                        >
                           {present}
                         </span>
-                        <span style={{ color: '#64748b', fontSize: 14 }}>
+                        <span style={{ color: 'var(--gm-text-secondary)', fontSize: 14 }}>
                           {' '}
                           / {capacity} hội viên
                         </span>
@@ -146,13 +160,6 @@ function OccupancyRealtimeTab() {
                       showInfo={false}
                       size={['100%', 10]}
                     />
-
-                    {b.peak_hours && b.peak_hours.length > 0 && (
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        Khung giờ cao điểm thường gặp:{' '}
-                        {b.peak_hours.map((h) => `${h}:00`).join(', ')}
-                      </Typography.Text>
-                    )}
                   </Space>
                 </Card>
               </Col>
@@ -190,10 +197,12 @@ function KpiTargetsTab({ canManage }: { canManage: boolean }) {
 
   const periodStr = periodDayjs.format('YYYY-MM');
 
+  // Danh sách nhân sự theo CHI NHÁNH ĐANG CHỌN TRONG FORM (backend chỉ nhận nhân viên thuộc chi nhánh của chỉ tiêu).
+  const formBranchId = Form.useWatch('branch_id', form);
   const staffQuery = useQuery({
-    queryKey: [staffApi.key, 'options', 'kpi', selectedBranch ?? branchId],
-    queryFn: () => staffApi.options(selectedBranch ?? branchId),
-    enabled: modalOpen,
+    queryKey: [staffApi.key, 'options', 'kpi', formBranchId],
+    queryFn: () => staffApi.options(formBranchId),
+    enabled: modalOpen && !!formBranchId,
   });
 
   const kpiQuery = useQuery({
@@ -251,92 +260,83 @@ function KpiTargetsTab({ canManage }: { canManage: boolean }) {
     onError: (err) => showError(err, 'Không thể xóa chỉ tiêu KPI'),
   });
 
-  const rows: KPIReportItem[] = useMemo(() => {
-    const reportItems = kpiQuery.data?.items ?? [];
-    if (reportItems.length > 0) return reportItems;
-    return (targetsQuery.data?.items ?? []).map((t) => ({
-      id: t.id,
-      target_id: t.id,
-      branch_id: t.branch_id,
-      branch_name: t.branch_name,
-      staff_id: t.staff_id,
-      staff_name: t.staff_name,
-      period: t.period,
-      metric: t.metric,
-      target_value: t.target_value,
-      actual_value: t.actual_value ?? 0,
-      pct: t.pct ?? 0,
-    }));
-  }, [kpiQuery.data, targetsQuery.data]);
+  const reportItems: KPIReportItem[] = kpiQuery.data?.items ?? [];
+  const targets: SalesTarget[] = targetsQuery.data?.items ?? [];
+  const scopeBranchId = kpiQuery.data?.branch_id || selectedBranch || branchId || 0;
+  const scopeLabel = scopeBranchId
+    ? (branches.find((b) => b.id === scopeBranchId)?.name ?? `Chi nhánh #${scopeBranchId}`)
+    : 'Toàn hệ thống';
 
-  const formatMetricVal = (metric: KPIMetric, val: number) => {
-    if (metric === 'REVENUE' || metric === 'PT_SALES') {
-      return formatMoney(val);
-    }
-    return `${formatNumber(val)} lượt`;
+  // PT_SALES: chỉ tiêu < 1.000 được hiểu là số hợp đồng (API trả actual là số lượng), ngược lại là doanh số (VND).
+  const isMoneyMetric = (metric: KPIMetric, target?: number) =>
+    metric === 'REVENUE' || (metric === 'PT_SALES' && !(target && target > 0 && target < 1000));
+
+  const formatMetricVal = (metric: KPIMetric, val: number, target?: number) => {
+    if (isMoneyMetric(metric, target)) return formatMoney(val);
+    return `${formatNumber(val)} ${metric === 'PT_SALES' ? 'HĐ' : 'lượt'}`;
   };
 
-  const columns = useMemo<ColumnsType<KPIReportItem>>(
+  const reportColumns = useMemo<ColumnsType<KPIReportItem>>(
     () => [
       {
-        title: 'Kỳ KPI',
-        dataIndex: 'period',
-        width: 100,
-        render: (v: string) => <Tag className="code-text">{v || periodStr}</Tag>,
-      },
-      {
-        title: 'Chi nhánh / Nhân sự phụ trách',
-        key: 'scope',
-        render: (_, r) => (
-          <Space direction="vertical" size={0}>
-            <Typography.Text strong>
-              {r.branch_name || `Chi nhánh #${r.branch_id}`}
-            </Typography.Text>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {r.staff_name
-                ? `Cá nhân: ${r.staff_name}`
-                : r.staff_id
-                  ? `Nhân sự #${r.staff_id}`
-                  : 'Chỉ tiêu chung toàn chi nhánh'}
-            </Typography.Text>
-          </Space>
-        ),
-      },
-      {
-        title: 'Chỉ số đo lường (Metric)',
+        title: 'Chỉ số',
         dataIndex: 'metric',
-        render: (m: KPIMetric) => (
-          <Tag color="geekblue">{KPI_METRIC_LABELS[m] ?? m}</Tag>
+        width: 220,
+        render: (m: KPIMetric, r) => (
+          <Tag color="geekblue">{r.label || KPI_METRIC_LABELS[m] || m}</Tag>
         ),
       },
       {
-        title: 'Mục tiêu (Target)',
+        title: 'Chỉ tiêu chi nhánh',
         dataIndex: 'target_value',
         align: 'right',
-        render: (v: number, r) => (
-          <Typography.Text strong>{formatMetricVal(r.metric, v)}</Typography.Text>
-        ),
+        width: 180,
+        render: (v: number, r) =>
+          (r.has_target ?? v > 0) ? (
+            <Space direction="vertical" size={0} align="end">
+              <Typography.Text strong>{formatMetricVal(r.metric, v, v)}</Typography.Text>
+              {!scopeBranchId && (r.target_branch_count ?? 0) > 0 && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {r.target_branch_count} chi nhánh có chỉ tiêu
+                </Typography.Text>
+              )}
+            </Space>
+          ) : (
+            <Typography.Text type="secondary">Chưa đặt chỉ tiêu</Typography.Text>
+          ),
       },
       {
-        title: 'Thực đạt (Actual)',
-        dataIndex: 'actual_value',
+        title: (
+          <HelpLabel
+            help={
+              <>
+                {REVENUE_HELP.kpi}
+                <br />
+                Xem toàn hệ thống: thực đạt chỉ cộng các chi nhánh CÓ chỉ tiêu của chỉ số đó (so
+                cùng phạm vi); chỉ số chưa đặt chỉ tiêu hiển thị thực đạt toàn hệ thống.
+              </>
+            }
+          >
+            Thực đạt
+          </HelpLabel>
+        ),
+        dataIndex: 'actual',
         align: 'right',
+        width: 180,
         render: (v: number, r) => (
-          <Typography.Text strong style={{ color: '#0A3150' }}>
-            {formatMetricVal(r.metric, v || 0)}
+          <Typography.Text strong style={{ color: 'var(--gm-tone-navy-fg)' }}>
+            {formatMetricVal(r.metric, Number(v) || 0, r.target_value)}
           </Typography.Text>
         ),
       },
       {
-        title: 'Tiến độ hoàn thành KPI',
+        title: 'Tiến độ',
         key: 'progress',
         width: 240,
         render: (_, r) => {
-          const target = Number(r.target_value) || 0;
-          const actual = Number(r.actual_value) || 0;
-          const pct = Number(
-            r.achievement_pct ?? r.pct ?? (target > 0 ? Math.round((actual / target) * 1000) / 10 : 0),
-          );
+          if (!(r.has_target ?? r.target_value > 0) || !(r.target_value > 0))
+            return <Typography.Text type="secondary">Chưa đặt chỉ tiêu</Typography.Text>;
+          const pct = Number(r.achievement_pct) || 0;
           return (
             <Progress
               percent={Math.min(100, Math.round(pct))}
@@ -347,13 +347,47 @@ function KpiTargetsTab({ canManage }: { canManage: boolean }) {
           );
         },
       },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopeBranchId],
+  );
+
+  const targetColumns = useMemo<ColumnsType<SalesTarget>>(
+    () => [
+      {
+        title: 'Chi nhánh / Nhân sự phụ trách',
+        key: 'scope',
+        render: (_, r) => (
+          <Space direction="vertical" size={0}>
+            <Typography.Text strong>{r.branch_name || `Chi nhánh #${r.branch_id}`}</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {r.staff_id
+                ? `Cá nhân: ${r.staff_name || `Nhân sự #${r.staff_id}`}`
+                : 'Chỉ tiêu chung toàn chi nhánh'}
+            </Typography.Text>
+          </Space>
+        ),
+      },
+      {
+        title: 'Chỉ số',
+        dataIndex: 'metric',
+        render: (m: KPIMetric) => <Tag color="geekblue">{KPI_METRIC_LABELS[m] ?? m}</Tag>,
+      },
+      {
+        title: 'Mục tiêu',
+        dataIndex: 'target_value',
+        align: 'right',
+        width: 180,
+        render: (v: number, r) => (
+          <Typography.Text strong>{formatMetricVal(r.metric, v, v)}</Typography.Text>
+        ),
+      },
       {
         title: '',
         key: 'actions',
-        width: 70,
-        render: (_, r) => {
-          const tid = r.target_id ?? r.id;
-          return canManage && tid ? (
+        width: 60,
+        render: (_, r) =>
+          canManage ? (
             <ConfirmButton
               perm={PERM.KPI_MANAGE}
               type="text"
@@ -361,15 +395,14 @@ function KpiTargetsTab({ canManage }: { canManage: boolean }) {
               danger
               icon={<DeleteOutlined />}
               confirmTitle="Xóa chỉ tiêu KPI này?"
-              onConfirm={() => deleteTargetMut.mutateAsync(tid)}
+              onConfirm={() => deleteTargetMut.mutateAsync(r.id)}
               aria-label="Xóa"
             />
-          ) : null;
-        },
+          ) : null,
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canManage, periodStr],
+    [canManage],
   );
 
   return (
@@ -432,13 +465,31 @@ function KpiTargetsTab({ canManage }: { canManage: boolean }) {
         </Row>
       </Card>
 
-      <Card size="small" title={`Bảng theo dõi tiến độ KPI thực tế vs mục tiêu – Kỳ ${periodStr}`}>
+      <Card size="small" title={`Tiến độ KPI – ${scopeLabel} – Kỳ ${periodStr}`}>
         <Table<KPIReportItem>
           size="small"
-          rowKey={(r) => `${r.id ?? r.target_id ?? ''}_${r.branch_id}_${r.staff_id ?? 0}_${r.metric}`}
-          loading={kpiQuery.isLoading || targetsQuery.isLoading}
-          columns={columns}
-          dataSource={rows}
+          rowKey="metric"
+          scroll={{ x: 'max-content' }}
+          loading={kpiQuery.isLoading}
+          columns={reportColumns}
+          dataSource={reportItems}
+          pagination={false}
+          locale={{ emptyText: <Empty description="Chưa có dữ liệu KPI trong kỳ này" /> }}
+        />
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+          Chỉ tiêu chi nhánh = tổng các chỉ tiêu chung (không gắn nhân sự). Chỉ tiêu cá nhân là phần
+          phân bổ, không cộng thêm.
+        </Typography.Text>
+      </Card>
+
+      <Card size="small" title={`Chỉ tiêu đã thiết lập – Kỳ ${periodStr}`}>
+        <Table<SalesTarget>
+          size="small"
+          rowKey="id"
+          scroll={{ x: 'max-content' }}
+          loading={targetsQuery.isLoading}
+          columns={targetColumns}
+          dataSource={targets}
           pagination={false}
           locale={{
             emptyText: (
@@ -450,7 +501,7 @@ function KpiTargetsTab({ canManage }: { canManage: boolean }) {
 
       <Modal
         open={modalOpen}
-        title="Thiết lập Chỉ tiêu Doanh số KPI (/admin/sales-targets)"
+        title="Thiết lập chỉ tiêu doanh số KPI"
         okText="Lưu chỉ tiêu KPI"
         cancelText="Hủy"
         onOk={() => form.submit()}
@@ -472,7 +523,10 @@ function KpiTargetsTab({ canManage }: { canManage: boolean }) {
                 label="Chi nhánh"
                 rules={[{ required: true, message: 'Chọn chi nhánh' }]}
               >
-                <BranchSelect activeOnly />
+                <BranchSelect
+                  activeOnly
+                  onChange={() => form.setFieldValue('staff_id', undefined)}
+                />
               </Form.Item>
             </Col>
             <Col xs={12}>
@@ -485,7 +539,10 @@ function KpiTargetsTab({ canManage }: { canManage: boolean }) {
               </Form.Item>
             </Col>
             <Col xs={24}>
-              <Form.Item name="staff_id" label="Giao cho nhân sự cụ thể (Để trống = Chỉ tiêu cả chi nhánh)">
+              <Form.Item
+                name="staff_id"
+                label="Giao cho nhân sự cụ thể (Để trống = Chỉ tiêu cả chi nhánh)"
+              >
                 <Select
                   allowClear
                   showSearch
@@ -564,13 +621,10 @@ function CohortRetentionTab() {
       align: 'center',
       width: 105,
       render: (_, r) => {
-        const cellObj = r.months?.find((m) => m.month_index === idx) ?? r.months?.[idx];
-        const pct =
-          cellObj?.pct ??
-          r.retention_pct?.[idx] ??
-          (idx === 0 && (r.cohort_size || r.initial_members) ? 100 : undefined);
+        const pct = r.retention_by_month?.[idx];
+        const activeCount = r.active_counts?.[idx];
 
-        if (pct === undefined) return <span style={{ color: '#cbd5e1' }}>—</span>;
+        if (pct === undefined || !r.size) return <span style={{ color: '#cbd5e1' }}>—</span>;
 
         return (
           <div
@@ -583,8 +637,7 @@ function CohortRetentionTab() {
               fontSize: 12,
             }}
           >
-            {pct}%
-            {cellObj?.active_count !== undefined ? ` (${cellObj.active_count})` : ''}
+            {pct}%{activeCount !== undefined ? ` (${activeCount})` : ''}
           </div>
         );
       },
@@ -596,9 +649,9 @@ function CohortRetentionTab() {
         dataIndex: 'cohort_month',
         fixed: 'left',
         width: 160,
-        render: (v: string, r) => (
+        render: (v: string) => (
           <Typography.Text strong className="code-text">
-            {r.label || v}
+            {v}
           </Typography.Text>
         ),
       },
@@ -607,9 +660,7 @@ function CohortRetentionTab() {
         key: 'size',
         width: 140,
         align: 'right',
-        render: (_, r) => (
-          <Tag color="blue">{formatNumber(r.cohort_size ?? r.initial_members ?? 0)} HV</Tag>
-        ),
+        render: (_, r) => <Tag color="blue">{formatNumber(r.size ?? 0)} HV</Tag>,
       },
       ...monthCols,
     ];
@@ -632,7 +683,8 @@ function CohortRetentionTab() {
                 />
               )}
               <Typography.Text type="secondary">
-                Tỷ lệ % hội viên còn duy trì gói tập ACTIVE ở các tháng tiếp theo kể từ tháng đăng ký đầu tiên.
+                Tỷ lệ % hội viên còn hoạt động ở các tháng tiếp theo kể từ tháng gia nhập (số trong
+                ngoặc là số hội viên).
               </Typography.Text>
             </Space>
           </Col>
@@ -647,7 +699,10 @@ function CohortRetentionTab() {
         </Row>
       </Card>
 
-      <Card size="small" title="Ma trận giữ chân hội viên theo nhóm tháng gia nhập (Cohort Retention Matrix)">
+      <Card
+        size="small"
+        title="Ma trận giữ chân hội viên theo nhóm tháng gia nhập (Cohort Retention Matrix)"
+      >
         <Table<CohortRow>
           size="small"
           rowKey="cohort_month"
@@ -667,48 +722,51 @@ export default function KpiAnalyticsPage() {
   const { can } = usePermission();
   const canManage = can(PERM.KPI_MANAGE);
 
+  // Bố cục chuẩn: Card.page-card (padding 20px như các trang khác).
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <PageTitle
-        title="Mật độ phòng tập, Chỉ tiêu KPI & Cohort Retention"
-        subtitle="Giám sát công suất phòng tập thời gian thực, theo dõi tiến độ doanh số KPI và ma trận giữ chân hội viên theo tháng"
-      />
+    <Card variant="borderless" className="page-card">
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <PageTitle
+          title="Mật độ phòng tập, Chỉ tiêu KPI & Cohort Retention"
+          subtitle="Giám sát công suất phòng tập thời gian thực, theo dõi tiến độ doanh số KPI và ma trận giữ chân hội viên theo tháng"
+        />
 
-      <Tabs
-        defaultActiveKey="occupancy"
-        items={[
-          {
-            key: 'occupancy',
-            label: (
-              <Space size={6}>
-                <DashboardOutlined />
-                <span>Mật độ phòng tập Realtime</span>
-              </Space>
-            ),
-            children: <OccupancyRealtimeTab />,
-          },
-          {
-            key: 'kpi',
-            label: (
-              <Space size={6}>
-                <AimOutlined />
-                <span>Chỉ tiêu doanh số KPI</span>
-              </Space>
-            ),
-            children: <KpiTargetsTab canManage={canManage} />,
-          },
-          {
-            key: 'cohort',
-            label: (
-              <Space size={6}>
-                <TableOutlined />
-                <span>Ma trận Cohort Retention</span>
-              </Space>
-            ),
-            children: <CohortRetentionTab />,
-          },
-        ]}
-      />
-    </Space>
+        <Tabs
+          defaultActiveKey="occupancy"
+          items={[
+            {
+              key: 'occupancy',
+              label: (
+                <Space size={6}>
+                  <DashboardOutlined />
+                  <span>Mật độ phòng tập Realtime</span>
+                </Space>
+              ),
+              children: <OccupancyRealtimeTab />,
+            },
+            {
+              key: 'kpi',
+              label: (
+                <Space size={6}>
+                  <AimOutlined />
+                  <span>Chỉ tiêu doanh số KPI</span>
+                </Space>
+              ),
+              children: <KpiTargetsTab canManage={canManage} />,
+            },
+            {
+              key: 'cohort',
+              label: (
+                <Space size={6}>
+                  <TableOutlined />
+                  <span>Ma trận Cohort Retention</span>
+                </Space>
+              ),
+              children: <CohortRetentionTab />,
+            },
+          ]}
+        />
+      </Space>
+    </Card>
   );
 }

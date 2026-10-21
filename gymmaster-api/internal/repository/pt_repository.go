@@ -438,8 +438,10 @@ func (r *ptRepository) TrainerPTOverlap(ctx context.Context, trainerID uint, sta
 
 func (r *ptRepository) TrainerClassOverlap(ctx context.Context, trainerID uint, start, end time.Time) (bool, error) {
 	var n int64
+	// HLV thực dạy = HLV dạy thay (nếu có), ngược lại là HLV chính.
 	err := postgres.Conn(ctx, r.db).Table("class_schedules").
-		Where("trainer_id = ? AND status <> 'CANCELLED' AND start_at < ? AND end_at > ?", trainerID, end, start).
+		Where("COALESCE(substitute_trainer_id, trainer_id) = ? AND status <> 'CANCELLED' AND start_at < ? AND end_at > ?",
+			trainerID, end, start).
 		Count(&n).Error
 	return n > 0, err
 }

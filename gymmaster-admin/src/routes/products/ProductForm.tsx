@@ -1,6 +1,18 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { App, Col, Form, Input, InputNumber, Modal, Row, Segmented, Select, Table, Typography } from 'antd';
+import {
+  App,
+  Col,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Row,
+  Segmented,
+  Select,
+  Table,
+  Typography,
+} from 'antd';
 import productApi, { productCategoryApi } from '@/api/product';
 import type { Product, ProductInput } from '@/api/product';
 import ImageUpload from '@/components/ImageUpload';
@@ -68,7 +80,7 @@ export default function ProductForm({ open, record, onClose }: ProductFormProps)
       name: v.name.trim(),
       category_id: v.category_id ?? null,
       unit: v.unit?.trim() || 'cái',
-      // Giá vốn do phiếu nhập tính (bình quân gia quyền) – khi sửa giữ nguyên giá trị hệ thống.
+      // Giá vốn do phiếu nhập tính (bình quân gia quyền) – khi sửa backend BỎ QUA trường này (không ghi đè).
       cost_price: isEdit ? (detail.data?.cost_price ?? record.cost_price) : (v.cost_price ?? 0),
       sell_price: v.sell_price,
       member_price: v.member_price === undefined || v.member_price === null ? null : v.member_price,
@@ -208,7 +220,12 @@ export default function ProductForm({ open, record, onClose }: ProductFormProps)
                 label="Giá vốn"
                 tooltip="Giá vốn bình quân gia quyền do hệ thống tự tính khi nhập hàng"
               >
-                <Input readOnly disabled value={formatNumber(detail.data?.cost_price ?? record?.cost_price)} addonAfter="₫" />
+                <Input
+                  readOnly
+                  disabled
+                  value={formatNumber(detail.data?.cost_price ?? record?.cost_price)}
+                  suffix="₫"
+                />
               </Form.Item>
             ) : (
               <Form.Item
@@ -239,7 +256,8 @@ export default function ProductForm({ open, record, onClose }: ProductFormProps)
                 ({ getFieldValue }) => ({
                   validator: (_, v: number | null | undefined) => {
                     const sell = getFieldValue('sell_price') as number | undefined;
-                    if (v === null || v === undefined || sell === undefined) return Promise.resolve();
+                    if (v === null || v === undefined || sell === undefined)
+                      return Promise.resolve();
                     return v <= sell
                       ? Promise.resolve()
                       : Promise.reject(new Error('Giá hội viên không được lớn hơn giá bán'));
@@ -298,7 +316,13 @@ export default function ProductForm({ open, record, onClose }: ProductFormProps)
                 title: 'Giá trị tồn',
                 key: 'value',
                 align: 'right',
-                render: (_, r) => <MoneyText value={Math.round(r.quantity * (record?.cost_price ?? 0))} />,
+                render: (_, r) => (
+                  <MoneyText
+                    value={Math.round(
+                      r.quantity * (detail.data?.cost_price ?? record?.cost_price ?? 0),
+                    )}
+                  />
+                ),
               },
             ]}
           />

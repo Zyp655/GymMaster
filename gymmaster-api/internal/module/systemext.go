@@ -10,7 +10,7 @@ import (
 
 func RegisterSystemExt(d *Deps, admin *ghttp.RouterGroup) {
 	repo := repository.NewSystemExtRepository(d.DB)
-	svc := service.NewSystemExtService(repo, d.Notifier)
+	svc := service.NewSystemExtService(repo, d.Notifier, d.Audit)
 	ctrl := systemext.New(svc)
 	admin.Bind(ctrl)
 }

@@ -74,6 +74,16 @@ func ptCheckOpeningHours(b *entity.Branch, start, end time.Time) error {
 	return nil
 }
 
+// ptCheckScheduleGuard: chi nhánh không nghỉ lễ đóng cửa, HLV không nghỉ phép (đã duyệt) và buổi nằm trong
+// lịch rảnh HLV đã đăng ký (nếu HLV có cấu hình lịch rảnh tại chi nhánh).
+func ptCheckScheduleGuard(ctx context.Context, trainerID, branchID uint, start, end time.Time) error {
+	g := currentScheduleGuard()
+	if err := g.CheckBranchOpen(ctx, branchID, start, end); err != nil {
+		return err
+	}
+	return g.CheckTrainerSlot(ctx, trainerID, branchID, start, end)
+}
+
 // trainerConflict trả lý do HLV bận ("" nếu trống): buổi PT khác (trừ excludeID) hoặc lớp nhóm chưa hủy.
 func (s *ptService) trainerConflict(ctx context.Context, trainerID uint, start, end time.Time, excludeID uint) (string, error) {
 	busy, err := s.repo.TrainerPTOverlap(ctx, trainerID, start, end, excludeID)
@@ -277,6 +287,9 @@ func (s *ptService) book(ctx context.Context, contractID uint, start time.Time, 
 		if err := ptCheckOpeningHours(branch, start, end); err != nil {
 			return err
 		}
+		if err := ptCheckScheduleGuard(ctx, c.TrainerID, c.BranchID, start, end); err != nil {
+			return err
+		}
 		scheduled, err := s.repo.CountScheduled(ctx, c.ID)
 		if err != nil {
 			return err
@@ -344,6 +357,9 @@ func (s *ptService) RescheduleSession(ctx context.Context, id uint, startAt stri
 			return ptNotFound(err, rescode.New(rescode.BadRequest, "Chi nhánh không tồn tại"))
 		}
 		if err := ptCheckOpeningHours(branch, start, end); err != nil {
+			return err
+		}
+		if err := ptCheckScheduleGuard(ctx, ss.TrainerID, ss.BranchID, start, end); err != nil {
 			return err
 		}
 		if err := s.slotConflict(ctx, ss.TrainerID, ss.MemberID, start, end, ss.ID); err != nil {

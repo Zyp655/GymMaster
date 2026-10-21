@@ -21,6 +21,7 @@ import type {
   ConversationItem,
   CreateDataRequestPayload,
   CreateFoodLogPayload,
+  UpdateFoodLogPayload,
   CreateGuestPassPayload,
   CreateMemberReviewPayload,
   CreateWorkoutLogPayload,
@@ -85,6 +86,8 @@ export function extractWorkoutLogs(res: WorkoutLogsResponse | null | undefined):
   if (Array.isArray(res.logs)) return res.logs;
   return [];
 }
+
+export { pickDefaultExerciseId } from './workout';
 
 export function extractWorkoutProgress(
   res: WorkoutLogsResponse | null | undefined,
@@ -340,6 +343,12 @@ export const getMemberFoodLogs = (date?: string) =>
 export const createMemberFoodLog = (payload: CreateFoodLogPayload) =>
   apiClient.post<FoodLogItem>('/member/food-logs', payload);
 
+export const updateMemberFoodLog = (id: number, payload: UpdateFoodLogPayload) =>
+  apiClient.put<FoodLogItem>(`/member/food-logs/${id}`, payload);
+
+export const deleteMemberFoodLog = (id: number) =>
+  apiClient.del<null>(`/member/food-logs/${id}`);
+
 // ---- Sprint 24: Hợp đồng điện tử & Vé khách mời ---------------------------------
 
 export const getMemberContracts = async (): Promise<MemberContractItem[]> => {
@@ -394,8 +403,23 @@ export const getMemberSessions = async (): Promise<SessionItem[]> => {
   return [];
 };
 
-export const revokeOtherMemberSessions = () =>
-  apiClient.post<{ revoked?: number; message?: string }>('/member/security/sessions/revoke-others');
+/**
+ * Đăng xuất mọi thiết bị khác, GIỮ phiên hiện tại. API xác định phiên hiện tại qua claim `sid`
+ * của access token; gửi kèm `current_session_id` (nếu biết từ danh sách) cho token cũ không có sid.
+ */
+export const revokeOtherMemberSessions = (currentSessionId?: number) =>
+  apiClient.post<{ revoked_count?: number }>(
+    '/member/security/sessions/revoke-others',
+    currentSessionId ? { current_session_id: currentSessionId } : {},
+  );
+
+/** Thu hồi một phiên đăng nhập cụ thể (không áp dụng cho phiên hiện tại). */
+export const revokeMemberSession = (id: number) =>
+  apiClient.del<null>(`/member/security/sessions/${id}`);
+
+/** Tải bản trích xuất dữ liệu cá nhân (JSON) của yêu cầu EXPORT đã hoàn tất. */
+export const downloadMemberDataExport = (id: number) =>
+  apiClient.download(`/member/data-requests/${id}/download`);
 
 export const getMemberConsents = async (): Promise<ConsentItem[]> => {
   const res = await apiClient.get<
@@ -546,6 +570,8 @@ export const portalApi = {
   getMemberMealPlans,
   getMemberFoodLogs,
   createMemberFoodLog,
+  updateMemberFoodLog,
+  deleteMemberFoodLog,
   getMemberContracts,
   signMemberContract,
   getMemberGuestPasses,
@@ -555,6 +581,8 @@ export const portalApi = {
   disableMemberMFA,
   getMemberSessions,
   revokeOtherMemberSessions,
+  revokeMemberSession,
+  downloadMemberDataExport,
   getMemberConsents,
   updateMemberConsents,
   getMemberDataRequests,

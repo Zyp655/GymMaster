@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"errors"
 
 	"gorm.io/gorm"
@@ -25,11 +26,30 @@ type (
 
 	branchService struct {
 		branchRepo repository.BranchRepository
+		audit      AuditService
 	}
 )
 
-func NewBranchService(branchRepo repository.BranchRepository) BranchService {
-	return &branchService{branchRepo: branchRepo}
+const auditEntityBranch = "branch"
+
+// NewBranchService: audit tùy chọn (test đơn vị có thể bỏ qua).
+func NewBranchService(branchRepo repository.BranchRepository, audit ...AuditService) BranchService {
+	return &branchService{branchRepo: branchRepo, audit: optionalAudit(audit)}
+}
+
+// optionalAudit lấy AuditService đầu tiên (nếu có) từ tham số tùy chọn của constructor.
+func optionalAudit(list []AuditService) AuditService {
+	if len(list) > 0 {
+		return list[0]
+	}
+	return nil
+}
+
+// auditLogSafe ghi nhật ký nếu service được cấu hình AuditService (nil-safe).
+func auditLogSafe(a AuditService, ctx context.Context, action, entityName string, entityID uint, before, after any) {
+	if a != nil {
+		a.Log(ctx, action, entityName, entityID, before, after)
+	}
 }
 
 var branchOrderable = []string{"id", "code", "name", "status", "created_at"}
@@ -65,7 +85,9 @@ func (s *branchService) Create(ctx context.Context, in v1.BranchInput) (*v1.Bran
 	if err := s.branchRepo.Create(ctx, b); err != nil {
 		return nil, mapDuplicate(err, "Mã chi nhánh đã tồn tại")
 	}
-	return toBranchRes(*b), nil
+	res := toBranchRes(*b)
+	auditLogSafe(s.audit, ctx, AuditCreate, auditEntityBranch, b.ID, nil, res)
+	return res, nil
 }
 
 func (s *branchService) Update(ctx context.Context, id uint, in v1.BranchInput) (*v1.Branch, error) {
@@ -76,16 +98,23 @@ func (s *branchService) Update(ctx context.Context, id uint, in v1.BranchInput) 
 	if err := s.validate(ctx, in, id); err != nil {
 		return nil, err
 	}
+	before := toBranchRes(*b)
 	applyBranchInput(b, in)
 	b.UpdatedBy = reqctx.UserID(ctx)
 	if err := s.branchRepo.Update(ctx, b); err != nil {
 		return nil, mapDuplicate(err, "Mã chi nhánh đã tồn tại")
 	}
-	return s.Get(ctx, id)
+	after, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	auditLogSafe(s.audit, ctx, AuditUpdate, auditEntityBranch, id, before, after)
+	return after, nil
 }
 
 func (s *branchService) Delete(ctx context.Context, id uint) error {
-	if _, err := s.find(ctx, id); err != nil {
+	b, err := s.find(ctx, id)
+	if err != nil {
 		return err
 	}
 	n, err := s.branchRepo.CountStaff(ctx, id)
@@ -95,7 +124,23 @@ func (s *branchService) Delete(ctx context.Context, id uint) error {
 	if n > 0 {
 		return rescode.New(rescode.Conflict, "Không thể xóa chi nhánh đang có nhân viên làm việc")
 	}
-	return s.branchRepo.Delete(ctx, id, reqctx.UserID(ctx))
+	// Chi nhánh còn hội viên/gói tập/hóa đơn: xóa (mềm) sẽ làm dữ liệu nghiệp vụ trỏ tới chi nhánh "biến mất"
+	// (không lọc/báo cáo được) → yêu cầu chuyển hội viên hoặc chuyển chi nhánh sang ngừng hoạt động.
+	deps, err := s.branchRepo.Dependencies(ctx, id)
+	if err != nil {
+		return err
+	}
+	if deps.Members > 0 || deps.ActiveSubs > 0 || deps.Invoices > 0 {
+		return rescode.New(rescode.Conflict, fmt.Sprintf(
+			"Không thể xóa chi nhánh còn %d hội viên, %d gói tập đang hiệu lực và %d hóa đơn. "+
+				"Hãy chuyển hội viên sang chi nhánh khác hoặc chuyển chi nhánh sang trạng thái ngừng hoạt động",
+			deps.Members, deps.ActiveSubs, deps.Invoices))
+	}
+	if err := s.branchRepo.Delete(ctx, id, reqctx.UserID(ctx)); err != nil {
+		return err
+	}
+	auditLogSafe(s.audit, ctx, AuditDelete, auditEntityBranch, id, toBranchRes(*b), nil)
+	return nil
 }
 
 func (s *branchService) find(ctx context.Context, id uint) (*entity.Branch, error) {

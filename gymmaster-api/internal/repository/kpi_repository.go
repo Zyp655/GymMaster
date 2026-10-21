@@ -48,6 +48,12 @@ type (
 		UpsertSalesTarget(ctx context.Context, st *entity.SalesTarget) error
 		DeleteSalesTarget(ctx context.Context, id uint) error
 
+		// BranchExists: chi nhánh tồn tại và chưa bị xóa mềm.
+		BranchExists(ctx context.Context, branchID uint) (bool, error)
+		// StaffBranchStatus: exists = tài khoản nhân viên (có vai trò khác MEMBER) đang ACTIVE, chưa xóa;
+		// inBranch = có vai trò tại branchID hoặc vai trò toàn hệ thống (branch_id NULL).
+		StaffBranchStatus(ctx context.Context, staffID, branchID uint) (exists, inBranch bool, err error)
+
 		ComputeKPIActuals(ctx context.Context, branchID uint, from, to time.Time) (KPIActuals, error)
 		ListCohortMembers(ctx context.Context, branchID uint, since time.Time) ([]CohortMemberRow, error)
 		ListActiveMemberMonths(ctx context.Context, memberIDs []uint, since time.Time) (map[uint]map[string]bool, error)
@@ -66,7 +72,7 @@ func (r *kpiRepository) ListBranchOccupancy(ctx context.Context, since time.Time
 	var rows []BranchOccupancyRow
 	err := postgres.Conn(ctx, r.db).Table("branches b").
 		Select(`b.id AS branch_id, b.code AS branch_code, b.name AS branch_name, COALESCE(b.capacity, 120) AS capacity,
-			(SELECT COUNT(DISTINCT ck.member_id) FROM checkins ck
+			(SELECT COUNT(DISTINCT COALESCE('m' || ck.member_id::text, 'd' || ck.day_pass_id::text, 't' || ck.trial_pass_id::text)) FROM checkins ck
 			 WHERE ck.branch_id = b.id AND ck.result = 'ALLOWED'
 			   AND ck.checked_in_at >= ? AND ck.checked_out_at IS NULL) AS present_count`, since).
 		Where("b.deleted_at IS NULL AND b.status = 'ACTIVE'").
@@ -147,6 +153,26 @@ func (r *kpiRepository) UpsertSalesTarget(ctx context.Context, st *entity.SalesT
 		return nil
 	}
 	return conn.Create(st).Error
+}
+
+func (r *kpiRepository) BranchExists(ctx context.Context, branchID uint) (bool, error) {
+	var n int64
+	err := postgres.Conn(ctx, r.db).Table("branches").Where("id = ? AND deleted_at IS NULL", branchID).Count(&n).Error
+	return n > 0, err
+}
+
+func (r *kpiRepository) StaffBranchStatus(ctx context.Context, staffID, branchID uint) (exists, inBranch bool, err error) {
+	var row struct {
+		Total    int64
+		InBranch int64
+	}
+	err = postgres.Conn(ctx, r.db).Table("users u").
+		Select("COUNT(*) AS total, COUNT(*) FILTER (WHERE ur.branch_id = ? OR ur.branch_id IS NULL) AS in_branch", branchID).
+		Joins("JOIN user_roles ur ON ur.user_id = u.id").
+		Joins("JOIN roles r ON r.id = ur.role_id").
+		Where("u.id = ? AND u.deleted_at IS NULL AND u.status = 'ACTIVE' AND r.code <> 'MEMBER'", staffID).
+		Scan(&row).Error
+	return row.Total > 0, row.InBranch > 0, err
 }
 
 func (r *kpiRepository) DeleteSalesTarget(ctx context.Context, id uint) error {

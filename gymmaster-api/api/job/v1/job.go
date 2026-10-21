@@ -43,13 +43,13 @@ type RunsReq struct {
 type RunsRes = dto.PageRes[*JobRun]
 
 type RunReq struct {
-	g.Meta `path:"/jobs/{name}/run" method:"post" tags:"Job định kỳ" summary:"Chạy job ngay (đồng bộ)" perm:"job.view"`
+	g.Meta `path:"/jobs/{name}/run" method:"post" tags:"Job định kỳ" summary:"Chạy job ngay (đồng bộ)" perm:"job.manage"`
 	Name   string `json:"name" in:"path" v:"required"`
 }
 type RunRes = JobRun
 
 type TestEmailReq struct {
-	g.Meta `path:"/jobs/test-email" method:"post" tags:"Job định kỳ" summary:"Gửi email thử (kiểm tra cấu hình SMTP)" perm:"job.view"`
+	g.Meta `path:"/jobs/test-email" method:"post" tags:"Job định kỳ" summary:"Gửi email thử (kiểm tra cấu hình SMTP)" perm:"job.manage"`
 	To     string `json:"to" v:"required|email#Vui lòng nhập email nhận|Email không hợp lệ"`
 }
 type TestEmailRes struct {

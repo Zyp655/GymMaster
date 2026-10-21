@@ -8,7 +8,8 @@
     "start": "next start -p 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-loader.mjs --test src/__tests__/portal.test.ts",
+    "i18n:check": "node scripts/check-i18n.mjs",
+    "test": "node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-loader.mjs --test src/__tests__/portal.test.ts src/__tests__/qa2-web.test.ts src/features/auth/auth.test.ts src/hooks/use-api-error.test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

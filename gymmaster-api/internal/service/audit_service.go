@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"gymmaster-api/internal/entity"
+	"gymmaster-api/internal/pkg/clientip"
 	"gymmaster-api/internal/pkg/reqctx"
 	"gymmaster-api/internal/storage/postgres"
 )
@@ -46,7 +47,7 @@ func (s *auditService) Log(ctx context.Context, action, entityName string, entit
 		row.EntityID = &entityID
 	}
 	if r := g.RequestFromCtx(ctx); r != nil {
-		row.IP = r.GetClientIp()
+		row.IP = clientip.Real(r)
 	}
 	if err := postgres.Conn(ctx, s.db).Create(row).Error; err != nil {
 		g.Log().Warningf(ctx, "audit log: %v", err)

@@ -43,6 +43,8 @@ type fakePortalRepo struct {
 	trainer   []repository.PortalBusy
 	memberBz  []repository.PortalBusy
 	updated   map[uint]map[string]any
+	// email tài khoản (users) khác đã dùng – giả lập cho kiểm tra trùng email.
+	takenUserEmails []string
 }
 
 func (f *fakePortalRepo) FindMemberByUserID(_ context.Context, userID uint) (*entity.Member, error) {
@@ -75,6 +77,20 @@ func (f *fakePortalRepo) UpdateProfile(_ context.Context, memberID uint, fields 
 	f.updated[memberID] = fields
 	return nil
 }
+func (f *fakePortalRepo) EmailInUse(_ context.Context, email string, memberID uint, _ *uint) (bool, error) {
+	for _, m := range f.members {
+		if m.ID != memberID && strings.EqualFold(m.Email, email) {
+			return true, nil
+		}
+	}
+	for _, e := range f.takenUserEmails {
+		if strings.EqualFold(e, email) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakePortalRepo) FindContract(_ context.Context, id uint) (*repository.PortalContract, error) {
 	if c, ok := f.contracts[id]; ok {
 		return c, nil
@@ -485,6 +501,28 @@ func TestPortal_UpdateProfileValidatesAndTargetsOwnMember(t *testing.T) {
 	assert.NotContains(t, f.repo.updated, ptB)
 	assert.Equal(t, "a@mail.vn", f.repo.updated[ptA]["email"])
 	assert.Equal(t, "0912345678", f.repo.updated[ptA]["emergency_contact_phone"])
+}
+
+func TestPortal_UpdateProfileRejectsEmailOfAnotherAccount(t *testing.T) {
+	f := newPortalFixture(t)
+	f.repo.members[ptUserB].Email = "b@mail.vn"
+	f.repo.takenUserEmails = []string{"owner@gymmaster.vn"}
+
+	// Email của hội viên khác (không phân biệt hoa thường) → 409, không ghi DB.
+	_, err := f.svc.UpdateProfile(portalCtx(ptUserA), PortalProfileInput{Email: " B@Mail.VN "})
+	assert.Equal(t, rescode.Conflict.Code(), portalCode(err))
+	// Email của tài khoản nhân viên/người dùng khác → 409.
+	_, err = f.svc.UpdateProfile(portalCtx(ptUserA), PortalProfileInput{Email: "owner@gymmaster.vn"})
+	assert.Equal(t, rescode.Conflict.Code(), portalCode(err))
+	assert.Empty(t, f.repo.updated)
+
+	// Giữ nguyên email của chính mình / email mới chưa ai dùng → OK.
+	f.repo.members[ptUserA].Email = "a@mail.vn"
+	_, err = f.svc.UpdateProfile(portalCtx(ptUserA), PortalProfileInput{Email: "A@mail.vn"})
+	require.NoError(t, err)
+	_, err = f.svc.UpdateProfile(portalCtx(ptUserA), PortalProfileInput{Email: "new@mail.vn"})
+	require.NoError(t, err)
+	assert.Equal(t, "new@mail.vn", f.repo.updated[ptA]["email"])
 }
 
 func TestPortal_UploadAvatarRejectsNonImage(t *testing.T) {

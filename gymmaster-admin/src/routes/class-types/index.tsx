@@ -69,8 +69,11 @@ function ClassTypesDesktop() {
         width: 60,
         align: 'center',
         render: (color: string) => (
+          // ColorDot không forwardRef → bọc <span> để Tooltip không phải dùng findDOMNode.
           <Tooltip title={color}>
-            <ColorDot color={color} size={18} />
+            <span style={{ display: 'inline-flex' }}>
+              <ColorDot color={color} size={18} />
+            </span>
           </Tooltip>
         ),
       },

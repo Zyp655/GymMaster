@@ -10,7 +10,7 @@ import (
 
 // RegisterContractPass: hợp đồng điện tử, vé ngày & vé mời khách (/v1/admin & /v1/member).
 func RegisterContractPass(d *Deps, admin, member *ghttp.RouterGroup) {
-	svc := service.NewContractPassService(repository.NewContractPassRepository(d.DB), d.Tx, d.Audit)
+	svc := service.NewContractPassService(repository.NewContractPassRepository(d.DB), d.Tx, d.Audit, d.Invoices)
 	if admin != nil {
 		admin.Bind(contractpassctrl.NewAdminV1(svc))
 	}

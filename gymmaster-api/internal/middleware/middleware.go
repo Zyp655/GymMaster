@@ -8,6 +8,8 @@ import (
 
 type Middleware interface {
 	CORS() ghttp.HandlerFunc
+	// SecurityHeaders gắn header bảo mật cơ bản (nosniff, chống clickjacking, Referrer-Policy).
+	SecurityHeaders() ghttp.HandlerFunc
 	Response() ghttp.HandlerFunc
 	RequestLog() ghttp.HandlerFunc
 	// Authentication bắt buộc Bearer access token hợp lệ.

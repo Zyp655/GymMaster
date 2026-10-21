@@ -163,7 +163,7 @@ type DeleteBadgeReq struct {
 }
 
 type ListChallengesReq struct {
-	g.Meta   `path:"/challenges" method:"get" tags:"Tích điểm & Thử thách" summary:"Danh sách thử thách" perm:"loyalty.view,loyalty.manage"`
+	g.Meta `path:"/challenges" method:"get" tags:"Tích điểm & Thử thách" summary:"Danh sách thử thách" perm:"loyalty.view,loyalty.manage"`
 	dto.PageReq
 	BranchID uint   `json:"branch_id" in:"query"`
 	Status   string `json:"status"    in:"query"`
@@ -200,6 +200,25 @@ type AdjustMemberPointsRes struct {
 	Points   int                `json:"points"`
 	Ledger   *LoyaltyLedgerItem `json:"ledger"`
 }
+
+// AdminLoyaltyLedgerItem: dòng lịch sử biến động điểm kèm thông tin hội viên / người thao tác.
+type AdminLoyaltyLedgerItem struct {
+	LoyaltyLedgerItem
+	MemberCode    string `json:"member_code"`
+	MemberName    string `json:"member_name"`
+	BranchID      uint   `json:"branch_id"`
+	BranchName    string `json:"branch_name"`
+	CreatedByName string `json:"created_by_name"`
+}
+
+type ListLoyaltyLedgersReq struct {
+	g.Meta `path:"/loyalty-ledgers" method:"get" tags:"Tích điểm & Thử thách" summary:"Lịch sử biến động điểm thưởng (theo chi nhánh được phân quyền)" perm:"loyalty.view,loyalty.manage"`
+	dto.PageReq
+	MemberID uint   `json:"member_id" in:"query"`
+	BranchID uint   `json:"branch_id" in:"query"`
+	Reason   string `json:"reason"    in:"query" v:"in:CHECKIN,RENEW,REFERRAL,REVIEW,REDEEM,CHALLENGE,ADJUST#Lý do biến động điểm không hợp lệ"`
+}
+type ListLoyaltyLedgersRes = dto.PageRes[*AdminLoyaltyLedgerItem]
 
 // ---- Member (/v1/member) --------------------------------------------------------
 

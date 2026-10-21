@@ -15,11 +15,11 @@
 
 .notif-pop .notif-head {
   padding: 4px 4px 8px;
-  border-bottom: 1px solid #eceff3;
+  border-bottom: 1px solid var(--gm-border);
 }
 
 .notif-pop .notif-foot {
-  border-top: 1px solid #eceff3;
+  border-top: 1px solid var(--gm-border);
   padding-top: 6px;
   text-align: center;
 }

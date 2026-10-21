@@ -97,7 +97,7 @@ type DeleteContractTemplateReq struct {
 type DeleteContractPassRes struct{}
 
 type ListMemberContractsReq struct {
-	g.Meta   `path:"/member-contracts" method:"get" tags:"Hợp đồng & Vé ngày" summary:"Danh sách hợp đồng điện tử của hội viên" perm:"contract.manage,member.view"`
+	g.Meta `path:"/member-contracts" method:"get" tags:"Hợp đồng & Vé ngày" summary:"Danh sách hợp đồng điện tử của hội viên" perm:"contract.manage,member.view"`
 	dto.PageReq
 	MemberID uint   `json:"member_id" in:"query"`
 	Status   string `json:"status"    in:"query"`
@@ -113,7 +113,7 @@ type CreateMemberContractReq struct {
 type CreateMemberContractRes = MemberContractItem
 
 type ListDayPassesReq struct {
-	g.Meta   `path:"/day-passes" method:"get" tags:"Hợp đồng & Vé ngày" summary:"Danh sách vé ngày & vé khách" perm:"contract.manage,checkin.view"`
+	g.Meta `path:"/day-passes" method:"get" tags:"Hợp đồng & Vé ngày" summary:"Danh sách vé ngày & vé khách" perm:"contract.manage,checkin.view"`
 	dto.PageReq
 	BranchID uint   `json:"branch_id" in:"query"`
 	Type     string `json:"type"      in:"query"`
@@ -127,6 +127,8 @@ type CreateDayPassReq struct {
 	Phone     string  `json:"phone"      v:"required|max-length:20#Vui lòng nhập số điện thoại"`
 	Price     float64 `json:"price"      d:"100000" v:"min:0"`
 	ValidDate string  `json:"valid_date"`
+	// PaymentMethod: hình thức thu tiền vé (CASH/TRANSFER/CARD), mặc định CASH – vé có giá được lập hóa đơn và ghi nhận doanh thu.
+	PaymentMethod string `json:"payment_method" v:"in:CASH,TRANSFER,CARD#Phương thức thanh toán không hợp lệ"`
 }
 type CreateDayPassRes = DayPassItem
 

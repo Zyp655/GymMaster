@@ -26,7 +26,9 @@ type Invoice struct {
 	BranchName     string     `json:"branch_name"`
 	Subtotal       float64    `json:"subtotal"    dc:"Tổng tiền hàng trước giảm giá"`
 	Discount       float64    `json:"discount"    dc:"Tổng giảm giá (giảm theo dòng + khuyến mãi)"`
-	Total          float64    `json:"total"       dc:"= subtotal - discount"`
+	Total          float64    `json:"total"       dc:"= subtotal - discount - write_off_amount"`
+	WriteOffAmount float64    `json:"write_off_amount" dc:"Phần nợ được xóa khi hủy gói (không phải giảm giá)"`
+	WriteOffReason string     `json:"write_off_reason" dc:"Lý do xóa nợ, vd 'Hủy gói tập: ...'"`
 	PaidAmount     float64    `json:"paid_amount"`
 	RefundedAmount float64    `json:"refunded_amount"`
 	Due            float64    `json:"due"         dc:"Còn phải thu = total - paid_amount"`

@@ -28,6 +28,12 @@ type (
 		SponsorName string
 	}
 
+	// ActiveSubPlan: gói tập đang hiệu lực (ACTIVE, trong khoảng ngày) kèm gói định nghĩa.
+	ActiveSubPlan struct {
+		Sub  entity.Subscription
+		Plan entity.MembershipPlan
+	}
+
 	ContractPassRepository interface {
 		ListTemplates(ctx context.Context, q dto.Query, status string) ([]entity.ContractTemplate, int64, error)
 		FindTemplateByID(ctx context.Context, id uint) (*entity.ContractTemplate, error)
@@ -43,15 +49,20 @@ type (
 		CreateMemberContract(ctx context.Context, mc *entity.MemberContract) error
 		UpdateMemberContract(ctx context.Context, mc *entity.MemberContract) error
 
-		ListDayPasses(ctx context.Context, q dto.Query, branchID uint, passType string) ([]DayPassRow, int64, error)
+		ListDayPasses(ctx context.Context, q dto.Query, branchIDs []uint, passType string) ([]DayPassRow, int64, error)
 		ListSponsorGuestPasses(ctx context.Context, sponsorMemberID uint) ([]DayPassRow, error)
 		CountSponsorGuestPassesInMonth(ctx context.Context, sponsorMemberID uint, monthStart, monthEnd time.Time) (int, error)
 		FindDayPassByID(ctx context.Context, id uint) (*DayPassRow, error)
 		CreateDayPass(ctx context.Context, dp *entity.DayPass) error
 
 		FindMemberByID(ctx context.Context, id uint) (*entity.Member, error)
+		// LockMember khóa dòng hội viên (FOR UPDATE) – tuần tự hóa việc dùng hạn mức vé mời; gọi trong transaction.
+		LockMember(ctx context.Context, id uint) error
 		FindMemberByUserID(ctx context.Context, userID uint) (*entity.Member, error)
 		FindActiveMemberPlan(ctx context.Context, memberID uint) (*entity.MembershipPlan, *uint, error)
+		// ListActiveSubPlans: các gói ACTIVE đang hiệu lực tại ngày today (start_date ≤ today ≤ end_date).
+		ListActiveSubPlans(ctx context.Context, memberID uint, today time.Time) ([]ActiveSubPlan, error)
+		FindBranch(ctx context.Context, id uint) (*entity.Branch, error)
 	}
 
 	contractPassRepository struct {
@@ -196,10 +207,10 @@ func (r *contractPassRepository) baseDayPass(ctx context.Context) *gorm.DB {
 		Joins("LEFT JOIN members sm ON sm.id = dp.sponsor_member_id")
 }
 
-func (r *contractPassRepository) ListDayPasses(ctx context.Context, q dto.Query, branchID uint, passType string) ([]DayPassRow, int64, error) {
+func (r *contractPassRepository) ListDayPasses(ctx context.Context, q dto.Query, branchIDs []uint, passType string) ([]DayPassRow, int64, error) {
 	tx := r.baseDayPass(ctx)
-	if branchID > 0 {
-		tx = tx.Where("dp.branch_id = ?", branchID)
+	if len(branchIDs) > 0 {
+		tx = tx.Where("dp.branch_id IN ?", branchIDs)
 	}
 	if passType != "" {
 		tx = tx.Where("dp.type = ?", passType)
@@ -262,6 +273,11 @@ func (r *contractPassRepository) FindMemberByID(ctx context.Context, id uint) (*
 	return &m, nil
 }
 
+func (r *contractPassRepository) LockMember(ctx context.Context, id uint) error {
+	var ids []uint
+	return postgres.Conn(ctx, r.db).Raw("SELECT id FROM members WHERE id = ? FOR UPDATE", id).Scan(&ids).Error
+}
+
 func (r *contractPassRepository) FindMemberByUserID(ctx context.Context, userID uint) (*entity.Member, error) {
 	var m entity.Member
 	if err := postgres.Conn(ctx, r.db).Where("user_id = ?", userID).First(&m).Error; err != nil {
@@ -283,4 +299,30 @@ func (r *contractPassRepository) FindActiveMemberPlan(ctx context.Context, membe
 		return nil, &sub.ID, err
 	}
 	return &plan, &sub.ID, nil
+}
+
+func (r *contractPassRepository) ListActiveSubPlans(ctx context.Context, memberID uint, today time.Time) ([]ActiveSubPlan, error) {
+	conn := postgres.Conn(ctx, r.db)
+	var subs []entity.Subscription
+	if err := conn.Where("member_id = ? AND status = 'ACTIVE' AND start_date <= ? AND end_date >= ?", memberID, today, today).
+		Order("id DESC").Find(&subs).Error; err != nil {
+		return nil, err
+	}
+	out := make([]ActiveSubPlan, 0, len(subs))
+	for _, sub := range subs {
+		var plan entity.MembershipPlan
+		if err := conn.Unscoped().First(&plan, sub.PlanID).Error; err != nil {
+			return nil, err
+		}
+		out = append(out, ActiveSubPlan{Sub: sub, Plan: plan})
+	}
+	return out, nil
+}
+
+func (r *contractPassRepository) FindBranch(ctx context.Context, id uint) (*entity.Branch, error) {
+	var b entity.Branch
+	if err := postgres.Conn(ctx, r.db).First(&b, id).Error; err != nil {
+		return nil, err
+	}
+	return &b, nil
 }

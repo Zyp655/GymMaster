@@ -369,6 +369,10 @@ func TestMemberPortalAccount(t *testing.T) {
 	require.NoError(t, err)
 
 	// Email trùng tài khoản khác → 409.
+	_, err = fx.svc.CreatePortalAccount(ctx, m.ID, "hv-weak@gm.vn", "abcdefgh")
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "mật khẩu chỉ có chữ bị từ chối")
+	_, err = fx.svc.CreatePortalAccount(ctx, m.ID, "hv-weak@gm.vn", "12345678")
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "mật khẩu chỉ có số bị từ chối")
 	_, err = fx.svc.CreatePortalAccount(ctx, m.ID, "admin@gm.vn", "Member@123")
 	assert.Equal(t, rescode.Conflict.Code(), codeOf(err))
 

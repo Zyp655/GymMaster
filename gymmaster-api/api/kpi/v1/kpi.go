@@ -37,6 +37,11 @@ type KPIMetricComparison struct {
 	Actual         float64 `json:"actual"`
 	TargetValue    float64 `json:"target_value"`
 	AchievementPct float64 `json:"achievement_pct"`
+	// HasTarget = false → chưa đặt chỉ tiêu (FE hiện "Chưa đặt chỉ tiêu" thay vì 0%).
+	HasTarget bool `json:"has_target"`
+	// TargetBranchCount: số chi nhánh có chỉ tiêu cho chỉ số này. Khi xem toàn hệ thống, Actual chỉ cộng
+	// các chi nhánh này (so cùng phạm vi với chỉ tiêu) – nếu chưa chi nhánh nào đặt thì Actual là toàn hệ thống.
+	TargetBranchCount int `json:"target_branch_count"`
 }
 
 type CohortRow struct {
@@ -61,7 +66,7 @@ type MemberOccupancyRes []*BranchOccupancyItem
 // ---- Admin (/v1/admin) ----------------------------------------------------------
 
 type ListSalesTargetsReq struct {
-	g.Meta   `path:"/sales-targets" method:"get" tags:"KPI & Phân tích" summary:"Danh sách chỉ tiêu doanh số KPI" perm:"kpi.manage,report.view"`
+	g.Meta `path:"/sales-targets" method:"get" tags:"KPI & Phân tích" summary:"Danh sách chỉ tiêu doanh số KPI" perm:"kpi.manage,report.view"`
 	dto.PageReq
 	BranchID uint   `json:"branch_id" in:"query"`
 	Period   string `json:"period"    in:"query"`
@@ -71,11 +76,11 @@ type ListSalesTargetsRes = dto.PageRes[*SalesTargetItem]
 
 type CreateSalesTargetReq struct {
 	g.Meta      `path:"/sales-targets" method:"post" tags:"KPI & Phân tích" summary:"Thiết lập chỉ tiêu KPI tháng" perm:"kpi.manage"`
-	BranchID    uint    `json:"branch_id"    v:"required|min:1#Vui lòng chọn chi nhánh"`
+	BranchID    uint    `json:"branch_id"    v:"required|min:1#Vui lòng chọn chi nhánh|Vui lòng chọn chi nhánh"`
 	StaffID     *uint   `json:"staff_id"`
 	Period      string  `json:"period"       v:"required#Vui lòng nhập kỳ KPI (YYYY-MM)"`
-	Metric      string  `json:"metric"       v:"required|in:REVENUE,NEW_MEMBERS,RENEWALS,PT_SALES#Chỉ số KPI không hợp lệ"`
-	TargetValue float64 `json:"target_value" v:"required|min:0#Giá trị mục tiêu không được âm"`
+	Metric      string  `json:"metric"       v:"required|in:REVENUE,NEW_MEMBERS,RENEWALS,PT_SALES#Vui lòng chọn chỉ số KPI|Chỉ số KPI không hợp lệ"`
+	TargetValue float64 `json:"target_value" v:"required|min:0|max:999999999999#Vui lòng nhập giá trị mục tiêu|Giá trị mục tiêu không được âm|Giá trị mục tiêu vượt quá giới hạn cho phép"`
 }
 type CreateSalesTargetRes = SalesTargetItem
 

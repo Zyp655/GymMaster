@@ -137,7 +137,10 @@ export default function SystemToolsPage() {
   const steps = wizardQuery.data?.steps ?? [];
 
   return (
-    <Card title="Thiết lập Ban đầu, Chuyển đổi Dữ liệu Cũ & Công cụ Hệ thống (Sprint 30)">
+    <Card
+      className="gm-card-wrap-head"
+      title="Thiết lập Ban đầu, Chuyển đổi Dữ liệu Cũ & Công cụ Hệ thống"
+    >
       <Tabs
         items={[
           {
@@ -156,12 +159,19 @@ export default function SystemToolsPage() {
                   description="Bạn có thể bấm vào từng bước để mở trang quản lý chi tiết hoặc điền nhanh cấu hình bên dưới."
                 />
                 <Steps
+                  labelPlacement="vertical"
+                  size="small"
                   current={steps.filter((s) => s.completed).length}
                   items={steps.map((s) => ({
                     title: s.title,
                     status: s.completed ? 'finish' : 'process',
                     description: (
-                      <Button type="link" size="small" onClick={() => navigate(s.route)}>
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ padding: 0, height: 'auto', whiteSpace: 'normal' }}
+                        onClick={() => navigate(s.route)}
+                      >
                         Mở trang ({s.count} bản ghi)
                       </Button>
                     ),
@@ -201,7 +211,7 @@ export default function SystemToolsPage() {
                         </Form.Item>
                       </Col>
                     </Row>
-                    <Space>
+                    <Space wrap>
                       <Button
                         type="primary"
                         icon={<RocketOutlined />}
@@ -257,7 +267,7 @@ export default function SystemToolsPage() {
                         onChange={(e) => setImportJson(e.target.value)}
                         style={{ fontFamily: 'monospace', fontSize: 12 }}
                       />
-                      <Space>
+                      <Space wrap>
                         <Button
                           icon={<CheckCircleOutlined />}
                           loading={runImportMut.isPending}
@@ -299,7 +309,7 @@ export default function SystemToolsPage() {
                         {
                           title: 'Hợp lệ / Lỗi',
                           render: (_, r) => (
-                            <Space>
+                            <Space wrap>
                               <Tag color="success">{r.ok_rows} OK</Tag>
                               {r.error_rows > 0 && <Tag color="error">{r.error_rows} lỗi</Tag>}
                             </Space>

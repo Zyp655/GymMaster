@@ -66,6 +66,9 @@ type (
 		ListRentals(ctx context.Context, filter LockerRentalFilter) ([]LockerRentalRow, error)
 		ListExpiredActiveRentals(ctx context.Context, now time.Time) ([]entity.LockerRental, error)
 		ExpireRental(ctx context.Context, rentalID, lockerID uint, now time.Time) error
+		// EndRentalForVoidedInvoice kết thúc lượt thuê ACTIVE rentalID (hóa đơn thuê tủ bị hủy) và trả tủ về AVAILABLE
+		// (trừ tủ BROKEN hoặc tủ còn lượt thuê ACTIVE khác). ended=false nếu lượt thuê không còn ACTIVE.
+		EndRentalForVoidedInvoice(ctx context.Context, rentalID uint, now time.Time) (ended bool, err error)
 	}
 
 	lockerRepository struct {
@@ -235,4 +238,20 @@ func (r *lockerRepository) ExpireRental(ctx context.Context, rentalID, lockerID 
 	return db.Model(&entity.Locker{}).
 		Where("id = ? AND status IN ?", lockerID, []string{entity.LockerStatusOccupied, entity.LockerStatusRented}).
 		Updates(map[string]any{"status": entity.LockerStatusAvailable, "updated_at": now}).Error
+}
+
+func (r *lockerRepository) EndRentalForVoidedInvoice(ctx context.Context, rentalID uint, now time.Time) (bool, error) {
+	conn := postgres.Conn(ctx, r.db)
+	var lockerIDs []uint
+	err := conn.Raw(`UPDATE locker_rentals SET status = ?, end_at = ?, updated_at = ?,
+			note = LEFT(CASE WHEN note = '' THEN 'Hủy hóa đơn thuê tủ' ELSE note || ' · Hủy hóa đơn thuê tủ' END, 255)
+		WHERE id = ? AND status = ? RETURNING locker_id`,
+		entity.LockerRentalEnded, now, now, rentalID, entity.LockerRentalActive).Scan(&lockerIDs).Error
+	if err != nil || len(lockerIDs) == 0 {
+		return false, err
+	}
+	err = conn.Exec(`UPDATE lockers SET status = ?, updated_at = ?
+		WHERE id = ? AND status <> ? AND NOT EXISTS (SELECT 1 FROM locker_rentals lr WHERE lr.locker_id = lockers.id AND lr.status = ?)`,
+		entity.LockerStatusAvailable, now, lockerIDs[0], entity.LockerStatusBroken, entity.LockerRentalActive).Error
+	return err == nil, err
 }

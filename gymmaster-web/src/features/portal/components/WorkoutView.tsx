@@ -10,7 +10,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { LoadError } from '@/components/common/LoadError';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -59,6 +59,14 @@ import { createWorkoutLogSchema, type WorkoutLogFormValues } from '../schema';
 import type { ExerciseItem, WorkoutPlan, WorkoutPlanItem } from '../types';
 import { PortalPageHeader } from './PortalPageHeader';
 
+type WorkoutT = ReturnType<typeof useTranslations<'portal.workout'>>;
+
+/** Nhãn tiếng Việt cho nhóm cơ (enum API: CHEST, BACK…); giá trị lạ hiển thị nguyên văn. */
+function muscleLabel(t: WorkoutT, group: string): string {
+  const key = `muscleGroups.${group}`;
+  return t.has(key as never) ? t(key as never) : group;
+}
+
 export function WorkoutView() {
   const t = useTranslations('portal.workout');
   const plansQuery = useWorkoutPlansQuery();
@@ -73,7 +81,7 @@ export function WorkoutView() {
       exercise_id: firstExerciseId,
       sets: 3,
       reps: 10,
-      weight_kg: 20,
+      weight: 20,
       note: '',
     });
   };
@@ -81,10 +89,11 @@ export function WorkoutView() {
   const openItemLog = (item: WorkoutPlanItem) => {
     const parsedReps = Number.parseInt(String(item.reps), 10);
     setLogPreset({
+      plan_item_id: item.id,
       exercise_id: item.exercise_id,
       sets: item.sets || 3,
       reps: Number.isFinite(parsedReps) && parsedReps > 0 ? parsedReps : 10,
-      weight_kg: item.weight_kg ?? 0,
+      weight: item.weight ?? 0,
       note: '',
     });
   };
@@ -168,7 +177,7 @@ export function WorkoutView() {
                 {logs.map(log => (
                   <TableRow key={log.id}>
                     <TableCell className="whitespace-nowrap text-secondary">
-                      {formatDateTime(log.logged_at)}
+                      {formatDateTime(log.performed_at)}
                     </TableCell>
                     <TableCell className="font-semibold text-primary">
                       {log.exercise_name}
@@ -176,7 +185,7 @@ export function WorkoutView() {
                     <TableCell>{log.sets}</TableCell>
                     <TableCell>{log.reps}</TableCell>
                     <TableCell className="font-semibold text-brand-600">
-                      {log.weight_kg} kg
+                      {t('weightValue', { weight: log.weight })}
                     </TableCell>
                     <TableCell className="text-secondary">{log.note || '—'}</TableCell>
                   </TableRow>
@@ -208,24 +217,22 @@ function WorkoutPlanCard({
     () => [...(plan.days ?? [])].sort((a, b) => a.day_index - b.day_index),
     [plan.days],
   );
-  const [activeDayIndex, setActiveDayIndex] = useState<number>(
-    sortedDays[0]?.day_index ?? 1,
-  );
+  const [activeDayIndex, setActiveDayIndex] = useState<number>(sortedDays[0]?.day_index ?? 1);
 
-  const currentDay =
-    sortedDays.find(d => d.day_index === activeDayIndex) ?? sortedDays[0] ?? null;
+  const currentDay = sortedDays.find(d => d.day_index === activeDayIndex) ?? sortedDays[0] ?? null;
 
   return (
     <Card className="gap-4">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="grid gap-1">
-            <CardTitle>{plan.title}</CardTitle>
-            {plan.description ? <CardDescription>{plan.description}</CardDescription> : null}
+            <CardTitle>{plan.name}</CardTitle>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {plan.goal ? (
-              <Badge variant="brand">{t('goal', { goal: plan.goal })}</Badge>
+              <Badge variant="brand" className="max-w-full whitespace-normal">
+                {t('goal', { goal: plan.goal })}
+              </Badge>
             ) : null}
             {plan.trainer_name ? (
               <Badge variant="neutral">{t('trainer', { name: plan.trainer_name })}</Badge>
@@ -243,10 +250,11 @@ function WorkoutPlanCard({
                 size="sm"
                 variant={currentDay?.day_index === day.day_index ? 'primary' : 'ghost'}
                 onClick={() => setActiveDayIndex(day.day_index)}
+                className="h-auto min-h-9 max-w-full py-1.5 text-left whitespace-normal"
               >
                 {day.title
                   ? t('dayLabel', { index: day.day_index, title: day.title })
-                  : `Ngày ${day.day_index}`}
+                  : t('dayFallback', { index: day.day_index })}
               </Button>
             ))}
           </div>
@@ -260,11 +268,11 @@ function WorkoutPlanCard({
                 >
                   <div className="grid gap-2">
                     <div className="flex items-start justify-between gap-2">
-                      <h4 className="text-body font-semibold text-primary">
+                      <h4 className="min-w-0 text-body font-semibold break-words text-primary">
                         {item.exercise_name}
                       </h4>
                       {item.muscle_group ? (
-                        <Badge variant="outline">{item.muscle_group}</Badge>
+                        <Badge variant="outline">{muscleLabel(t, item.muscle_group)}</Badge>
                       ) : null}
                     </div>
 
@@ -272,19 +280,15 @@ function WorkoutPlanCard({
                       <Badge variant="brand">
                         {t('setsReps', { sets: item.sets, reps: item.reps })}
                       </Badge>
-                      {item.weight_kg != null && item.weight_kg > 0 ? (
-                        <Badge variant="info">{t('weightKg', { weight: item.weight_kg })}</Badge>
+                      {item.weight > 0 ? (
+                        <Badge variant="info">{t('weightKg', { weight: item.weight })}</Badge>
                       ) : null}
                       {item.rest_sec != null && item.rest_sec > 0 ? (
-                        <Badge variant="neutral">
-                          {t('restSec', { seconds: item.rest_sec })}
-                        </Badge>
+                        <Badge variant="neutral">{t('restSec', { seconds: item.rest_sec })}</Badge>
                       ) : null}
                     </div>
 
-                    {item.note ? (
-                      <p className="text-caption text-secondary">{item.note}</p>
-                    ) : null}
+                    {item.note ? <p className="text-caption text-secondary">{item.note}</p> : null}
                   </div>
 
                   <div className="flex justify-end">
@@ -313,6 +317,7 @@ function WorkoutLogDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations('portal.workout.logDialog');
+  const tw = useTranslations('portal.workout');
   const tc = useTranslations('common');
   const tv = useTranslations('common.validation');
   const toastError = useToastApiError();
@@ -322,10 +327,11 @@ function WorkoutLogDialog({
   const form = useForm<WorkoutLogFormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
+      plan_item_id: preset?.plan_item_id ?? null,
       exercise_id: preset?.exercise_id ?? exercises[0]?.id ?? 0,
       sets: preset?.sets ?? 3,
       reps: preset?.reps ?? 10,
-      weight_kg: preset?.weight_kg ?? 20,
+      weight: preset?.weight ?? 20,
       note: preset?.note ?? '',
     },
   });
@@ -333,10 +339,11 @@ function WorkoutLogDialog({
   useEffect(() => {
     if (preset) {
       form.reset({
+        plan_item_id: preset.plan_item_id ?? null,
         exercise_id: preset.exercise_id || exercises[0]?.id || 0,
         sets: preset.sets ?? 3,
         reps: preset.reps ?? 10,
-        weight_kg: preset.weight_kg ?? 20,
+        weight: preset.weight ?? 20,
         note: preset.note ?? '',
       });
     }
@@ -345,10 +352,11 @@ function WorkoutLogDialog({
   const onSubmit = form.handleSubmit(async values => {
     try {
       await mutation.mutateAsync({
+        plan_item_id: values.plan_item_id ?? undefined,
         exercise_id: values.exercise_id,
         sets: values.sets,
         reps: values.reps,
-        weight_kg: values.weight_kg,
+        weight: values.weight,
         note: values.note?.trim() || undefined,
       });
       toast.success(t('success'));
@@ -375,7 +383,7 @@ function WorkoutLogDialog({
                 <FormItem>
                   <FormLabel>{t('exerciseLabel')}</FormLabel>
                   <Select
-                    value={field.value ? String(field.value) : undefined}
+                    value={field.value ? String(field.value) : ''}
                     onValueChange={v => field.onChange(Number(v))}
                   >
                     <FormControl>
@@ -386,7 +394,8 @@ function WorkoutLogDialog({
                     <SelectContent>
                       {exercises.map(ex => (
                         <SelectItem key={ex.id} value={String(ex.id)}>
-                          {ex.name} {ex.muscle_group ? `(${ex.muscle_group})` : ''}
+                          {ex.name}
+                          {ex.muscle_group ? ` (${muscleLabel(tw, ex.muscle_group)})` : ''}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -437,7 +446,7 @@ function WorkoutLogDialog({
 
               <FormField
                 control={form.control}
-                name="weight_kg"
+                name="weight"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>{t('weightLabel')}</FormLabel>

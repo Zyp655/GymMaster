@@ -4,7 +4,7 @@ Base URL (dev): `http://localhost:8000/v1`. Mọi endpoint cần `Authorization:
 Envelope, mã lỗi, phân trang: xem `sprint-01-auth-rbac-branch.md`. Tóm tắt:
 
 - Thành công: `{ "code": 0, "message": "OK", "data": ... }`.
-- Lỗi: `code` 5 chữ số, HTTP = code/100. `message` là câu tiếng Việt, hiển thị thẳng cho người dùng được.
+- Lỗi: `code` 5 chữ số, HTTP status chuẩn theo bảng trong `sprint-01-auth-rbac-branch.md`. `message` là câu tiếng Việt, hiển thị thẳng cho người dùng được.
 - Lỗi validate tag của GoFrame: `code = 51`, HTTP 400.
 - Ngày: `"YYYY-MM-DD"`. Thời điểm: RFC3339 (`2026-10-14T08:00:00+07:00`).
 

@@ -92,7 +92,7 @@ export const routes: AppRoute[] = [
   {
     path: 'leads',
     element: page(Leads),
-    perm: [PERM.LEAD_VIEW, PERM.LEAD_MANAGE, PERM.MEMBER_VIEW],
+    perm: [PERM.LEAD_VIEW, PERM.LEAD_MANAGE],
   },
   {
     path: 'lockers',
@@ -186,7 +186,7 @@ export const routes: AppRoute[] = [
   {
     path: 'trainer-schedules',
     element: page(TrainerSchedules),
-    perm: [PERM.LEAVE_MANAGE, PERM.HOLIDAY_MANAGE],
+    perm: [PERM.LEAVE_MANAGE, PERM.HOLIDAY_MANAGE, PERM.PT_SCHEDULE],
   },
 
   // Báo cáo & KPI
@@ -213,14 +213,14 @@ export const routes: AppRoute[] = [
   { path: 'roles', element: page(Roles), perm: [PERM.ROLE_VIEW] },
   { path: 'settings', element: page(Settings), perm: [PERM.SETTING_MANAGE] },
   {
+    // Mọi nhân viên: 2FA + phiên đăng nhập của chính mình; tab yêu cầu dữ liệu ẩn theo privacy.manage.
     path: 'security-privacy',
     element: page(SecurityPrivacy),
-    perm: [PERM.PRIVACY_MANAGE, PERM.MEMBER_VIEW_SENSITIVE, PERM.SETTING_MANAGE],
   },
   {
     path: 'cms-marketing',
     element: page(CmsMarketing),
-    perm: [PERM.CMS_MANAGE, PERM.PT_VIEW, PERM.LEAD_VIEW],
+    perm: [PERM.CMS_MANAGE, PERM.STAFF_VIEW, PERM.LEAD_VIEW],
   },
   {
     path: 'system-tools',
@@ -230,5 +230,10 @@ export const routes: AppRoute[] = [
   { path: 'audit-logs', element: page(AuditLogs), perm: [PERM.AUDIT_VIEW] },
   { path: 'jobs', element: page(Jobs), perm: [PERM.JOB_VIEW] },
 ];
+
+/** Quyền (anyOf) của route `/app/<path>` – dùng để ẩn liên kết tới trang người dùng không vào được. */
+export function routePerm(path: string): string[] | undefined {
+  return routes.find((r) => r.path === path)?.perm;
+}
 
 export default routes;

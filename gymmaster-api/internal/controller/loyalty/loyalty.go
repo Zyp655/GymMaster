@@ -69,6 +69,10 @@ func (c *AdminControllerV1) DeleteChallenge(ctx context.Context, req *v1.DeleteC
 	return &v1.DeleteLoyaltyRes{}, c.svc.DeleteChallenge(ctx, req.ID)
 }
 
+func (c *AdminControllerV1) ListLoyaltyLedgers(ctx context.Context, req *v1.ListLoyaltyLedgersReq) (res *v1.ListLoyaltyLedgersRes, err error) {
+	return c.svc.ListLedgers(ctx, req)
+}
+
 func (c *AdminControllerV1) AdjustMemberPoints(ctx context.Context, req *v1.AdjustMemberPointsReq) (res *v1.AdjustMemberPointsRes, err error) {
 	return c.svc.AdjustMemberPoints(ctx, req)
 }

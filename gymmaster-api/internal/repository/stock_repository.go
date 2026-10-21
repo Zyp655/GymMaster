@@ -31,6 +31,7 @@ type (
 		MinStock     int
 		CostPrice    float64
 		SellPrice    float64
+		LowStock     bool // theo LowStockCond
 	}
 
 	StockFilter struct {
@@ -179,7 +180,7 @@ func (r *stockRepository) stockQuery(ctx context.Context, q dto.Query, f StockFi
 		tx = tx.Where("p.category_id = ?", f.CategoryID)
 	}
 	if f.LowStock {
-		tx = tx.Where("p.min_stock > 0 AND COALESCE(sl.quantity, 0) < p.min_stock")
+		tx = tx.Where(lowStockSQL)
 	}
 	if q.Keyword != "" {
 		kw := "%" + q.Keyword + "%"
@@ -197,7 +198,7 @@ func (r *stockRepository) ListStock(ctx context.Context, q dto.Query, f StockFil
 	var rows []StockRow
 	err := tx.Select(`p.id AS product_id, p.sku, p.barcode, p.name AS product_name, p.category_id,
 		COALESCE(c.name, '') AS category_name, p.unit, p.image_url, b.id AS branch_id, b.name AS branch_name,
-		COALESCE(sl.quantity, 0) AS quantity, p.min_stock, p.cost_price, p.sell_price`).
+		COALESCE(sl.quantity, 0) AS quantity, p.min_stock, p.cost_price, p.sell_price, `+lowStockSQL+` AS low_stock`).
 		Scopes(q.Paginate).Order("p.id, b.id").Scan(&rows).Error
 	return rows, total, err
 }
@@ -206,7 +207,7 @@ func (r *stockRepository) SumStock(ctx context.Context, q dto.Query, f StockFilt
 	var out StockSummaryRow
 	err := r.stockQuery(ctx, q, f).Select(`COALESCE(SUM(COALESCE(sl.quantity, 0)), 0) AS total_quantity,
 		COALESCE(SUM(COALESCE(sl.quantity, 0) * p.cost_price), 0) AS total_value,
-		COUNT(*) FILTER (WHERE p.min_stock > 0 AND COALESCE(sl.quantity, 0) < p.min_stock) AS low_stock_count`).
+		COUNT(*) FILTER (WHERE `+lowStockSQL+`) AS low_stock_count`).
 		Scan(&out).Error
 	return &out, err
 }
@@ -265,9 +266,9 @@ func (r *stockRepository) ListLowStock(ctx context.Context, branchIDs []uint) ([
 	tx := postgres.Conn(ctx, r.db).Table("stock_levels sl").
 		Select(`p.id AS product_id, p.sku, p.name AS product_name, p.unit, b.id AS branch_id, b.name AS branch_name,
 			sl.quantity, p.min_stock`).
-		Joins("JOIN products p ON p.id = sl.product_id AND p.deleted_at IS NULL AND p.status = ?", entity.ProductStatusActive).
-		Joins("JOIN branches b ON b.id = sl.branch_id AND b.deleted_at IS NULL AND b.status = 'ACTIVE'").
-		Where("p.min_stock > 0 AND sl.quantity < p.min_stock")
+		Joins("JOIN products p ON p.id = sl.product_id").
+		Joins("JOIN branches b ON b.id = sl.branch_id").
+		Where(lowStockSQL)
 	if branchIDs != nil {
 		tx = tx.Where("sl.branch_id IN ?", branchIDs)
 	}

@@ -19,15 +19,21 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import branchApi from '@/api/branch';
+import checkinApi from '@/api/checkin';
+import memberApi from '@/api/member';
 import reportApi from '@/api/report';
 import type { LowStockItem } from '@/api/report';
+import HelpLabel from '@/components/HelpLabel';
 import StatCard, { SectionHeader } from '@/components/StatCard';
 import { CARD_STYLE, TONES } from '@/components/StatCard/tokens';
 import { PERM } from '@/constants/permissions';
+import { REVENUE_HELP } from '@/constants/revenueBasis';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
+import { useThemeMode } from '@/theme';
 import { formatMoney, formatNumber } from '@/utils/format';
+import { summarizeBranches } from './dashboardStats';
 
 const { Title, Text } = Typography;
 
@@ -87,16 +93,20 @@ function greeting(): string {
 
 export default function Dashboard() {
   const { user, can } = usePermission();
+  const { darkMode } = useThemeMode();
   const navigate = useNavigate();
   const { branchId } = useWorkingBranch();
-  const { branches } = useBranchOptions();
+  const branchOptions = useBranchOptions();
+  const { branches } = branchOptions;
   const canBranch = can(PERM.BRANCH_VIEW);
   const canReport = can(PERM.REPORT_VIEW);
+  const allowedBranchIds = user?.branch_ids ?? [];
+  const isGlobalUser = allowedBranchIds.length === 0;
 
-  // Đếm chi nhánh theo trạng thái (limit=1, chỉ lấy total).
-  const branchStats = useQuery({
+  // Đếm chi nhánh theo trạng thái (limit=1, chỉ lấy total) – chỉ cho user toàn hệ thống.
+  const globalBranchStats = useQuery({
     queryKey: [branchApi.key, 'dashboard-stats'],
-    enabled: canBranch,
+    enabled: canBranch && isGlobalUser,
     queryFn: async () => {
       const [all, active] = await Promise.all([
         branchApi.list({ limit: 1 }),
@@ -105,6 +115,15 @@ export default function Dashboard() {
       return { total: all.total, active: active.total, inactive: all.total - active.total };
     },
   });
+  // User bị giới hạn chi nhánh → chỉ đếm các chi nhánh được phân công.
+  const branchStats = isGlobalUser
+    ? globalBranchStats
+    : {
+        data: branchOptions.data
+          ? summarizeBranches(branchOptions.data, allowedBranchIds)
+          : undefined,
+        isLoading: branchOptions.isLoading,
+      };
 
   const overview = useQuery({
     queryKey: [reportApi.key, 'overview', branchId ?? null],
@@ -113,6 +132,31 @@ export default function Dashboard() {
   });
 
   const ov = overview.data;
+
+  // Không có report.view → vẫn hiện số liệu theo quyền riêng (member.view / checkin.view).
+  const canMember = can(PERM.MEMBER_VIEW);
+  const canCheckin = can(PERM.CHECKIN_VIEW);
+  const memberFallback = useQuery({
+    queryKey: [memberApi.key, 'dashboard-active', branchId ?? null],
+    enabled: !canReport && canMember,
+    queryFn: () =>
+      memberApi.list({ limit: 1, subscription_status: 'active', branch_id: branchId ?? undefined }),
+  });
+  const checkinFallback = useQuery({
+    queryKey: [checkinApi.key, 'dashboard-today', branchId ?? null],
+    enabled: !canReport && canCheckin,
+    queryFn: () => {
+      const today = dayjs().format('YYYY-MM-DD');
+      // Chỉ đếm lượt được vào (giống báo cáo tổng quan), bỏ lượt bị từ chối.
+      return checkinApi.list({
+        limit: 1,
+        result: 'ALLOWED',
+        from: today,
+        to: today,
+        branch_id: branchId ?? undefined,
+      });
+    },
+  });
 
   const workingName = branchId
     ? (branches.find((b) => b.id === branchId)?.name ?? 'Chi nhánh đang chọn')
@@ -162,43 +206,57 @@ export default function Dashboard() {
           <StatCard
             label="Hội viên đang hoạt động"
             icon={<TeamOutlined />}
-            value={canReport ? ov?.members.active : '—'}
-            loading={canReport && overview.isLoading}
+            value={canReport ? ov?.members.active : canMember ? memberFallback.data?.total : '—'}
+            loading={canReport ? overview.isLoading : canMember && memberFallback.isLoading}
             caption={
               canReport && ov
                 ? `+${formatNumber(ov.members.new_this_month)} mới tháng này · ${formatNumber(ov.members.expiring_7d)} sắp hết hạn`
                 : canReport
                   ? undefined
-                  : NO_PERM_CAPTION
+                  : canMember
+                    ? 'Có gói tập đang hiệu lực'
+                    : NO_PERM_CAPTION
             }
-            onClick={can(PERM.MEMBER_VIEW) ? () => navigate('/app/members') : undefined}
+            onClick={canMember ? () => navigate('/app/members') : undefined}
           />
         </Col>
         <Col {...QUARTER_COL}>
           <StatCard
             label="Lượt check-in hôm nay"
             icon={<LoginOutlined />}
-            value={canReport ? ov?.checkins.today : '—'}
-            loading={canReport && overview.isLoading}
+            value={canReport ? ov?.checkins.today : canCheckin ? checkinFallback.data?.total : '—'}
+            loading={canReport ? overview.isLoading : canCheckin && checkinFallback.isLoading}
             caption={
               canReport && ov
                 ? `${formatNumber(ov.checkins.present)} đang trong phòng tập`
-                : canReport
+                : canReport || canCheckin
                   ? undefined
                   : NO_PERM_CAPTION
             }
-            onClick={can(PERM.CHECKIN_VIEW) ? () => navigate('/app/checkins') : undefined}
+            onClick={canCheckin ? () => navigate('/app/checkins') : undefined}
           />
         </Col>
         <Col {...QUARTER_COL}>
           <StatCard
-            label="Doanh thu tháng này"
+            label={
+              <HelpLabel
+                help={
+                  <>
+                    {REVENUE_HELP.cash}
+                    <br />
+                    {REVENUE_HELP.dashboardCompare}
+                  </>
+                }
+              >
+                Doanh thu tháng này
+              </HelpLabel>
+            }
             icon={<DollarOutlined />}
             value={canReport ? ov?.revenue.month : '—'}
             currency
             loading={canReport && overview.isLoading}
             delta={canReport ? ov?.revenue.change_pct : null}
-            deltaLabel="% so với kỳ trước"
+            deltaLabel="% so với cùng kỳ tháng trước"
             caption={
               canReport && ov
                 ? `Hôm nay: ${formatMoney(ov.revenue.today)}`
@@ -319,7 +377,9 @@ export default function Dashboard() {
                 title={
                   <span>
                     <InboxOutlined style={{ marginRight: 6 }} />
-                    Cảnh báo tồn kho thấp ({ov?.low_stock_count ?? 0})
+                    <HelpLabel help="Dòng tồn (sản phẩm đã nhập về chi nhánh) có số lượng NHỎ HƠN mức tồn tối thiểu; chỉ tính sản phẩm & chi nhánh đang hoạt động – cùng định nghĩa với màn Kho hàng.">
+                      Cảnh báo tồn kho thấp ({ov?.low_stock_count ?? 0})
+                    </HelpLabel>
                   </span>
                 }
                 extra={
@@ -387,12 +447,13 @@ export default function Dashboard() {
               />
             ) : (
               <Pie
+                theme={darkMode ? 'classicDark' : 'classic'}
                 height={240}
                 data={pieData}
                 angleField="value"
                 colorField="type"
                 innerRadius={0.62}
-                scale={{ color: { range: [TONES.navy.fg, '#CBD5E1'] } }}
+                scale={{ color: { range: ['#1D6FB8', '#94A3B8'] } }}
                 label={{ text: 'value', style: { fontWeight: 600 } }}
                 legend={{ color: { position: 'bottom', layout: { justifyContent: 'center' } } }}
                 tooltip={{ title: 'type' }}

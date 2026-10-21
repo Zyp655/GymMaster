@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { Alert, App, Form, Input, Modal } from 'antd';
 import type { Staff } from '@/api/staff';
-import { setFormError, showError } from '@/utils/errors';
+import { getErrorMessage, setFormError, showError } from '@/utils/errors';
 import { useResetStaffPassword } from './queries';
+import { isStaffGuardError } from './staffGuards';
 
 interface Values {
   password: string;
@@ -18,7 +19,7 @@ export default function ResetPasswordModal({
   onClose: () => void;
 }) {
   const [form] = Form.useForm<Values>();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const reset = useResetStaffPassword();
 
   useEffect(() => {
@@ -35,6 +36,11 @@ export default function ResetPasswordModal({
           onClose();
         },
         onError: (e) => {
+          // 403/400 "chính mình" không phải lỗi ô mật khẩu → hiện nguyên thông điệp server.
+          if (isStaffGuardError(e)) {
+            modal.error({ title: 'Không thể đặt lại mật khẩu', content: getErrorMessage(e) });
+            return;
+          }
           if (!setFormError(form, e, { password: /mật khẩu/i }))
             showError(e, 'Không thể đặt lại mật khẩu');
         },

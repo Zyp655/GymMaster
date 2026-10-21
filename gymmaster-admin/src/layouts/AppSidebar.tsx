@@ -32,6 +32,7 @@ export function AppSidebar({ collapsed, onNavigate }: AppSidebarProps) {
     <Menu
       mode="inline"
       className="app-menu"
+      inlineIndent={16}
       items={items}
       selectedKeys={[selectedKey]}
       {...(collapsed ? {} : { openKeys, onOpenChange: setOpenKeys })}

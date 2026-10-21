@@ -24,6 +24,7 @@ import {
   TrashIcon,
   TrophyIcon,
 } from '@heroicons/react/24/outline';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { LoadError } from '@/components/common/LoadError';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -43,11 +44,14 @@ import {
   useMemberDataRequestsQuery,
   useMemberSessionsQuery,
   useProfileQuery,
+  useRevokeMemberSessionMutation,
   useRevokeOtherMemberSessionsMutation,
   useSetupMemberMFAMutation,
   useUpdateMemberConsentsMutation,
 } from '../queries';
-import type { ConsentType, DataRequestType, MFASetupRes } from '../types';
+import { downloadMemberDataExport } from '../api';
+import type { ConsentType, DataRequestType, MFASetupRes, SessionItem } from '../types';
+import { describeUserAgent } from '../user-agent';
 import { PortalPageHeader } from './PortalPageHeader';
 import { DataRequestStatusBadge } from './PortalStatusBadge';
 import { ProfileFormCard } from './ProfileFormCard';
@@ -111,7 +115,10 @@ export function AccountView() {
         <ProfileFormCard profile={query.data} />
       )}
 
-      <MfaSecurityCard initialEnabled={Boolean(query.data?.member.mfa_enabled)} />
+      <MfaSecurityCard
+        key={String(Boolean(query.data?.member.mfa_enabled))}
+        initialEnabled={Boolean(query.data?.member.mfa_enabled)}
+      />
 
       <ActiveSessionsCard />
 
@@ -226,14 +233,17 @@ function MfaSecurityCard({ initialEnabled }: { initialEnabled: boolean }) {
         <div className="flex flex-wrap items-end gap-3 rounded-xl bg-canvas p-4">
           <div className="grid flex-1 gap-1">
             <label className="text-caption font-medium text-secondary">
-              {t('mfaCodeLabel')}
+              {t('mfaDisableCodeLabel')}
             </label>
             <Input
               value={otpCode}
               onChange={e => setOtpCode(e.target.value)}
-              placeholder={t('mfaCodePlaceholder')}
-              maxLength={6}
-              inputMode="numeric"
+              placeholder={t('mfaDisableCodePlaceholder')}
+              maxLength={32}
+              // Tắt 2FA chấp nhận mã TOTP 6 số HOẶC mã khôi phục (chữ + số) → bàn phím chữ.
+              inputMode="text"
+              autoCapitalize="characters"
+              autoComplete="one-time-code"
               className="max-w-xs font-mono"
             />
           </div>
@@ -311,20 +321,44 @@ function MfaSecurityCard({ initialEnabled }: { initialEnabled: boolean }) {
   );
 }
 
-/** Danh sách thiết bị / phiên đăng nhập & thu hồi các phiên khác. */
+/** Số phiên hiển thị trước khi bấm "Xem thêm". */
+const SESSIONS_COLLAPSED = 4;
+
+/** Danh sách thiết bị / phiên đăng nhập: phiên hiện tại lên đầu, thu hồi từng phiên hoặc mọi phiên khác. */
 function ActiveSessionsCard() {
   const t = useTranslations('portal.account');
   const toastError = useToastApiError();
 
   const sessionsQuery = useMemberSessionsQuery();
-  const revokeMutation = useRevokeOtherMemberSessionsMutation();
+  const revokeOthersMutation = useRevokeOtherMemberSessionsMutation();
+  const revokeOneMutation = useRevokeMemberSessionMutation();
+  const [expanded, setExpanded] = useState(false);
+  const [confirmOthers, setConfirmOthers] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<SessionItem | null>(null);
 
-  const sessions = sessionsQuery.data ?? [];
+  const sessions = [...(sessionsQuery.data ?? [])].sort(
+    (a, b) => Number(isCurrentSession(b)) - Number(isCurrentSession(a)),
+  );
+  const current = sessions.find(isCurrentSession);
+  const otherCount = sessions.filter(sess => !isCurrentSession(sess)).length;
+  const visible = expanded ? sessions : sessions.slice(0, SESSIONS_COLLAPSED);
 
   async function handleRevokeOthers() {
     try {
-      await revokeMutation.mutateAsync();
+      await revokeOthersMutation.mutateAsync(current?.id);
       toast.success(t('revokeOthersSuccess'));
+      setConfirmOthers(false);
+    } catch (error) {
+      toastError(error);
+    }
+  }
+
+  async function handleRevokeOne() {
+    if (!revokeTarget) return;
+    try {
+      await revokeOneMutation.mutateAsync(revokeTarget.id);
+      toast.success(t('revokeSessionSuccess'));
+      setRevokeTarget(null);
     } catch (error) {
       toastError(error);
     }
@@ -337,66 +371,125 @@ function ActiveSessionsCard() {
           <CardTitle>{t('sessionsTitle')}</CardTitle>
           <p className="text-caption text-secondary">{t('sessionsDesc')}</p>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={revokeMutation.isPending}
-          onClick={() => void handleRevokeOthers()}
-        >
-          <TrashIcon />
-          {revokeMutation.isPending ? t('revokingOthers') : t('revokeOthersBtn')}
-        </Button>
+        {otherCount > 0 ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={revokeOthersMutation.isPending}
+            onClick={() => setConfirmOthers(true)}
+          >
+            <TrashIcon />
+            {t('revokeOthersBtn', { count: otherCount })}
+          </Button>
+        ) : null}
       </CardHeader>
 
       {sessionsQuery.isLoading ? (
         <Skeleton className="h-20 rounded-xl" />
+      ) : sessionsQuery.isError ? (
+        <LoadError error={sessionsQuery.error} onRetry={() => void sessionsQuery.refetch()} />
       ) : sessions.length === 0 ? (
         <div className="flex items-center gap-3 rounded-xl bg-canvas p-4 text-secondary">
           <ComputerDesktopIcon className="size-5 shrink-0 text-tertiary" />
           <span className="text-body">{t('emptySessions')}</span>
         </div>
       ) : (
-        <ul className="grid gap-2.5">
-          {sessions.map(session => {
-            const isCurrent = Boolean(session.is_current ?? session.current);
-            const ip = session.ip_address || session.ip;
-            return (
-              <li
-                key={session.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-canvas p-3.5"
-              >
-                <div className="flex items-center gap-3">
-                  <ComputerDesktopIcon className="size-6 shrink-0 text-brand-600" />
-                  <div className="grid gap-0.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-body font-medium text-primary">
-                        {session.device ||
-                          session.device_name ||
-                          session.user_agent ||
-                          `Session #${session.id}`}
-                      </span>
-                      {isCurrent ? (
-                        <Badge variant="success">{t('currentSessionBadge')}</Badge>
-                      ) : null}
+        <div className="grid gap-2.5">
+          <ul className="grid gap-2.5">
+            {visible.map(session => {
+              const isCurrent = isCurrentSession(session);
+              const ip = session.ip_address || session.ip;
+              const ua = session.user_agent || session.device || session.device_name || '';
+              const label = describeUserAgent(ua) || ua || t('sessionFallback', { id: session.id });
+              const lastUsed = session.last_used_at || session.created_at;
+              return (
+                <li
+                  key={session.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-canvas p-3.5"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <ComputerDesktopIcon className="size-6 shrink-0 text-brand-600" />
+                    <div className="grid min-w-0 gap-0.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-body font-medium break-words text-primary" title={ua}>
+                          {label}
+                        </span>
+                        {isCurrent ? (
+                          <Badge variant="success">{t('currentSessionBadge')}</Badge>
+                        ) : null}
+                      </div>
+                      <p className="text-caption text-secondary">
+                        {[
+                          ip ? t('sessionIp', { ip }) : null,
+                          lastUsed ? t('lastUsedAt', { time: formatDateTime(lastUsed) }) : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
                     </div>
-                    <p className="text-caption text-secondary">
-                      {ip ? `IP: ${ip} · ` : ''}
-                      {session.last_used_at || session.created_at
-                        ? t('lastUsedAt', {
-                            time: formatDateTime(session.last_used_at || session.created_at!),
-                          })
-                        : ''}
-                    </p>
                   </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                  {!isCurrent ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={revokeOneMutation.isPending}
+                      onClick={() => setRevokeTarget(session)}
+                    >
+                      <ArrowRightStartOnRectangleIcon />
+                      {t('revokeSessionBtn')}
+                    </Button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+          {sessions.length > SESSIONS_COLLAPSED ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="justify-self-start"
+              onClick={() => setExpanded(v => !v)}
+            >
+              {expanded
+                ? t('sessionsShowLess')
+                : t('sessionsShowMore', { count: sessions.length - SESSIONS_COLLAPSED })}
+            </Button>
+          ) : null}
+        </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOthers}
+        onOpenChange={setConfirmOthers}
+        title={t('revokeOthersConfirmTitle')}
+        description={t('revokeOthersConfirmDesc', { count: otherCount })}
+        confirmLabel={t('revokeOthersConfirmBtn')}
+        loading={revokeOthersMutation.isPending}
+        onConfirm={handleRevokeOthers}
+      />
+      <ConfirmDialog
+        open={Boolean(revokeTarget)}
+        onOpenChange={open => !open && setRevokeTarget(null)}
+        title={t('revokeSessionConfirmTitle')}
+        description={t('revokeSessionConfirmDesc', {
+          device:
+            describeUserAgent(revokeTarget?.user_agent) ||
+            revokeTarget?.user_agent ||
+            t('sessionFallback', { id: revokeTarget?.id ?? 0 }),
+        })}
+        confirmLabel={t('revokeSessionBtn')}
+        loading={revokeOneMutation.isPending}
+        onConfirm={handleRevokeOne}
+      />
     </Card>
   );
+}
+
+function isCurrentSession(session: SessionItem): boolean {
+  return Boolean(session.is_current ?? session.current);
 }
 
 /** Quyền riêng tư & Dữ liệu cá nhân (Nghị định 13/2023/NĐ-CP). */
@@ -410,6 +503,8 @@ function PrivacyDataCard() {
   const createDataRequestMutation = useCreateMemberDataRequestMutation();
 
   const [reason, setReason] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   const consents = consentsQuery.data ?? [];
   const dataRequests = dataRequestsQuery.data ?? [];
@@ -432,6 +527,18 @@ function PrivacyDataCard() {
     }
   }
 
+  async function handleDownload(id: number) {
+    setDownloadingId(id);
+    try {
+      const { blob, filename } = await downloadMemberDataExport(id);
+      saveBlob(blob, filename || `gymmaster-du-lieu-ca-nhan-${id}.json`);
+    } catch (error) {
+      toastError(error);
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   async function handleRequestData(type: DataRequestType) {
     try {
       await createDataRequestMutation.mutateAsync({
@@ -439,9 +546,8 @@ function PrivacyDataCard() {
         reason: reason.trim() || undefined,
       });
       setReason('');
-      toast.success(
-        type === 'EXPORT' ? t('requestExportSuccess') : t('requestDeleteSuccess'),
-      );
+      setConfirmDelete(false);
+      toast.success(type === 'EXPORT' ? t('requestExportSuccess') : t('requestDeleteSuccess'));
     } catch (error) {
       toastError(error);
     }
@@ -492,9 +598,7 @@ function PrivacyDataCard() {
                 <Checkbox
                   checked={checked}
                   disabled={updateConsentMutation.isPending}
-                  onCheckedChange={val =>
-                    void handleToggleConsent(item.type, Boolean(val))
-                  }
+                  onCheckedChange={val => void handleToggleConsent(item.type, Boolean(val))}
                   className="mt-0.5"
                 />
                 <span className="grid gap-0.5">
@@ -529,7 +633,7 @@ function PrivacyDataCard() {
               variant="danger-ghost"
               size="sm"
               disabled={createDataRequestMutation.isPending}
-              onClick={() => void handleRequestData('DELETE')}
+              onClick={() => setConfirmDelete(true)}
             >
               <TrashIcon />
               {t('requestDeleteBtn')}
@@ -546,18 +650,28 @@ function PrivacyDataCard() {
                   className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface p-3"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{req.type}</Badge>
+                    <Badge variant="outline">
+                      {req.type === 'EXPORT'
+                        ? t('dataRequestTypes.EXPORT')
+                        : req.type === 'DELETE'
+                          ? t('dataRequestTypes.DELETE')
+                          : req.type}
+                    </Badge>
                     <DataRequestStatusBadge status={req.status} />
                     <span className="text-caption text-secondary">
                       {formatDateTime(req.created_at)}
                     </span>
                   </div>
-                  {req.export_url ? (
-                    <Button asChild variant="outline" size="sm">
-                      <a href={req.export_url} target="_blank" rel="noreferrer">
-                        <ArrowDownTrayIcon />
-                        {t('downloadExportBtn')}
-                      </a>
+                  {req.type === 'EXPORT' && req.status === 'DONE' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={downloadingId === req.id}
+                      onClick={() => void handleDownload(req.id)}
+                    >
+                      <ArrowDownTrayIcon />
+                      {downloadingId === req.id ? t('downloadingExport') : t('downloadExportBtn')}
                     </Button>
                   ) : null}
                 </li>
@@ -566,6 +680,28 @@ function PrivacyDataCard() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={t('requestDeleteConfirmTitle')}
+        description={t('requestDeleteConfirmDesc')}
+        confirmLabel={t('requestDeleteConfirmBtn')}
+        loading={createDataRequestMutation.isPending}
+        onConfirm={() => handleRequestData('DELETE')}
+      />
     </Card>
   );
+}
+
+/** Lưu Blob thành file tải về trên trình duyệt. */
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

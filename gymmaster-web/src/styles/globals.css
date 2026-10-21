@@ -120,4 +120,13 @@
     line-height: var(--text-body--line-height);
     -webkit-font-smoothing: antialiased;
   }
+
+  /*
+   * Cổng hội viên: grid một cột ngầm định (không khai báo grid-cols-*) dùng track `auto` nên bị nội dung
+   * dài (badge nowrap, canvas, bảng...) đẩy rộng hơn màn hình ở mobile. Ép track tối thiểu 0 để
+   * nội dung co theo khung. `:where()` + @layer base ⇒ mọi tiện ích grid-cols-* vẫn ghi đè được.
+   */
+  :where([data-portal-main] .grid) {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

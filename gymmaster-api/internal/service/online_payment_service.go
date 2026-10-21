@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gogf/gf/v2/errors/gerror"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
@@ -99,52 +100,87 @@ func (s *onlinePaymentService) newTxnRef(now time.Time) string {
 	return fmt.Sprintf("VNP%s%04d", now.In(subVNLoc).Format("060102150405"), seq)
 }
 
+// createTxn tạo (hoặc dùng lại) giao dịch VNPay cho số còn nợ của hóa đơn. Chạy trong transaction, khóa hóa đơn
+// để hai yêu cầu đồng thời không tạo hai giao dịch PENDING:
+//   - đã có giao dịch PENDING còn hạn của chính hội viên với đúng số còn nợ → trả lại URL thanh toán của giao dịch đó;
+//   - PENDING khác (số tiền đã đổi) → chuyển EXPIRED (bị thay thế) rồi tạo giao dịch mới. Nếu hội viên vẫn thanh toán
+//     giao dịch cũ, IPN vẫn ghi nhận tiền (hoặc gắn cờ cần hoàn) – không mất tiền.
 func (s *onlinePaymentService) createTxn(ctx context.Context, inv *entity.Invoice, memberID uint, clientIP string) (*v1.PaymentURLRes, error) {
-	if inv.Status != entity.InvoiceStatusUnpaid && inv.Status != entity.InvoiceStatusPartial {
-		return nil, rescode.New(rescode.BadRequest, "Hóa đơn đã được thanh toán hoặc đã hủy")
-	}
-	due := roundMoneyVND(inv.Due())
-	if due <= 0 {
-		return nil, rescode.New(rescode.BadRequest, "Hóa đơn không còn số tiền cần thanh toán")
-	}
+	var out *v1.PaymentURLRes
+	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
+		// Khóa hóa đơn bằng ngữ cảnh hệ thống (hội viên không có phạm vi chi nhánh quản trị).
+		locked, err := s.invoices.LockInvoice(reqctx.WithAuth(ctx, nil), inv.ID)
+		if err != nil {
+			return err
+		}
+		if locked.Status != entity.InvoiceStatusUnpaid && locked.Status != entity.InvoiceStatusPartial {
+			return rescode.New(rescode.BadRequest, "Hóa đơn đã được thanh toán hoặc đã hủy")
+		}
+		due := roundMoneyVND(locked.Due())
+		if due <= 0 {
+			return rescode.New(rescode.BadRequest, "Hóa đơn không còn số tiền cần thanh toán")
+		}
+		orderInfo := fmt.Sprintf("Thanh toan hoa don %s", locked.InvoiceNo)
+		if locked.InvoiceNo == "" {
+			orderInfo = fmt.Sprintf("Thanh toan hoa don #%d", locked.ID)
+		}
 
-	now := s.now()
-	expiresAt := now.Add(onlineTxnTTL)
-	txnRef := s.newTxnRef(now)
-	orderInfo := fmt.Sprintf("Thanh toan hoa don %s", inv.InvoiceNo)
-	if inv.InvoiceNo == "" {
-		orderInfo = fmt.Sprintf("Thanh toan hoa don #%d", inv.ID)
-	}
+		now := s.now()
+		pending, err := s.repo.FindPendingByInvoice(ctx, locked.ID, now.Add(-onlineTxnTTL))
+		if err != nil {
+			return err
+		}
+		if pending != nil {
+			if pending.MemberID == memberID && roundMoneyVND(pending.Amount) == due {
+				expiresAt := pending.CreatedAt.Add(onlineTxnTTL)
+				paymentURL, err := vnpay.BuildPaymentURL(s.cfg, vnpay.BuildParams{
+					TxnRef: pending.TxnRef, Amount: pending.Amount, OrderInfo: orderInfo, ClientIP: clientIP,
+					CreateDate: pending.CreatedAt, ExpireDate: expiresAt,
+				})
+				if err != nil {
+					return err
+				}
+				out = &v1.PaymentURLRes{TxnRef: pending.TxnRef, PaymentURL: paymentURL, Amount: pending.Amount, ExpiresAt: expiresAt}
+				return nil
+			}
+			if err := s.repo.UpdateFields(ctx, pending.ID, map[string]any{
+				"status": entity.OnlineTxnExpired, "note": "Thay bằng giao dịch mới (số tiền cần thanh toán đã thay đổi)",
+			}); err != nil {
+				return err
+			}
+		}
 
-	paymentURL, err := vnpay.BuildPaymentURL(s.cfg, vnpay.BuildParams{
-		TxnRef:     txnRef,
-		Amount:     due,
-		OrderInfo:  orderInfo,
-		ClientIP:   clientIP,
-		CreateDate: now,
-		ExpireDate: expiresAt,
+		expiresAt := now.Add(onlineTxnTTL)
+		txnRef := s.newTxnRef(now)
+		paymentURL, err := vnpay.BuildPaymentURL(s.cfg, vnpay.BuildParams{
+			TxnRef:     txnRef,
+			Amount:     due,
+			OrderInfo:  orderInfo,
+			ClientIP:   clientIP,
+			CreateDate: now,
+			ExpireDate: expiresAt,
+		})
+		if err != nil {
+			return err
+		}
+		txn := &entity.OnlinePaymentTxn{
+			InvoiceID: locked.ID,
+			MemberID:  memberID,
+			TxnRef:    txnRef,
+			Amount:    due,
+			Status:    entity.OnlineTxnPending,
+			CreatedAt: now,
+		}
+		if err := s.repo.Create(ctx, txn); err != nil {
+			return err
+		}
+		out = &v1.PaymentURLRes{TxnRef: txnRef, PaymentURL: paymentURL, Amount: due, ExpiresAt: expiresAt}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	txn := &entity.OnlinePaymentTxn{
-		InvoiceID: inv.ID,
-		MemberID:  memberID,
-		TxnRef:    txnRef,
-		Amount:    due,
-		Status:    entity.OnlineTxnPending,
-		CreatedAt: now,
-	}
-	if err := s.repo.Create(ctx, txn); err != nil {
-		return nil, err
-	}
-	return &v1.PaymentURLRes{
-		TxnRef:     txnRef,
-		PaymentURL: paymentURL,
-		Amount:     due,
-		ExpiresAt:  expiresAt,
-	}, nil
+	return out, nil
 }
 
 func (s *onlinePaymentService) CreateInvoiceVNPay(ctx context.Context, invoiceID uint, clientIP string) (*v1.PaymentURLRes, error) {
@@ -182,6 +218,30 @@ func (s *onlinePaymentService) CheckoutSubscription(ctx context.Context, req *v1
 
 	var out *v1.CheckoutSubscriptionRes
 	err = s.tx.WithTx(sellCtx, func(txCtx context.Context) error {
+		// Đã có đơn đăng ký trực tuyến chờ thanh toán cho đúng gói/chi nhánh → dùng lại (không tạo gói PENDING trùng).
+		// Khác mã khuyến mãi → hủy đơn cũ (trả lượt KM, gói cũ chuyển CANCELLED) rồi lập đơn mới.
+		if existing, err := s.repo.FindPortalCheckout(txCtx, member.ID, req.PlanID, branchID); err != nil {
+			return err
+		} else if existing != nil {
+			if strings.EqualFold(strings.TrimSpace(existing.PromotionCode), strings.TrimSpace(req.PromotionCode)) {
+				invEntity, err := s.invoices.FindInvoice(txCtx, existing.InvoiceID)
+				if err != nil {
+					return err
+				}
+				payRes, err := s.createTxn(txCtx, invEntity, member.ID, clientIP)
+				if err != nil {
+					return err
+				}
+				out = &v1.CheckoutSubscriptionRes{
+					SubscriptionID: existing.SubscriptionID, InvoiceID: existing.InvoiceID, InvoiceNo: existing.InvoiceNo,
+					Amount: payRes.Amount, TxnRef: payRes.TxnRef, PaymentURL: payRes.PaymentURL,
+				}
+				return nil
+			}
+			if err := s.invoices.Void(reqctx.WithAuth(txCtx, nil), existing.InvoiceID, "Hội viên đăng ký lại gói trực tuyến với mã khuyến mãi khác"); err != nil {
+				return err
+			}
+		}
 		subDetail, err := s.subscriptions.Sell(txCtx, subv1.SellInput{
 			MemberID:      member.ID,
 			PlanID:        req.PlanID,
@@ -252,13 +312,41 @@ func (s *onlinePaymentService) CheckPromotion(ctx context.Context, req *v1.Check
 	}, nil
 }
 
+// Mã phản hồi IPN theo đặc tả VNPay.
+const (
+	VNPayRspSuccess          = "00"
+	VNPayRspOrderNotFound    = "01"
+	VNPayRspAlreadyConfirmed = "02"
+	VNPayRspInvalidAmount    = "04"
+	VNPayRspInvalidChecksum  = "97"
+	VNPayRspUnknown          = "99"
+)
+
+// VNPayIPNResponseFor đổi lỗi nghiệp vụ của HandleIPN sang phản hồi chuẩn VNPay (RspCode/Message).
+func VNPayIPNResponseFor(err error) *v1.VNPayIPNRes {
+	if err == nil {
+		return &v1.VNPayIPNRes{RspCode: VNPayRspSuccess, Message: "Confirm Success"}
+	}
+	switch gerror.Code(err).Code() {
+	case rescode.PaymentInvalidSignature.Code():
+		return &v1.VNPayIPNRes{RspCode: VNPayRspInvalidChecksum, Message: "Invalid Checksum"}
+	case rescode.NotFound.Code():
+		return &v1.VNPayIPNRes{RspCode: VNPayRspOrderNotFound, Message: "Order not found"}
+	case rescode.PaymentAmountMismatch.Code():
+		return &v1.VNPayIPNRes{RspCode: VNPayRspInvalidAmount, Message: "Invalid amount"}
+	case rescode.PaymentTxnExpired.Code():
+		return &v1.VNPayIPNRes{RspCode: VNPayRspAlreadyConfirmed, Message: "Order already confirmed (transaction expired)"}
+	}
+	return &v1.VNPayIPNRes{RspCode: VNPayRspUnknown, Message: "Unknown error"}
+}
+
 func (s *onlinePaymentService) HandleIPN(ctx context.Context, params map[string]string) (*v1.VNPayIPNRes, error) {
 	if !vnpay.VerifyQuery(s.cfg.HashSecret, params) {
 		return nil, rescode.New(rescode.PaymentInvalidSignature, "Chữ ký VNPay không hợp lệ")
 	}
 	txnRef := strings.TrimSpace(params["vnp_TxnRef"])
 	if txnRef == "" {
-		return nil, rescode.New(rescode.BadRequest, "Thiếu mã giao dịch vnp_TxnRef")
+		return nil, rescode.New(rescode.NotFound, "Thiếu mã giao dịch vnp_TxnRef")
 	}
 
 	var res *v1.VNPayIPNRes
@@ -276,39 +364,89 @@ func (s *onlinePaymentService) HandleIPN(ctx context.Context, params map[string]
 			return rescode.New(rescode.PaymentAmountMismatch, "Số tiền thanh toán không khớp với giao dịch")
 		}
 
-		if txn.Status == entity.OnlineTxnSuccess {
-			res = &v1.VNPayIPNRes{RspCode: "00", Message: "Confirm Success"}
+		switch txn.Status {
+		case entity.OnlineTxnSuccess, entity.OnlineTxnFailed, entity.OnlineTxnNeedsRefund, entity.OnlineTxnRefunded:
+			// VNPay gọi lại IPN cho giao dịch đã xử lý → 02 (Order already confirmed), không ghi trùng.
+			res = &v1.VNPayIPNRes{RspCode: VNPayRspAlreadyConfirmed, Message: "Order already confirmed"}
 			return nil
 		}
 
 		now := s.now()
-		if txn.Status == entity.OnlineTxnExpired || (txn.Status == entity.OnlineTxnPending && !txn.CreatedAt.IsZero() && now.Sub(txn.CreatedAt) > onlineTxnTTL) {
-			if txn.Status == entity.OnlineTxnPending {
-				_ = s.repo.UpdateFields(ctx, txn.ID, map[string]any{"status": entity.OnlineTxnExpired})
-			}
-			return rescode.New(rescode.PaymentTxnExpired, "Giao dịch thanh toán trực tuyến đã hết hạn")
-		}
-
 		rawIPN, _ := json.Marshal(params)
 		rspCode := strings.TrimSpace(params["vnp_ResponseCode"])
 		providerTxn := strings.TrimSpace(params["vnp_TransactionNo"])
 		bankCode := strings.TrimSpace(params["vnp_BankCode"])
 
 		if rspCode != "00" {
-			if err := s.repo.UpdateFields(ctx, txn.ID, map[string]any{
-				"status":          entity.OnlineTxnFailed,
-				"provider_txn_no": providerTxn,
-				"bank_code":       bankCode,
-				"raw_ipn":         datatypes.JSON(rawIPN),
-			}); err != nil {
+			// Thanh toán không thành công: giao dịch PENDING → FAILED; giao dịch đã hết hạn/bị thay thế giữ EXPIRED.
+			fields := map[string]any{"provider_txn_no": providerTxn, "bank_code": bankCode, "raw_ipn": datatypes.JSON(rawIPN)}
+			if txn.Status == entity.OnlineTxnPending {
+				fields["status"] = entity.OnlineTxnFailed
+			}
+			if err := s.repo.UpdateFields(ctx, txn.ID, fields); err != nil {
 				return err
 			}
-			res = &v1.VNPayIPNRes{RspCode: "00", Message: "Confirm Failed Transaction"}
+			res = &v1.VNPayIPNRes{RspCode: VNPayRspSuccess, Message: "Confirm Failed Transaction"}
 			return nil
 		}
 
+		// VNPay xác nhận ĐÃ trừ tiền khách. Kể cả giao dịch đã quá hạn/bị thay thế (IPN đến trễ) cũng phải ghi nhận
+		// tiền – không bao giờ trả lỗi làm mất dấu khoản tiền: ghi vào hóa đơn tối đa số còn nợ, phần còn lại
+		// (hoặc toàn bộ nếu hóa đơn đã thu đủ/đã hủy/gói đã hủy) gắn cờ NEEDS_REFUND để nhân viên hoàn.
+		// IPN là tác vụ hệ thống: KHÔNG gắn người dùng (payload nil = toàn quyền chi nhánh, người thu/actor = NULL).
+		// Không dùng UserID 0 vì sẽ vi phạm FK payments.received_by / audit_logs.actor_id.
+		sysCtx := reqctx.WithAuth(ctx, nil)
+		cur, err := s.invoices.LockInvoice(sysCtx, txn.InvoiceID)
+		if err != nil {
+			return err
+		}
+		var due float64
+		if cur.Status == entity.InvoiceStatusUnpaid || cur.Status == entity.InvoiceStatusPartial {
+			due = max(0, roundMoneyVND(cur.Due()))
+		}
+		record := math.Min(roundMoneyVND(txn.Amount), due)
+		refundReason := ""
+		var inv *entity.Invoice
+		if record > 0 {
+			ref := providerTxn
+			if ref == "" {
+				ref = txn.TxnRef
+			}
+			inv, err = s.invoices.AddPayment(sysCtx, txn.InvoiceID, PaymentInput{
+				Amount:    record,
+				Method:    entity.PaymentVNPay,
+				Reference: ref,
+				Note:      "Thanh toán trực tuyến VNPay (" + txn.TxnRef + ")",
+			})
+			if err != nil {
+				if !onlineIsBusinessErr(err) {
+					return err // lỗi hệ thống → 99, VNPay sẽ gọi lại IPN
+				}
+				// Bị từ chối nghiệp vụ (vd gói đã hủy) → không ghi vào hóa đơn, cần hoàn toàn bộ.
+				refundReason = "Không ghi nhận được vào hóa đơn: " + err.Error()
+				record, inv = 0, nil
+			}
+		}
+		status := entity.OnlineTxnSuccess
+		note := ""
+		excess := roundMoneyVND(txn.Amount - record)
+		if excess > 0 {
+			status = entity.OnlineTxnNeedsRefund
+			switch {
+			case refundReason != "":
+				note = refundReason
+			case record > 0:
+				note = fmt.Sprintf("Khách trả vượt số còn nợ: đã ghi nhận %s vào hóa đơn, cần hoàn %s", formatMoneyVND(record), formatMoneyVND(excess))
+			case cur.Status == entity.InvoiceStatusVoid:
+				note = "Hóa đơn đã bị hủy trước khi nhận tiền VNPay – cần hoàn toàn bộ cho khách"
+			default:
+				note = "Hóa đơn đã được thanh toán đủ trước khi nhận tiền VNPay – cần hoàn toàn bộ cho khách"
+			}
+		}
 		if err := s.repo.UpdateFields(ctx, txn.ID, map[string]any{
-			"status":          entity.OnlineTxnSuccess,
+			"status":          status,
+			"recorded_amount": record,
+			"note":            invoiceTruncate(note, 255),
 			"provider_txn_no": providerTxn,
 			"bank_code":       bankCode,
 			"raw_ipn":         datatypes.JSON(rawIPN),
@@ -317,41 +455,44 @@ func (s *onlinePaymentService) HandleIPN(ctx context.Context, params map[string]
 			return err
 		}
 
-		ref := providerTxn
-		if ref == "" {
-			ref = txn.TxnRef
-		}
-		payCtx := reqctx.WithAuth(ctx, &token.Payload{Roles: []string{consts.RoleOwner}})
-		inv, err := s.invoices.AddPayment(payCtx, txn.InvoiceID, PaymentInput{
-			Amount:    txn.Amount,
-			Method:    entity.PaymentVNPay,
-			Reference: ref,
-			Note:      "Thanh toán trực tuyến VNPay (" + txn.TxnRef + ")",
-		})
-		if err != nil {
-			return err
-		}
-
 		if s.notifier != nil {
+			invNo := cur.InvoiceNo
+			if inv != nil && inv.InvoiceNo != "" {
+				invNo = inv.InvoiceNo
+			}
+			link := fmt.Sprintf("/me/invoices?invoice=%d", txn.InvoiceID)
 			if m, mErr := s.repo.FindMemberByID(ctx, txn.MemberID); mErr == nil && m != nil && m.UserID != nil {
-				_ = s.notifier.Notify(
-					ctx,
-					[]uint{*m.UserID},
-					NotifyPaymentSuccess,
-					"Thanh toán thành công",
-					fmt.Sprintf("Hóa đơn %s (%s) đã được thanh toán qua VNPay.", inv.InvoiceNo, formatMoneyVND(txn.Amount)),
-					fmt.Sprintf("/me/invoices/%d", inv.ID),
-				)
+				if record > 0 {
+					_ = s.notifier.Notify(ctx, []uint{*m.UserID}, NotifyPaymentSuccess, "Thanh toán thành công",
+						fmt.Sprintf("Hóa đơn %s đã ghi nhận %s thanh toán qua VNPay.", invNo, formatMoneyVND(record)), link)
+				}
+				if excess > 0 {
+					_ = s.notifier.Notify(ctx, []uint{*m.UserID}, NotifyPaymentSuccess, "Đã nhận tiền VNPay – sẽ hoàn phần chưa ghi nhận",
+						fmt.Sprintf("Giao dịch %s: %s chưa được ghi vào hóa đơn %s. Phòng tập sẽ liên hệ hoàn tiền cho bạn.", txn.TxnRef, formatMoneyVND(excess), invNo), link)
+				}
+			}
+			if excess > 0 {
+				branchID := cur.BranchID
+				_ = s.notifier.NotifyPermission(ctx, consts.PermInvoiceRefund, &branchID, NotifySystem,
+					"Giao dịch VNPay cần hoàn tiền",
+					fmt.Sprintf("Giao dịch %s (hóa đơn %s): %s.", txn.TxnRef, invNo, note),
+					"/app/payments?status="+entity.OnlineTxnNeedsRefund)
 			}
 		}
 
-		res = &v1.VNPayIPNRes{RspCode: "00", Message: "Confirm Success"}
+		res = &v1.VNPayIPNRes{RspCode: VNPayRspSuccess, Message: "Confirm Success"}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return res, nil
+}
+
+// onlineIsBusinessErr: lỗi nghiệp vụ có mã 4xxxx (từ chối hợp lệ) – khác lỗi hệ thống/DB.
+func onlineIsBusinessErr(err error) bool {
+	c := gerror.Code(err).Code()
+	return c >= 40000 && c < 50000
 }
 
 func (s *onlinePaymentService) VerifyReturn(ctx context.Context, params map[string]string) (*v1.VNPayReturnRes, error) {
@@ -381,6 +522,14 @@ func (s *onlinePaymentService) VerifyReturn(ctx context.Context, params map[stri
 		out.Amount = txn.Amount
 		if inv, invErr := s.invoices.FindInvoice(ctx, txn.InvoiceID); invErr == nil && inv != nil {
 			out.InvoiceNo = inv.InvoiceNo
+		}
+		switch txn.Status {
+		case entity.OnlineTxnNeedsRefund:
+			out.Success = false
+			out.Message = "Hóa đơn đã được xử lý trước đó, phòng tập sẽ liên hệ đối soát hoàn tiền"
+		case entity.OnlineTxnFailed, entity.OnlineTxnExpired:
+			out.Success = false
+			out.Message = "Giao dịch thanh toán không thành công hoặc đã hết hạn"
 		}
 	}
 	return out, nil
@@ -415,6 +564,18 @@ func (s *onlinePaymentService) List(ctx context.Context, req *v1.ListOnlineTxnsR
 			BankCode:      r.BankCode,
 			CreatedAt:     r.CreatedAt,
 			PaidAt:        r.PaidAt,
+			RecordedAmount: func() float64 {
+				if r.RecordedAmount == nil {
+					if r.Status == entity.OnlineTxnSuccess || r.Status == entity.OnlineTxnRefunded {
+						return r.Amount
+					}
+					return 0
+				}
+				return *r.RecordedAmount
+			}(),
+			RefundedAmount: r.RefundedAmount,
+			Refundable:     roundMoneyVND(r.Amount - r.RefundedAmount),
+			Note:           r.Note,
 		}
 	})
 	return dto.NewPageRes(items, total, q), nil

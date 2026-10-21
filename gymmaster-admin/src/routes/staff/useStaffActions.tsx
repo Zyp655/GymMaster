@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { App } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import {
   DeleteOutlined,
   EditOutlined,
@@ -8,12 +9,14 @@ import {
   KeyOutlined,
   LockOutlined,
   UnlockOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 import type { Staff } from '@/api/staff';
 import { PERM, ROLE } from '@/constants/permissions';
 import { usePermission } from '@/hooks/usePermission';
 import { getErrorMessage, showError } from '@/utils/errors';
 import { useStaffAction } from './queries';
+import { isSelfStaff, isStaffGuardError } from './staffGuards';
 
 export interface StaffActionItem {
   key: string;
@@ -34,6 +37,7 @@ export function useStaffActions(handlers: {
 }) {
   const { can, isOwner, user } = usePermission();
   const { message, modal } = App.useApp();
+  const navigate = useNavigate();
   const action = useStaffAction();
   const [pendingId, setPendingId] = useState<number | null>(null);
 
@@ -49,8 +53,15 @@ export function useStaffActions(handlers: {
             : `Đã xóa nhân viên ${r.full_name}`,
       );
     } catch (e) {
-      if (kind === 'delete') {
-        modal.error({ title: 'Không thể xóa nhân viên', content: getErrorMessage(e) });
+      // 403 (quyền cao hơn) / 400 (chính mình): hiện nguyên thông điệp server.
+      if (kind === 'delete' || isStaffGuardError(e)) {
+        modal.error({
+          title:
+            kind === 'delete'
+              ? 'Không thể xóa nhân viên'
+              : 'Không thể cập nhật trạng thái tài khoản',
+          content: getErrorMessage(e),
+        });
       } else {
         showError(e, 'Không thể cập nhật trạng thái tài khoản');
       }
@@ -60,7 +71,18 @@ export function useStaffActions(handlers: {
   };
 
   const itemsFor = (r: Staff): StaffActionItem[] => {
-    const isSelf = r.id === user?.id;
+    // Tài khoản của chính mình: API từ chối sửa/khóa/xóa/đặt lại mật khẩu → chỉ xem + mở Hồ sơ.
+    if (isSelfStaff(r, user?.id)) {
+      return [
+        { key: 'edit', label: 'Xem chi tiết', icon: <EyeOutlined />, onClick: handlers.onEdit },
+        {
+          key: 'profile',
+          label: 'Hồ sơ cá nhân',
+          icon: <UserOutlined />,
+          onClick: () => navigate('/app/profile'),
+        },
+      ];
+    }
     const protectedOwner = !isOwner && r.roles.some((x) => x.role_code === ROLE.OWNER);
     const canUpdate = can(PERM.STAFF_UPDATE) && !protectedOwner;
     const items: StaffActionItem[] = [
@@ -84,7 +106,6 @@ export function useStaffActions(handlers: {
               key: 'lock',
               label: 'Khóa tài khoản',
               icon: <LockOutlined />,
-              disabled: isSelf,
               onClick: () =>
                 modal.confirm({
                   title: `Khóa tài khoản ${r.full_name}?`,
@@ -110,7 +131,6 @@ export function useStaffActions(handlers: {
         label: 'Xóa nhân viên',
         icon: <DeleteOutlined />,
         danger: true,
-        disabled: isSelf,
         onClick: () =>
           modal.confirm({
             title: `Xóa nhân viên ${r.full_name}?`,

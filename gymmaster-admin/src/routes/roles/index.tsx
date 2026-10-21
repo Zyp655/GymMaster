@@ -13,6 +13,7 @@ import { useUrlParams } from '@/hooks/useUrlParams';
 import { getErrorMessage, showError } from '@/utils/errors';
 import { normalizeText } from '@/utils/format';
 import RoleForm from './RoleForm';
+import { canManageRole } from './roleAccess';
 import { useDeleteRole, useRoles } from './queries';
 
 const TYPE_OPTIONS = [
@@ -25,7 +26,7 @@ const TYPE_OPTIONS = [
  * nhưng vẫn dùng FilterBar (giá trị trên URL) để thống nhất trải nghiệm.
  */
 export default function RolesPage() {
-  const { can } = usePermission();
+  const { can, user } = usePermission();
   const { message } = App.useApp();
   const url = useUrlParams();
   const roles = useRoles();
@@ -103,38 +104,42 @@ export default function RolesPage() {
       key: 'actions',
       fixed: 'right',
       width: 88,
-      render: (_, r) => (
-        <Space size={0}>
-          {can(PERM.ROLE_UPDATE) && (
-            <Tooltip title="Sửa">
-              <Button
+      render: (_, r) => {
+        // Ẩn sửa/xóa với vai trò không quản lý được (OWNER, vai trò đang giữ, quyền cao hơn).
+        const manageable = canManageRole(user, r).ok;
+        return (
+          <Space size={0}>
+            {can(PERM.ROLE_UPDATE) && manageable && (
+              <Tooltip title="Sửa">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => openForm(r)}
+                />
+              </Tooltip>
+            )}
+            {!r.is_system && manageable && (
+              <ConfirmButton
+                perm={PERM.ROLE_DELETE}
                 type="text"
                 size="small"
-                icon={<EditOutlined />}
-                onClick={() => openForm(r)}
+                danger
+                icon={<DeleteOutlined />}
+                confirmTitle={`Xóa vai trò ${r.name}?`}
+                confirmContent="Không thể xóa nếu vẫn còn tài khoản giữ vai trò này."
+                onConfirm={() =>
+                  remove.mutateAsync(r.id, {
+                    onSuccess: () => message.success('Đã xóa vai trò'),
+                    onError: (e) => showError(e, 'Không thể xóa vai trò'),
+                  })
+                }
+                aria-label="Xóa"
               />
-            </Tooltip>
-          )}
-          {!r.is_system && (
-            <ConfirmButton
-              perm={PERM.ROLE_DELETE}
-              type="text"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              confirmTitle={`Xóa vai trò ${r.name}?`}
-              confirmContent="Không thể xóa nếu vẫn còn tài khoản giữ vai trò này."
-              onConfirm={() =>
-                remove.mutateAsync(r.id, {
-                  onSuccess: () => message.success('Đã xóa vai trò'),
-                  onError: (e) => showError(e, 'Không thể xóa vai trò'),
-                })
-              }
-              aria-label="Xóa"
-            />
-          )}
-        </Space>
-      ),
+            )}
+          </Space>
+        );
+      },
     },
   ];
 

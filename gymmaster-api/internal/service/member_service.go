@@ -204,6 +204,9 @@ func (s *memberService) prepareInput(ctx context.Context, m *entity.Member, in v
 	m.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	m.IDCard = strings.TrimSpace(in.IDCard)
 	m.Address = strings.TrimSpace(in.Address)
+	if !validImageURLStrict(strings.TrimSpace(in.AvatarURL)) {
+		return rescode.New(rescode.BadRequest, "URL ảnh đại diện không hợp lệ (chỉ chấp nhận http(s) hoặc ảnh đã tải lên)")
+	}
 	m.AvatarURL = strings.TrimSpace(in.AvatarURL)
 	m.EmergencyContactName = strings.TrimSpace(in.EmergencyContactName)
 	m.EmergencyContactPhone = emergencyPhone
@@ -387,6 +390,10 @@ func (s *memberService) CreatePortalAccount(ctx context.Context, id uint, email,
 		return nil, err
 	}
 	email = strings.ToLower(strings.TrimSpace(email))
+	// Cùng chính sách mật khẩu với nhân viên/đăng ký/đổi/đặt lại (≥ 8 ký tự, có cả chữ và số).
+	if err := ValidateNewPassword(password); err != nil {
+		return nil, err
+	}
 	pwHash, err := hash.HashPassword(password)
 	if err != nil {
 		return nil, err

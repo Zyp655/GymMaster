@@ -4,7 +4,7 @@ import type { ListParams, Page } from './types';
 /** Check-in / ra vào – hợp đồng `docs/api/checkin.md`. */
 
 export type CheckinResult = 'ALLOWED' | 'DENIED';
-export type CheckinMethod = 'QR' | 'MANUAL';
+export type CheckinMethod = 'QR' | 'MANUAL' | 'DEVICE';
 export type DenyReason =
   | ''
   | 'QR_INVALID'
@@ -78,6 +78,10 @@ export interface CheckinItem {
   deny_message: string;
   staff_id: number | null;
   staff_name: string | null;
+  /** Lượt vào bằng vé ngày / vé khách – khi đó member_id = 0. */
+  day_pass_id?: number;
+  /** Lượt vào bằng vé tập thử – khi đó member_id = 0. */
+  trial_pass_id?: number;
   note: string;
 }
 
@@ -166,8 +170,10 @@ export const CHECKIN_RESULT_OPTIONS = [
 export const CHECKIN_METHOD_LABEL: Record<CheckinMethod, string> = {
   QR: 'Quét QR',
   MANUAL: 'Thủ công',
+  DEVICE: 'Thiết bị / Kiosk',
 };
 export const CHECKIN_METHOD_OPTIONS = [
   { value: 'QR', label: 'Quét QR' },
   { value: 'MANUAL', label: 'Thủ công' },
+  { value: 'DEVICE', label: 'Thiết bị / Kiosk' },
 ];

@@ -54,6 +54,18 @@ func (fakeStaffRoleRepo) FindByCode(_ context.Context, code string) (*entity.Rol
 	return nil, gorm.ErrRecordNotFound
 }
 
+// FindByID trả vai trò kèm quyền: vai trò MANAGER (id 2) có "payroll.manage" để kiểm tra chống leo thang.
+func (fakeStaffRoleRepo) FindByID(_ context.Context, id uint) (*entity.Role, error) {
+	r := staffRoleByID(id)
+	if r.ID == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if r.Code == consts.RoleManager {
+		r.Permissions = []entity.Permission{{Code: "payroll.manage"}}
+	}
+	return &r, nil
+}
+
 type fakeStaffAudit struct{ actions []string }
 
 func (f *fakeStaffAudit) Log(_ context.Context, action, _ string, _ uint, _, _ any) {
@@ -279,6 +291,20 @@ func TestStaffCreate_RoleRules(t *testing.T) {
 	}
 }
 
+func TestStaffCreate_NonOwnerCannotAssignRoleWithExtraPermissions(t *testing.T) {
+	f := newStaffFixture()
+	// Người thao tác không có payroll.manage → không được gán vai trò MANAGER (có payroll.manage).
+	_, err := f.svc.Create(managerCtx(), newStaffReq("x@gm.vn", v1.RoleAssignment{RoleCode: "MANAGER", BranchID: staffU(1)}))
+	require.Error(t, err)
+	assert.Equal(t, rescode.PermissionDenied.Code(), codeOf(err))
+
+	// Có đủ quyền thì gán được.
+	ctx := reqctx.WithAuth(context.Background(), &token.Payload{UserID: 2, Roles: []string{consts.RoleManager},
+		Permissions: []string{"payroll.manage"}, BranchIDs: []uint{1}})
+	_, err = f.svc.Create(ctx, newStaffReq("y@gm.vn", v1.RoleAssignment{RoleCode: "MANAGER", BranchID: staffU(1)}))
+	require.NoError(t, err)
+}
+
 func TestStaffCreate_OwnerMayAssignGlobalRoles(t *testing.T) {
 	f := newStaffFixture()
 	res, err := f.svc.Create(ownerCtx(), newStaffReq("x@gm.vn",
@@ -451,4 +477,89 @@ func TestStaffTextArrayRoundTrip(t *testing.T) {
 	assert.Empty(t, out)
 	require.NoError(t, out.Scan("{Yoga,Boxing}"))
 	assert.Equal(t, entity.StaffTextArray{"Yoga", "Boxing"}, out)
+}
+
+// Hồi quy QA vòng 2: chiếm tài khoản nhân viên có quyền cao hơn qua đặt lại mật khẩu/đổi email/khóa.
+func TestStaffManage_TargetPermissionsMustBeSubsetOfCaller(t *testing.T) {
+	// Quản lý 5 cùng chi nhánh 1: vai trò MANAGER có payroll.manage – quản lý 2 (không có quyền này) không được đụng tới.
+	newF := func() *staffFixture {
+		f := newStaffFixture()
+		f.repo.add(5, "ql2@gm.vn", entity.UserRole{RoleID: 2, BranchID: staffU(1)})
+		return f
+	}
+	actions := map[string]func(f *staffFixture, ctx context.Context) error{
+		"reset-password": func(f *staffFixture, ctx context.Context) error { return f.svc.ResetPassword(ctx, 5, "Takeover123") },
+		"lock":           func(f *staffFixture, ctx context.Context) error { _, err := f.svc.Lock(ctx, 5); return err },
+		"unlock":         func(f *staffFixture, ctx context.Context) error { _, err := f.svc.Unlock(ctx, 5); return err },
+		"update-email": func(f *staffFixture, ctx context.Context) error {
+			_, err := f.svc.Update(ctx, 5, v1.StaffInput{FullName: "QL2", Email: "attacker@gm.vn", Position: StaffPositionManager})
+			return err
+		},
+		"delete": func(f *staffFixture, ctx context.Context) error { return f.svc.Delete(ctx, 5) },
+		"assign-roles": func(f *staffFixture, ctx context.Context) error {
+			_, err := f.svc.AssignRoles(ctx, 5, []v1.RoleAssignment{{RoleCode: "TRAINER", BranchID: staffU(1)}})
+			return err
+		},
+	}
+	for name, act := range actions {
+		t.Run(name, func(t *testing.T) {
+			f := newF()
+			err := act(f, managerCtx())
+			require.Error(t, err)
+			assert.Equal(t, rescode.PermissionDenied.Code(), codeOf(err))
+			assert.Equal(t, "ql2@gm.vn", f.repo.users[5].Email)
+			assert.Empty(t, f.repo.users[5].PasswordHash)
+			assert.Empty(t, f.audit.actions)
+
+			// Vai trò khác (không đồng cấp) có đủ quyền của nhân viên đích → được phép.
+			hr := reqctx.WithAuth(context.Background(), &token.Payload{UserID: 2, Roles: []string{"HR_ADMIN"},
+				Permissions: []string{"payroll.manage"}, BranchIDs: []uint{1}})
+			require.NoError(t, act(newF(), hr))
+
+			// Quản lý đồng cấp, dù có đủ quyền, cũng không được thao tác trên quản lý khác.
+			peer := reqctx.WithAuth(context.Background(), &token.Payload{UserID: 2, Roles: []string{consts.RoleManager},
+				Permissions: []string{"payroll.manage"}, BranchIDs: []uint{1}})
+			err = act(newF(), peer)
+			assert.Equal(t, rescode.PermissionDenied.Code(), codeOf(err))
+		})
+	}
+}
+
+func TestStaffManage_BranchScopeAndSelf(t *testing.T) {
+	t.Run("nhân viên có vai trò ở chi nhánh khác → không reset/khóa được, gán vai trò trong chi nhánh vẫn được", func(t *testing.T) {
+		f := newStaffFixture()
+		f.repo.users[3].UserRoles = append(f.repo.users[3].UserRoles,
+			entity.UserRole{UserID: 3, RoleID: 4, BranchID: staffU(2), Role: staffRoleByID(4)})
+		err := f.svc.ResetPassword(managerCtx(), 3, "Takeover123")
+		require.Error(t, err)
+		assert.Equal(t, rescode.PermissionDenied.Code(), codeOf(err))
+		_, err = f.svc.Lock(managerCtx(), 3)
+		assert.Equal(t, rescode.PermissionDenied.Code(), codeOf(err))
+		_, err = f.svc.AssignRoles(managerCtx(), 3, []v1.RoleAssignment{{RoleCode: "TRAINER", BranchID: staffU(1)}})
+		require.NoError(t, err)
+		// OWNER không bị giới hạn.
+		require.NoError(t, f.svc.ResetPassword(ownerCtx(), 3, "NewPass123"))
+	})
+	t.Run("không tự thao tác trên chính mình qua màn quản trị", func(t *testing.T) {
+		f := newStaffFixture()
+		err := f.svc.ResetPassword(managerCtx(), 2, "NewPass123")
+		assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+		err = f.svc.ResetPassword(ownerCtx(), 1, "NewPass123")
+		assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "OWNER cũng phải dùng đổi mật khẩu (cần mật khẩu cũ)")
+		_, err = f.svc.Unlock(managerCtx(), 2)
+		assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+		_, err = f.svc.Update(managerCtx(), 2, v1.StaffInput{FullName: "QL", Email: "manager@gm.vn", Position: StaffPositionManager})
+		assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+		_, err = f.svc.Update(ownerCtx(), 1, v1.StaffInput{FullName: "Chủ", Email: "owner@gm.vn", Position: StaffPositionManager})
+		require.NoError(t, err, "OWNER được tự sửa hồ sơ")
+	})
+	t.Run("mật khẩu mới phải có chữ và số", func(t *testing.T) {
+		f := newStaffFixture()
+		err := f.svc.ResetPassword(ownerCtx(), 3, "chiluchuthoi")
+		assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+		req := newStaffReq("z@gm.vn", v1.RoleAssignment{RoleCode: "TRAINER", BranchID: staffU(1)})
+		req.Password = "12345678"
+		_, err = f.svc.Create(ownerCtx(), req)
+		assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+	})
 }

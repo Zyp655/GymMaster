@@ -1,9 +1,21 @@
 import type { MetadataRoute } from 'next';
 import { getSiteUrl } from '@/env';
+import { landingApi } from '@/features/landing/api';
+import { postHref } from '@/features/landing/post-slug';
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = getSiteUrl();
   const now = new Date();
+  // Bài viết đã xuất bản (API công khai chỉ trả PUBLISHED); lỗi API → bỏ qua phần bài viết.
+  const postsRes = await landingApi.posts();
+  const postEntries: MetadataRoute.Sitemap = postsRes.ok
+    ? postsRes.data.map(post => ({
+        url: `${baseUrl}${postHref(post.slug)}`,
+        lastModified: new Date(post.published_at || post.created_at),
+        changeFrequency: 'monthly' as const,
+        priority: 0.7,
+      }))
+    : [];
 
   return [
     {
@@ -36,5 +48,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: 'monthly',
       priority: 0.6,
     },
+    ...postEntries,
   ];
 }

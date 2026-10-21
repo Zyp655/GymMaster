@@ -61,15 +61,17 @@ type TrialLeadFormValues = z.infer<ReturnType<typeof createTrialLeadSchema>>;
 export function TrialLeadSection({
   branches,
   plans,
+  referralCode = null,
 }: {
   branches: PublicBranch[];
   plans: PublicPlan[];
+  /** Mã giới thiệu từ ?ref= (đọc phía server để HTML server/client khớp nhau). */
+  referralCode?: string | null;
 }) {
   const t = useTranslations('common.landing.trial');
   const tv = useTranslations('common.validation');
   const toastError = useToastApiError();
   const [submitted, setSubmitted] = useState(false);
-  const [referralCode, setReferralCode] = useState<string | null>(null);
 
   const schema = useMemo(() => createTrialLeadSchema(looseT(tv)), [tv]);
   const form = useForm<TrialLeadFormValues>({
@@ -85,18 +87,13 @@ export function TrialLeadSection({
   });
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const ref = params.get('ref')?.trim();
-    if (ref) {
-      setReferralCode(ref);
-      const currentNote = form.getValues('note').trim();
-      const prefix = t('referralNotePrefix', { code: ref });
-      if (!currentNote.includes(ref)) {
-        form.setValue('note', currentNote ? `${prefix} ${currentNote}` : prefix);
-      }
+    if (!referralCode) return;
+    const currentNote = form.getValues('note').trim();
+    const prefix = t('referralNotePrefix', { code: referralCode });
+    if (!currentNote.includes(referralCode)) {
+      form.setValue('note', currentNote ? `${prefix} ${currentNote}` : prefix);
     }
-  }, [form, t]);
+  }, [form, referralCode, t]);
 
   const onSubmit = form.handleSubmit(async values => {
     try {
@@ -125,11 +122,7 @@ export function TrialLeadSection({
     <section id="tap-thu" className="scroll-mt-16 border-t border-line bg-canvas">
       <div className="mx-auto grid max-w-6xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-2 lg:items-center">
         <div className="grid gap-4">
-          <SectionHeading
-            eyebrow={t('eyebrow')}
-            title={t('title')}
-            subtitle={t('subtitle')}
-          />
+          <SectionHeading eyebrow={t('eyebrow')} title={t('title')} subtitle={t('subtitle')} />
           {referralCode ? (
             <div>
               <Badge variant="brand">{t('referralBadge', { code: referralCode })}</Badge>
@@ -222,7 +215,7 @@ export function TrialLeadSection({
                       <FormItem>
                         <FormLabel>{t('branchLabel')}</FormLabel>
                         <Select
-                          value={field.value ? String(field.value) : undefined}
+                          value={field.value ? String(field.value) : ''}
                           onValueChange={v => field.onChange(Number(v))}
                         >
                           <FormControl>

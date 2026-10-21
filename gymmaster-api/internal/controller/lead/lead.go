@@ -6,6 +6,7 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 
 	v1 "gymmaster-api/api/lead/v1"
+	"gymmaster-api/internal/pkg/clientip"
 	"gymmaster-api/internal/service"
 )
 
@@ -32,7 +33,7 @@ func NewPublicV1(svc service.LeadService) *PublicControllerV1 {
 func (c *PublicControllerV1) CreateLead(ctx context.Context, req *v1.PublicCreateLeadReq) (*v1.PublicCreateLeadRes, error) {
 	ip := ""
 	if r := g.RequestFromCtx(ctx); r != nil {
-		ip = r.GetClientIp()
+		ip = clientip.Real(r)
 	}
 	return c.svc.PublicCreateLead(ctx, req, ip)
 }
@@ -57,6 +58,10 @@ func (c *AdminControllerV1) CreateLead(ctx context.Context, req *v1.CreateLeadRe
 
 func (c *AdminControllerV1) UpdateLead(ctx context.Context, req *v1.UpdateLeadReq) (*v1.UpdateLeadRes, error) {
 	return c.svc.UpdateLead(ctx, req)
+}
+
+func (c *AdminControllerV1) UpdateLeadStatus(ctx context.Context, req *v1.UpdateLeadStatusReq) (*v1.UpdateLeadStatusRes, error) {
+	return c.svc.UpdateLeadStatus(ctx, req.ID, req.Status)
 }
 
 func (c *AdminControllerV1) DeleteLead(ctx context.Context, req *v1.DeleteLeadReq) (*v1.DeleteLeadRes, error) {

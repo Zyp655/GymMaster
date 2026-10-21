@@ -5,14 +5,7 @@ import type {
   PublicClassSchedule,
   PublicClassSchedulesRaw,
 } from './types';
-
-export function extractPublicSchedules(
-  raw: PublicClassSchedulesRaw | null | undefined,
-): PublicClassSchedule[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  return Array.isArray(raw.items) ? raw.items : [];
-}
+import { normalizePublicSchedules } from './schedule';
 
 export async function getPublicClassSchedules(params: {
   branch_id?: number;
@@ -23,7 +16,7 @@ export async function getPublicClassSchedules(params: {
     auth: false,
     query: params,
   });
-  return extractPublicSchedules(raw);
+  return normalizePublicSchedules(raw);
 }
 
 export async function createPublicLead(

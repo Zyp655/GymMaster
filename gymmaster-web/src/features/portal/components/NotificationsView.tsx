@@ -18,43 +18,14 @@ import {
   useReadAllNotificationsMutation,
   useReadNotificationMutation,
 } from '../queries';
+import { mapPortalNotificationLink, NOTIFICATION_FALLBACK_ROUTE } from '../notification-links';
 import type { Notification } from '../types';
 import { PortalPageHeader } from './PortalPageHeader';
 
-/**
- * Chuyển link trong thông báo backend (/member/...) sang đường dẫn cổng hội viên (/me/...).
- */
-export function mapPortalNotificationLink(rawLink: string): string | null {
-  const link = rawLink.trim();
-  if (!link) return null;
-  if (link.startsWith('/member/bookings') || link.startsWith('/member/classes')) {
-    return '/me/classes';
-  }
-  if (link.startsWith('/member/pt-sessions') || link.startsWith('/member/pt-contracts')) {
-    return '/me/pt';
-  }
-  if (link.startsWith('/member/subscriptions') || link.startsWith('/member/freezes')) {
-    return '/me/subscriptions';
-  }
-  if (link.startsWith('/member/invoices')) {
-    return '/me/invoices';
-  }
-  if (link.startsWith('/member/qr') || link.startsWith('/member/checkins')) {
-    return '/me/qr';
-  }
-  if (link.startsWith('/member/body-metrics')) {
-    return '/me/progress';
-  }
-  if (link.startsWith('/member/profile')) {
-    return '/me';
-  }
-  if (link.startsWith('/member/')) {
-    return link.replace(/^\/member\//, '/me/');
-  }
-  if (link.startsWith('/me')) {
-    return link;
-  }
-  return null;
+/** Đích điều hướng khi bấm thông báo; link không hợp lệ/không tồn tại → ở lại trang thông báo. */
+function openableRoute(link: string): string | null {
+  const route = mapPortalNotificationLink(link);
+  return route && route !== NOTIFICATION_FALLBACK_ROUTE ? route : null;
 }
 
 export function NotificationsView() {
@@ -88,7 +59,7 @@ export function NotificationsView() {
         toastError(error);
       }
     }
-    const targetRoute = mapPortalNotificationLink(item.link);
+    const targetRoute = openableRoute(item.link);
     if (targetRoute) {
       router.push(targetRoute);
     }
@@ -152,7 +123,7 @@ export function NotificationsView() {
       ) : (
         <div className="grid gap-3">
           {displayedItems.map(item => {
-            const targetRoute = mapPortalNotificationLink(item.link);
+            const targetRoute = openableRoute(item.link);
             return (
               <Card
                 key={item.id}

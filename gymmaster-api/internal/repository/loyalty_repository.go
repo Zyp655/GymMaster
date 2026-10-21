@@ -13,6 +13,16 @@ import (
 	"gymmaster-api/internal/storage/postgres"
 )
 
+// LoyaltyLedgerRow: dòng ledger kèm hội viên, chi nhánh chính và người thao tác.
+type LoyaltyLedgerRow struct {
+	entity.LoyaltyLedger
+	MemberCode    string
+	MemberName    string
+	BranchID      uint
+	BranchName    string
+	CreatedByName string
+}
+
 type (
 	ChallengeRow struct {
 		entity.Challenge
@@ -66,6 +76,8 @@ type (
 
 		CreateLedger(ctx context.Context, l *entity.LoyaltyLedger) error
 		ListMemberLedgers(ctx context.Context, memberID uint, limit int) ([]entity.LoyaltyLedger, error)
+		// ListLedgers: lịch sử biến động điểm (admin) – lọc theo hội viên, chi nhánh chính của hội viên (branchIDs nil = mọi chi nhánh), lý do.
+		ListLedgers(ctx context.Context, q dto.Query, branchIDs []uint, memberID uint, reason string) ([]LoyaltyLedgerRow, int64, error)
 		CreatePromotion(ctx context.Context, p *entity.Promotion) error
 
 		TopMembersByPoints(ctx context.Context, limit int) ([]LeaderboardRow, error)
@@ -375,6 +387,37 @@ func (r *loyaltyRepository) UpdateMemberReferralCode(ctx context.Context, member
 
 func (r *loyaltyRepository) CreateLedger(ctx context.Context, l *entity.LoyaltyLedger) error {
 	return postgres.Conn(ctx, r.db).Create(l).Error
+}
+
+func (r *loyaltyRepository) ListLedgers(ctx context.Context, q dto.Query, branchIDs []uint, memberID uint, reason string) ([]LoyaltyLedgerRow, int64, error) {
+	tx := postgres.Conn(ctx, r.db).Table("loyalty_ledgers l").
+		Select(`l.*, m.member_code, m.full_name AS member_name, m.home_branch_id AS branch_id,
+			COALESCE(b.name, '') AS branch_name, COALESCE(u.full_name, '') AS created_by_name`).
+		Joins("JOIN members m ON m.id = l.member_id").
+		Joins("LEFT JOIN branches b ON b.id = m.home_branch_id").
+		Joins("LEFT JOIN users u ON u.id = l.created_by")
+	if branchIDs != nil {
+		tx = tx.Where("m.home_branch_id IN ?", branchIDs)
+	}
+	if memberID > 0 {
+		tx = tx.Where("l.member_id = ?", memberID)
+	}
+	if reason != "" {
+		tx = tx.Where("l.reason = ?", reason)
+	}
+	if q.Keyword != "" {
+		like := "%" + q.Keyword + "%"
+		tx = tx.Where("m.full_name ILIKE ? OR m.member_code ILIKE ? OR l.note ILIKE ?", like, like, like)
+	}
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []LoyaltyLedgerRow
+	if err := q.Paginate(tx).Scan(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
 }
 
 func (r *loyaltyRepository) ListMemberLedgers(ctx context.Context, memberID uint, limit int) ([]entity.LoyaltyLedger, error) {

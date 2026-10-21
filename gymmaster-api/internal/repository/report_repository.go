@@ -385,8 +385,8 @@ SELECT rev.*,
 	(SELECT count(*) FROM pt_sessions ps WHERE ps.status IN ('SCHEDULED','COMPLETED') AND ps.start_at >= @today_start AND ps.start_at < @tomorrow` + reportBranch("ps.branch_id", b) + `) AS pt_sessions_today,
 	(SELECT count(*) FROM pt_sessions ps WHERE ps.status = 'COMPLETED' AND ps.start_at >= @today_start AND ps.start_at < @tomorrow` + reportBranch("ps.branch_id", b) + `) AS pt_completed_today,
 	(SELECT count(*) FROM subscription_freezes f JOIN subscriptions s ON s.id = f.subscription_id WHERE f.status = 'PENDING'` + reportBranch("s.branch_id", b) + `) AS pending_freezes,
-	(SELECT count(*) FROM stock_levels sl JOIN products pr ON pr.id = sl.product_id
-	  WHERE pr.deleted_at IS NULL AND pr.status = 'ACTIVE' AND pr.min_stock > 0 AND sl.quantity <= pr.min_stock` + reportBranch("sl.branch_id", b) + `) AS low_stock
+	(SELECT count(*) FROM stock_levels sl JOIN products p ON p.id = sl.product_id JOIN branches b ON b.id = sl.branch_id
+	  WHERE ` + LowStockCond("p", "sl", "b") + reportBranch("sl.branch_id", b) + `) AS low_stock
 FROM rev`
 	args := ReportScope{BranchIDs: b}.args(map[string]any{
 		"today_start": p.TodayStart, "tomorrow": p.TomorrowStart, "month_start": p.MonthStart,
@@ -401,12 +401,12 @@ FROM rev`
 
 func (r *reportRepository) LowStock(ctx context.Context, branchIDs []uint, limit int) ([]ReportLowStockRow, error) {
 	q := `
-SELECT pr.id AS product_id, pr.sku, pr.name, sl.branch_id, b.name AS branch_name, sl.quantity, pr.min_stock
+SELECT p.id AS product_id, p.sku, p.name, sl.branch_id, b.name AS branch_name, sl.quantity, p.min_stock
 FROM stock_levels sl
-JOIN products pr ON pr.id = sl.product_id
+JOIN products p ON p.id = sl.product_id
 JOIN branches b ON b.id = sl.branch_id
-WHERE pr.deleted_at IS NULL AND pr.status = 'ACTIVE' AND pr.min_stock > 0 AND sl.quantity <= pr.min_stock` + reportBranch("sl.branch_id", branchIDs) + `
-ORDER BY (sl.quantity::numeric / pr.min_stock), pr.name
+WHERE ` + LowStockCond("p", "sl", "b") + reportBranch("sl.branch_id", branchIDs) + `
+ORDER BY (sl.quantity::numeric / p.min_stock), p.name
 LIMIT @limit`
 	var rows []ReportLowStockRow
 	err := r.raw(ctx, &rows, q, ReportScope{BranchIDs: branchIDs}.args(map[string]any{"limit": limit}))
@@ -640,32 +640,44 @@ ORDER BY pt_completed DESC, classes_taught DESC, u.full_name`
 	return rows, err
 }
 
-// ProductSales: dòng PRODUCT của hóa đơn đã thu (PAID/PARTIAL) lập trong kỳ. Doanh thu đã trừ giảm giá cấp hóa đơn
-// (phân bổ theo total/subtotal). Giá vốn lấy từ thẻ kho SALE của chính hóa đơn (unit_cost), không có thì dùng products.cost_price.
+// ProductSales: dòng PRODUCT của hóa đơn đã thu (PAID/PARTIAL) lập trong kỳ. invoice_items.amount đã gồm phần giảm giá
+// cấp hóa đơn được phân bổ (Σ amount = invoices.total) nên KHÔNG nhân thêm hệ số total/subtotal.
+// Hàng đã trả lại (SALE_RETURN của chính hóa đơn) được trừ khỏi số lượng, doanh thu (theo tỷ lệ như khi hoàn tiền) và giá vốn.
+// Giá vốn lấy từ thẻ kho SALE − SALE_RETURN của hóa đơn (unit_cost), không có thì dùng products.cost_price.
 func (r *reportRepository) ProductSales(ctx context.Context, s ReportScope) ([]ReportProductRow, error) {
 	q := `
 WITH items AS (
-	SELECT i.id AS invoice_id, ii.ref_id AS product_id, SUM(ii.quantity) AS qty,
-		SUM(ii.amount * CASE WHEN i.subtotal > 0 THEN i.total / i.subtotal ELSE 0 END) AS revenue
+	SELECT i.id AS invoice_id, ii.ref_id AS product_id, SUM(ii.quantity) AS qty, SUM(ii.amount) AS amount
 	FROM invoice_items ii
 	JOIN invoices i ON i.id = ii.invoice_id
 	WHERE ii.item_type = 'PRODUCT' AND ii.ref_id IS NOT NULL
 	  AND i.status IN ('PAID','PARTIAL') AND i.issued_at >= @start AND i.issued_at < @end` + reportBranch("i.branch_id", s.BranchIDs) + `
 	GROUP BY 1, 2
-), costs AS (
-	SELECT st.reference_id AS invoice_id, st.product_id, SUM(-st.quantity * st.unit_cost) AS cost
+), moves AS (
+	SELECT st.reference_id AS invoice_id, st.product_id,
+		COALESCE(SUM(st.quantity) FILTER (WHERE st.type = 'SALE_RETURN'), 0) AS returned,
+		COALESCE(SUM(-st.quantity * st.unit_cost) FILTER (WHERE st.type = 'SALE'), 0) AS sale_cost,
+		COALESCE(SUM(st.quantity * st.unit_cost) FILTER (WHERE st.type = 'SALE_RETURN'), 0) AS return_cost
 	FROM stock_transactions st
-	WHERE st.type = 'SALE' AND st.unit_cost > 0 AND st.reference_id IN (SELECT invoice_id FROM items)
+	WHERE st.type IN ('SALE','SALE_RETURN') AND st.reference_type = 'INVOICE'
+	  AND st.reference_id IN (SELECT invoice_id FROM items)
 	GROUP BY 1, 2
+), net AS (
+	SELECT it.invoice_id, it.product_id,
+		GREATEST(it.qty - COALESCE(m.returned, 0), 0) AS qty,
+		CASE WHEN it.qty > 0 THEN it.amount * GREATEST(it.qty - COALESCE(m.returned, 0), 0) / it.qty ELSE 0 END AS revenue,
+		CASE WHEN COALESCE(m.sale_cost, 0) > 0 THEN m.sale_cost - m.return_cost END AS cost
+	FROM items it
+	LEFT JOIN moves m ON m.invoice_id = it.invoice_id AND m.product_id = it.product_id
 )
 SELECT p.id AS product_id, p.sku, p.name, p.category_id, COALESCE(pc.name, '') AS category_name,
-	SUM(it.qty) AS quantity, SUM(it.revenue) AS revenue,
-	SUM(COALESCE(c.cost, it.qty * p.cost_price)) AS cost
-FROM items it
-JOIN products p ON p.id = it.product_id
+	SUM(n.qty) AS quantity, SUM(n.revenue) AS revenue,
+	SUM(COALESCE(n.cost, n.qty * p.cost_price)) AS cost
+FROM net n
+JOIN products p ON p.id = n.product_id
 LEFT JOIN product_categories pc ON pc.id = p.category_id
-LEFT JOIN costs c ON c.invoice_id = it.invoice_id AND c.product_id = it.product_id
 GROUP BY p.id, pc.name
+HAVING SUM(n.qty) > 0
 ORDER BY revenue DESC, p.name`
 	var rows []ReportProductRow
 	err := r.raw(ctx, &rows, q, s.args(nil))
@@ -742,10 +754,18 @@ LIMIT @limit`
 
 func (r *reportRepository) ExportCheckins(ctx context.Context, s ReportScope, limit int) ([]ReportCheckinExportRow, error) {
 	q := `
-SELECT c.checked_in_at, c.checked_out_at, m.member_code, m.full_name AS member_name, b.name AS branch_name,
-	c.method, c.result, c.deny_reason, COALESCE(u.full_name, '') AS staff_name
+SELECT c.checked_in_at, c.checked_out_at,
+	COALESCE(m.member_code, CASE WHEN c.day_pass_id IS NOT NULL THEN COALESCE(dp.qr_token, 'DP-' || c.day_pass_id)
+		WHEN c.trial_pass_id IS NOT NULL THEN COALESCE(tp.qr_token, 'TRIAL-' || c.trial_pass_id) ELSE '' END) AS member_code,
+	COALESCE(m.full_name, CASE WHEN c.day_pass_id IS NOT NULL
+			THEN dp.buyer_name || CASE WHEN dp.type = 'GUEST' THEN ' (Khách mời)' ELSE ' (Vé ngày)' END
+		WHEN c.trial_pass_id IS NOT NULL THEN l.full_name || ' (Tập thử)' END, '') AS member_name,
+	b.name AS branch_name, c.method, c.result, c.deny_reason, COALESCE(u.full_name, '') AS staff_name
 FROM checkins c
-JOIN members m ON m.id = c.member_id
+LEFT JOIN members m ON m.id = c.member_id
+LEFT JOIN day_passes dp ON dp.id = c.day_pass_id
+LEFT JOIN trial_passes tp ON tp.id = c.trial_pass_id
+LEFT JOIN leads l ON l.id = tp.lead_id
 JOIN branches b ON b.id = c.branch_id
 LEFT JOIN users u ON u.id = c.staff_id
 WHERE c.checked_in_at >= @start AND c.checked_in_at < @end` + reportBranch("c.branch_id", s.BranchIDs) + `

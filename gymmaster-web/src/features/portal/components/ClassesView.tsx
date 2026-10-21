@@ -39,6 +39,7 @@ import {
   useMemberReviewsQuery,
 } from '../queries';
 import { PortalPageHeader } from './PortalPageHeader';
+import { PaginationControls } from './PaginationControls';
 import { BookingStatusBadge } from './PortalStatusBadge';
 import { ReviewActionOrBadge, ReviewDialog, type ReviewTarget } from './ReviewDialog';
 import { ScheduleTabs } from './ScheduleTabs';
@@ -49,7 +50,19 @@ interface CancelTarget {
   startAt: string;
 }
 
-export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedule' | 'bookings' } = {}) {
+const BOOKINGS_PAGE_SIZE = 10;
+
+const pageCount = (total: number) => Math.max(1, Math.ceil(total / BOOKINGS_PAGE_SIZE));
+
+/** API trả toàn bộ lịch đã đặt → phân trang phía client (10 mục/trang). */
+function paginate<T>(items: T[], page: number, size: number): T[] {
+  const safePage = Math.min(Math.max(1, page), Math.max(1, Math.ceil(items.length / size)));
+  return items.slice((safePage - 1) * size, safePage * size);
+}
+
+export function ClassesView({
+  defaultTab = 'schedule',
+}: { defaultTab?: 'schedule' | 'bookings' } = {}) {
   const t = useTranslations('portal.classes');
   const toastError = useToastApiError();
 
@@ -69,6 +82,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
     !branchesQuery.isLoading,
   );
   const bookingsQuery = useBookingsQuery();
+  const [bookingsPage, setBookingsPage] = useState(1);
   const reviewsQuery = useMemberReviewsQuery();
 
   const bookMutation = useBookClassMutation();
@@ -136,7 +150,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
                   <Skeleton className="h-10 w-full rounded-xl" />
                 ) : (
                   <Select
-                    value={effectiveBranchId ? String(effectiveBranchId) : undefined}
+                    value={effectiveBranchId ? String(effectiveBranchId) : ''}
                     onValueChange={v => setBranchId(Number(v))}
                   >
                     <SelectTrigger>
@@ -154,11 +168,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
               </div>
               <div className="grid gap-1.5">
                 <Label>{t('fromLabel')}</Label>
-                <Input
-                  type="date"
-                  value={fromDate}
-                  onChange={e => setFromDate(e.target.value)}
-                />
+                <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
               </div>
               <div className="grid gap-1.5">
                 <Label>{t('toLabel')}</Label>
@@ -171,6 +181,19 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
               </div>
             </div>
 
+            {classesQuery.data?.booking_blocked_until ? (
+              <div
+                role="alert"
+                className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-caption text-red-700"
+              >
+                <InformationCircleIcon className="size-4 shrink-0" />
+                <span>
+                  {t('blockedBanner', {
+                    time: formatDateTime(classesQuery.data.booking_blocked_until),
+                  })}
+                </span>
+              </div>
+            ) : null}
             {classesQuery.data ? (
               <div className="flex items-center gap-2 rounded-xl bg-canvas px-3 py-2 text-caption text-secondary">
                 <InformationCircleIcon className="size-4 shrink-0 text-brand-600" />
@@ -211,8 +234,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
                   Boolean(myBooking) &&
                   (myBooking?.status === 'BOOKED' || myBooking?.status === 'WAITLIST') &&
                   dayjs(item.cancel_deadline).isAfter(dayjs());
-                const isBookingThis =
-                  bookMutation.isPending && bookingScheduleId === item.id;
+                const isBookingThis = bookMutation.isPending && bookingScheduleId === item.id;
 
                 return (
                   <Card key={item.id} className="justify-between gap-4">
@@ -265,7 +287,9 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
                             {t('waitlistCount', { count: item.waitlist_count })}
                           </p>
                         ) : null}
-                        {item.note ? <p className="text-caption text-secondary">{item.note}</p> : null}
+                        {item.note ? (
+                          <p className="text-caption text-secondary">{item.note}</p>
+                        ) : null}
                       </div>
                     </div>
 
@@ -312,7 +336,9 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
                           onClick={() => void handleBook(item.id)}
                         >
                           {!item.bookable
-                            ? t('notBookable')
+                            ? classesQuery.data?.booking_blocked_until
+                              ? t('blockedBtn')
+                              : t('notBookable')
                             : isBookingThis
                               ? t('booking')
                               : item.available_slots > 0
@@ -337,10 +363,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
             </div>
           ) : bookingsQuery.isError || !bookingsQuery.data ? (
             <Card>
-              <LoadError
-                error={bookingsQuery.error}
-                onRetry={() => void bookingsQuery.refetch()}
-              />
+              <LoadError error={bookingsQuery.error} onRetry={() => void bookingsQuery.refetch()} />
             </Card>
           ) : bookingsQuery.data.length === 0 ? (
             <Card>
@@ -352,7 +375,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
             </Card>
           ) : (
             <div className="grid gap-4">
-              {bookingsQuery.data.map(booking => (
+              {paginate(bookingsQuery.data, bookingsPage, BOOKINGS_PAGE_SIZE).map(booking => (
                 <Card
                   key={booking.id}
                   className={cn(
@@ -415,6 +438,14 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
                   ) : null}
                 </Card>
               ))}
+              {bookingsQuery.data.length > BOOKINGS_PAGE_SIZE ? (
+                <PaginationControls
+                  page={Math.min(bookingsPage, pageCount(bookingsQuery.data.length))}
+                  totalPage={pageCount(bookingsQuery.data.length)}
+                  total={bookingsQuery.data.length}
+                  onPageChange={setBookingsPage}
+                />
+              ) : null}
             </div>
           )}
         </div>
@@ -437,10 +468,7 @@ export function ClassesView({ defaultTab = 'schedule' }: { defaultTab?: 'schedul
         onConfirm={handleConfirmCancel}
       />
 
-      <ReviewDialog
-        target={reviewTarget}
-        onOpenChange={open => !open && setReviewTarget(null)}
-      />
+      <ReviewDialog target={reviewTarget} onOpenChange={open => !open && setReviewTarget(null)} />
     </div>
   );
 }

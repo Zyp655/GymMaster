@@ -1,8 +1,27 @@
 // Package rescode định nghĩa mã lỗi nghiệp vụ.
 //
-// Quy ước: mã 5 chữ số, HTTP status = code / 100 (xem middleware.Response).
+// Quy ước: mã 5 chữ số; trường `code` trong body JSON luôn là mã nghiệp vụ này (frontend dựa vào nó).
+// HTTP status được suy ra bằng HTTPStatus (xem bảng bên dưới) – luôn là status chuẩn của HTTP.
 // Dải mã theo module: 400xx-409xx dùng chung, 41xxx subscription, 42xxx check-in,
-// 43xxx booking, 44xxx thanh toán, 45xxx POS/tồn kho.
+// 43xxx lịch PT/booking, 44xxx thanh toán, 45xxx POS/tồn kho, 46xxx thiết bị & tủ đồ, 47xxx lương & ca thu ngân.
+//
+// Bảng ánh xạ mã nghiệp vụ → HTTP status:
+//
+//	400xx              → 400 Bad Request
+//	401xx              → 401 Unauthorized
+//	403xx              → 403 Forbidden
+//	404xx              → 404 Not Found
+//	409xx              → 409 Conflict
+//	429xx              → 429 Too Many Requests
+//	41xxx subscription → 409 Conflict             (trạng thái gói không cho phép thao tác)
+//	42xxx check-in     → 403 Forbidden            (bị từ chối vào cửa: chưa ký HĐ, ngoài giờ, nợ trả góp, nghỉ lễ)
+//	43xxx lịch PT      → 409 Conflict             (ngoài lịch rảnh HLV, HLV nghỉ phép)
+//	44xxx thanh toán   → 400 Bad Request          (sai chữ ký, lệch số tiền, giao dịch hết hạn)
+//	45xxx POS/tồn kho  → 409 Conflict
+//	46xxx thiết bị/tủ  → 409 Conflict             (thiết bị offline, tủ đã được thuê)
+//	47xxx lương/ca     → 47001 → 400 (kỳ lương không hợp lệ); 47002/47003 → 409 (trạng thái ca thu ngân)
+//	4xxxx khác         → 400 Bad Request
+//	5xxxx              → 500 Internal Server Error
 package rescode
 
 import (
@@ -45,16 +64,55 @@ var (
 	TrainerOnLeave        = gcode.New(43006, "TRAINER_ON_LEAVE", nil)
 
 	// 46xxx: Thiết bị ra vào & Tủ đồ (Sprint 18–19)
-	DeviceOfflineError   = gcode.New(46001, "DEVICE_OFFLINE", nil)
-	LockerAlreadyRented  = gcode.New(46002, "LOCKER_ALREADY_RENTED", nil)
+	DeviceOfflineError  = gcode.New(46001, "DEVICE_OFFLINE", nil)
+	LockerAlreadyRented = gcode.New(46002, "LOCKER_ALREADY_RENTED", nil)
 
 	// 47xxx: Lương, chi phí & đối soát ca (Sprint 20–21)
-	PayrollPeriodInvalid = gcode.New(47001, "PAYROLL_PERIOD_INVALID", nil)
+	PayrollPeriodInvalid   = gcode.New(47001, "PAYROLL_PERIOD_INVALID", nil)
 	CashSessionAlreadyOpen = gcode.New(47002, "CASH_SESSION_ALREADY_OPEN", nil)
-	CashSessionClosed    = gcode.New(47003, "CASH_SESSION_CLOSED", nil)
+	CashSessionClosed      = gcode.New(47003, "CASH_SESSION_CLOSED", nil)
 
 	Internal = gcode.New(50000, "INTERNAL", nil)
 )
+
+// HTTPStatus trả HTTP status chuẩn cho mã nghiệp vụ 5 chữ số (xem bảng ở đầu package).
+// ok=false nếu code không phải mã nghiệp vụ 5 chữ số (10000–59999).
+func HTTPStatus(code int) (status int, ok bool) {
+	if code < 10000 || code > 59999 {
+		return 0, false
+	}
+	if code >= 50000 {
+		return 500, true
+	}
+	switch code / 100 {
+	case 400:
+		return 400, true
+	case 401:
+		return 401, true
+	case 403:
+		return 403, true
+	case 404:
+		return 404, true
+	case 409:
+		return 409, true
+	case 429:
+		return 429, true
+	}
+	switch code / 1000 {
+	case 41, 43, 45, 46:
+		return 409, true
+	case 42:
+		return 403, true
+	case 44:
+		return 400, true
+	case 47:
+		if code == PayrollPeriodInvalid.Code() {
+			return 400, true
+		}
+		return 409, true
+	}
+	return 400, true
+}
 
 // New tạo lỗi có mã nghiệp vụ và thông điệp hiển thị cho người dùng.
 func New(code gcode.Code, msg string) error {

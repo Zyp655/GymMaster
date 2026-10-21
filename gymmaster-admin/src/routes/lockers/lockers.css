@@ -1,0 +1,57 @@
+/* Ô tủ đồ – màu theo trạng thái, có biến thể chế độ tối (App.tsx đặt data-theme trên <html>). */
+:root {
+  --locker-available-bg: #f0fdf4;
+  --locker-available-border: #86efac;
+  --locker-available-text: #166534;
+  --locker-occupied-bg: #fff7ed;
+  --locker-occupied-border: #fdba74;
+  --locker-occupied-text: #9a3412;
+  --locker-rented-bg: #eff6ff;
+  --locker-rented-border: #93c5fd;
+  --locker-rented-text: #1e40af;
+  --locker-broken-bg: #fef2f2;
+  --locker-broken-border: #fca5a5;
+  --locker-broken-text: #991b1b;
+}
+
+:root[data-theme='dark'] {
+  --locker-available-bg: rgba(74, 222, 128, 0.1);
+  --locker-available-border: rgba(74, 222, 128, 0.45);
+  --locker-available-text: #4ade80;
+  --locker-occupied-bg: rgba(249, 115, 22, 0.12);
+  --locker-occupied-border: rgba(251, 146, 60, 0.5);
+  --locker-occupied-text: #fb923c;
+  --locker-rented-bg: rgba(96, 165, 250, 0.12);
+  --locker-rented-border: rgba(96, 165, 250, 0.5);
+  --locker-rented-text: #93c5fd;
+  --locker-broken-bg: rgba(248, 113, 113, 0.12);
+  --locker-broken-border: rgba(248, 113, 113, 0.5);
+  --locker-broken-text: #fca5a5;
+}
+
+.locker-tile {
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 104px;
+}
+
+.locker-tile__meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--gm-text-secondary);
+}
+
+.locker-tile__member {
+  font-weight: 600;
+  color: var(--gm-ink);
+}
+
+.locker-tile__note {
+  font-size: 11px;
+  margin-top: 2px;
+}

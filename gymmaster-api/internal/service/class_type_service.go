@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -80,6 +81,9 @@ func (s *classTypeService) Get(ctx context.Context, id uint) (*v1.ClassType, err
 
 func (s *classTypeService) Create(ctx context.Context, in v1.ClassTypeInput) (*v1.ClassType, error) {
 	in = classTypeNormalize(in)
+	if !classTypeColorRe.MatchString(in.Color) {
+		return nil, rescode.New(rescode.BadRequest, classTypeColorMsg)
+	}
 	if err := s.checkCode(ctx, in.Code, 0); err != nil {
 		return nil, err
 	}
@@ -101,6 +105,9 @@ func (s *classTypeService) Update(ctx context.Context, id uint, in v1.ClassTypeI
 	}
 	before := *t
 	in = classTypeNormalize(in)
+	if !classTypeColorRe.MatchString(in.Color) {
+		return nil, rescode.New(rescode.BadRequest, classTypeColorMsg)
+	}
 	if err := s.checkCode(ctx, in.Code, id); err != nil {
 		return nil, err
 	}
@@ -153,6 +160,11 @@ func (s *classTypeService) checkCode(ctx context.Context, code string, excludeID
 	}
 	return nil
 }
+
+// classTypeColorRe: màu hiển thị dạng #RRGGBB.
+var classTypeColorRe = regexp.MustCompile(`^#[0-9A-F]{6}$`)
+
+const classTypeColorMsg = "Màu phải có dạng #RRGGBB (ví dụ #F97316)"
 
 func classTypeNormalize(in v1.ClassTypeInput) v1.ClassTypeInput {
 	in.Code = strings.ToUpper(strings.TrimSpace(in.Code))

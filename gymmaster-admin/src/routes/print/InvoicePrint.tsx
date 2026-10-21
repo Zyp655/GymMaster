@@ -109,6 +109,12 @@ function Paper({ data, size }: { data: InvoicePrintData; size: PaperSize }) {
               <td className="num">−{formatMoney(inv.discount)}</td>
             </tr>
           )}
+          {(inv.write_off_amount ?? 0) > 0 && (
+            <tr>
+              <td>Xóa nợ do hủy gói</td>
+              <td className="num">−{formatMoney(inv.write_off_amount)}</td>
+            </tr>
+          )}
           <tr className="strong">
             <td>Tổng cộng</td>
             <td className="num">{formatMoney(inv.total)}</td>

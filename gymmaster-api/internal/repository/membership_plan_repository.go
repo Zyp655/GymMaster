@@ -86,7 +86,8 @@ func (r *membershipPlanRepository) Create(ctx context.Context, p *entity.Members
 func (r *membershipPlanRepository) Update(ctx context.Context, p *entity.MembershipPlan) error {
 	return postgres.Conn(ctx, r.db).Model(p).
 		Select("code", "name", "description", "type", "duration_days", "session_count", "price", "access_scope",
-			"max_freeze_days", "max_freeze_times", "includes_classes", "transfer_fee", "status", "sort_order", "updated_by").
+			"max_freeze_days", "max_freeze_times", "includes_classes", "transfer_fee", "guest_passes_per_month", "access_hours",
+			"status", "sort_order", "updated_by").
 		Updates(p).Error
 }
 

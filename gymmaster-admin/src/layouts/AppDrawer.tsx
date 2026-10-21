@@ -14,7 +14,18 @@ export function AppDrawer({ open, onClose }: { open: boolean; onClose: () => voi
       styles={{ body: { padding: 0 } }}
     >
       <Link to="/app/dashboard" className="app-logo" onClick={onClose}>
-        <img src="/logo.svg" alt="GymMaster" style={{ height: 36 }} />
+        <img
+          className="app-logo__img--light"
+          src="/logo.svg"
+          alt="GymMaster"
+          style={{ height: 36 }}
+        />
+        <img
+          className="app-logo__img--dark"
+          src="/logo-dark.svg"
+          alt="GymMaster"
+          style={{ height: 36 }}
+        />
       </Link>
       <AppSidebar onNavigate={onClose} />
     </Drawer>

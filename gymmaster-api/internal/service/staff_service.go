@@ -134,6 +134,9 @@ func (s *staffService) Create(ctx context.Context, req *v1.CreateReq) (*v1.Staff
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateNewPassword(req.Password); err != nil {
+		return nil, err
+	}
 	pwHash, err := hash.HashPassword(req.Password)
 	if err != nil {
 		return nil, err
@@ -183,7 +186,12 @@ func (s *staffService) Create(ctx context.Context, req *v1.CreateReq) (*v1.Staff
 }
 
 func (s *staffService) Update(ctx context.Context, id uint, raw v1.StaffInput) (*v1.Staff, error) {
-	u, err := s.findManageable(ctx, id)
+	// Tự sửa hồ sơ của mình (lương, chức vụ, email...) qua màn quản trị chỉ dành cho OWNER;
+	// nhân viên khác dùng trang hồ sơ cá nhân.
+	if staffIsSelf(ctx, id) && !reqctx.HasRole(ctx, consts.RoleOwner) {
+		return nil, rescode.New(rescode.BadRequest, "Không thể tự sửa tài khoản của chính mình tại đây, vui lòng dùng trang hồ sơ cá nhân")
+	}
+	u, err := s.findManageable(ctx, id, staffScopeAccount)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +255,7 @@ func (s *staffService) AssignRoles(ctx context.Context, id uint, in []v1.RoleAss
 	if staffIsSelf(ctx, id) {
 		return nil, rescode.New(rescode.BadRequest, "Không thể tự thay đổi vai trò của chính mình")
 	}
-	u, err := s.findManageable(ctx, id)
+	u, err := s.findManageable(ctx, id, staffScopeRoles)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +305,7 @@ func (s *staffService) Lock(ctx context.Context, id uint) (*v1.Staff, error) {
 	if staffIsSelf(ctx, id) {
 		return nil, rescode.New(rescode.BadRequest, "Không thể tự khóa tài khoản của chính mình")
 	}
-	u, err := s.findManageable(ctx, id)
+	u, err := s.findManageable(ctx, id, staffScopeAccount)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +326,10 @@ func (s *staffService) Lock(ctx context.Context, id uint) (*v1.Staff, error) {
 }
 
 func (s *staffService) Unlock(ctx context.Context, id uint) (*v1.Staff, error) {
-	u, err := s.findManageable(ctx, id)
+	if staffIsSelf(ctx, id) {
+		return nil, rescode.New(rescode.BadRequest, "Không thể tự mở khóa tài khoản của chính mình")
+	}
+	u, err := s.findManageable(ctx, id, staffScopeAccount)
 	if err != nil {
 		return nil, err
 	}
@@ -330,10 +341,14 @@ func (s *staffService) Unlock(ctx context.Context, id uint) (*v1.Staff, error) {
 }
 
 func (s *staffService) ResetPassword(ctx context.Context, id uint, newPassword string) error {
-	if len(newPassword) < 8 {
-		return rescode.New(rescode.BadRequest, "Mật khẩu phải có ít nhất 8 ký tự")
+	if staffIsSelf(ctx, id) {
+		// Đặt lại không cần mật khẩu cũ → tự đổi mật khẩu phải qua "Đổi mật khẩu" (xác minh mật khẩu hiện tại).
+		return rescode.New(rescode.BadRequest, "Không thể tự đặt lại mật khẩu của chính mình, vui lòng dùng chức năng đổi mật khẩu")
 	}
-	if _, err := s.findManageable(ctx, id); err != nil {
+	if err := ValidateNewPassword(newPassword); err != nil {
+		return err
+	}
+	if _, err := s.findManageable(ctx, id, staffScopeAccount); err != nil {
 		return err
 	}
 	pwHash, err := hash.HashPassword(newPassword)
@@ -357,7 +372,7 @@ func (s *staffService) Delete(ctx context.Context, id uint) error {
 	if staffIsSelf(ctx, id) {
 		return rescode.New(rescode.BadRequest, "Không thể tự xóa tài khoản của chính mình")
 	}
-	u, err := s.findManageable(ctx, id)
+	u, err := s.findManageable(ctx, id, staffScopeAccount)
 	if err != nil {
 		return err
 	}
@@ -466,17 +481,67 @@ func (s *staffService) findVisible(ctx context.Context, id uint) (*entity.StaffA
 	return nil, rescode.New(rescode.NotFound, "Không tìm thấy nhân viên")
 }
 
-// findManageable: ngoài phạm vi chi nhánh, chỉ OWNER mới thao tác được trên tài khoản OWNER.
-func (s *staffService) findManageable(ctx context.Context, id uint) (*entity.StaffAccount, error) {
+// staffManageScope: phạm vi kiểm tra chi nhánh của findManageable.
+type staffManageScope int
+
+const (
+	// staffScopeAccount: thao tác ở mức TÀI KHOẢN (sửa thông tin/email, khóa, mở khóa, đặt lại mật khẩu, xóa)
+	// ảnh hưởng mọi chi nhánh của nhân viên → người gắn chi nhánh chỉ được làm khi MỌI vai trò của nhân viên
+	// đều thuộc chi nhánh mình quản lý.
+	staffScopeAccount staffManageScope = iota
+	// staffScopeRoles: gán vai trò chỉ thay các vai trò trong chi nhánh của người thao tác (vai trò ngoài
+	// phạm vi được giữ nguyên) → chỉ cần nhân viên có ít nhất một vai trò trong chi nhánh của mình.
+	staffScopeRoles
+)
+
+// findManageable kiểm tra người thao tác (không phải OWNER) có được quản lý tài khoản nhân viên id không:
+//   - không thao tác trên tài khoản OWNER, hay nhân viên đồng cấp (giữ một vai trò mà người thao tác cũng giữ);
+//   - tập quyền (hợp quyền mọi vai trò) của nhân viên phải nằm trong tập quyền của người thao tác,
+//     nếu không một quản lý có thể đặt lại mật khẩu/đổi email rồi chiếm tài khoản có quyền cao hơn;
+//   - nhân viên phải thuộc phạm vi chi nhánh của người thao tác (xem staffManageScope).
+func (s *staffService) findManageable(ctx context.Context, id uint, scope staffManageScope) (*entity.StaffAccount, error) {
 	u, err := s.findVisible(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !reqctx.HasRole(ctx, consts.RoleOwner) {
+	if reqctx.HasRole(ctx, consts.RoleOwner) {
+		return u, nil
+	}
+	for _, ur := range u.UserRoles {
+		if ur.Role.Code == consts.RoleOwner {
+			return nil, rescode.New(rescode.PermissionDenied, "Chỉ chủ trung tâm mới được thao tác trên tài khoản chủ trung tâm")
+		}
+		// Đồng cấp (cùng giữ một vai trò, vd. hai quản lý) không quản lý tài khoản của nhau – cùng quy tắc với
+		// ensureCanManageRole (không sửa vai trò mình đang giữ).
+		if reqctx.HasRole(ctx, ur.Role.Code) {
+			return nil, rescode.New(rescode.PermissionDenied,
+				"Không thể thao tác trên tài khoản nhân viên đồng cấp (cùng vai trò "+ur.Role.Name+"), vui lòng liên hệ chủ trung tâm")
+		}
+	}
+	if scope == staffScopeAccount && reqctx.AllowedBranches(ctx) != nil {
 		for _, ur := range u.UserRoles {
-			if ur.Role.Code == consts.RoleOwner {
-				return nil, rescode.New(rescode.PermissionDenied, "Chỉ chủ trung tâm mới được thao tác trên tài khoản chủ trung tâm")
+			if ur.BranchID == nil || !reqctx.CanAccessBranch(ctx, *ur.BranchID) {
+				return nil, rescode.New(rescode.PermissionDenied,
+					"Nhân viên này có vai trò ngoài chi nhánh bạn quản lý, vui lòng liên hệ chủ trung tâm")
 			}
+		}
+	}
+	seen := map[uint]bool{}
+	for _, ur := range u.UserRoles {
+		if seen[ur.RoleID] {
+			continue
+		}
+		seen[ur.RoleID] = true
+		role, err := s.roleRepo.FindByID(ctx, ur.RoleID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		if len(missingPermissions(ctx, role.Permissions)) > 0 {
+			return nil, rescode.New(rescode.PermissionDenied,
+				"Bạn không thể thao tác trên tài khoản nhân viên có quyền vượt quá quyền của bạn")
 		}
 	}
 	return u, nil
@@ -516,6 +581,18 @@ func (s *staffService) resolveRoles(ctx context.Context, in []v1.RoleAssignment)
 				return nil, rescode.New(rescode.BadRequest, fmt.Sprintf("Vai trò %s không tồn tại", code))
 			}
 			return nil, err
+		}
+		// Chống leo thang đặc quyền: người không phải OWNER chỉ gán được vai trò có tập quyền
+		// nằm trong tập quyền của chính mình.
+		if !isOwner && code != consts.RoleOwner {
+			full, err := s.roleRepo.FindByID(ctx, role.ID)
+			if err != nil {
+				return nil, err
+			}
+			if len(missingPermissions(ctx, full.Permissions)) > 0 {
+				return nil, rescode.New(rescode.PermissionDenied, fmt.Sprintf(
+					"Bạn không thể gán vai trò %s vì vai trò này có quyền vượt quá quyền của bạn", role.Name))
+			}
 		}
 		branchID := a.BranchID
 		if branchID != nil && *branchID == 0 {

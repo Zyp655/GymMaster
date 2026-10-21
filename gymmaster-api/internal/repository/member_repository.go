@@ -146,8 +146,8 @@ func (r *memberRepository) List(ctx context.Context, q dto.Query, f MemberListFi
 		Joins(memberSubLateral).
 		Where("m.deleted_at IS NULL")
 	if q.Keyword != "" {
-		kw := "%" + q.Keyword + "%"
-		phoneKw := "%" + normalizePhoneKeyword(q.Keyword) + "%"
+		kw := likeContains(q.Keyword)
+		phoneKw := likeContains(normalizePhoneKeyword(q.Keyword))
 		tx = tx.Where("m.full_name ILIKE ? OR m.phone LIKE ? OR m.member_code ILIKE ? OR m.email ILIKE ?", kw, phoneKw, kw, kw)
 	}
 	if f.BranchIDs != nil {
@@ -202,8 +202,8 @@ func normalizePhoneKeyword(kw string) string {
 func (r *memberRepository) Options(ctx context.Context, keyword string, branchIDs []uint, limit int) ([]entity.Member, error) {
 	tx := postgres.Conn(ctx, r.db).Model(&entity.Member{})
 	if keyword != "" {
-		kw := "%" + keyword + "%"
-		tx = tx.Where("full_name ILIKE ? OR phone LIKE ? OR member_code ILIKE ?", kw, "%"+normalizePhoneKeyword(keyword)+"%", kw)
+		kw := likeContains(keyword)
+		tx = tx.Where("full_name ILIKE ? OR phone LIKE ? OR member_code ILIKE ?", kw, likeContains(normalizePhoneKeyword(keyword)), kw)
 	}
 	if branchIDs != nil {
 		tx = tx.Where("home_branch_id IN ?", branchIDs)

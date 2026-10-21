@@ -80,9 +80,13 @@ export default function PortalModal({
           rules={[
             { required: true, message: 'Vui lòng nhập mật khẩu' },
             { min: 8, max: 72, message: 'Mật khẩu dài 8–72 ký tự' },
+            {
+              pattern: /^(?=.*\p{L})(?=.*\d).+$/u,
+              message: 'Mật khẩu phải có ít nhất 8 ký tự, gồm cả chữ và số',
+            },
           ]}
         >
-          <Input.Password autoComplete="new-password" placeholder="Tối thiểu 8 ký tự" />
+          <Input.Password autoComplete="new-password" placeholder="Tối thiểu 8 ký tự, gồm chữ và số" />
         </Form.Item>
       </Form>
     </Modal>

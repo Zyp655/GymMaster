@@ -5,6 +5,7 @@ import { PERM, ROLE } from '@/constants/permissions';
 import { usePermission } from '@/hooks/usePermission';
 import { getErrorMessage, setFormError, showError } from '@/utils/errors';
 import PermissionPicker from './PermissionPicker';
+import { canManageRole, grantablePermissions } from './roleAccess';
 import { usePermissions, useSaveRole } from './queries';
 
 interface FormValues {
@@ -24,13 +25,15 @@ export interface RoleFormProps {
 export default function RoleForm({ open, record, onClose }: RoleFormProps) {
   const [form] = Form.useForm<FormValues>();
   const { message } = App.useApp();
-  const { can } = usePermission();
+  const { can, user } = usePermission();
   const perms = usePermissions(open);
   const save = useSaveRole();
 
   const isEdit = !!record;
   const isOwner = record?.code === ROLE.OWNER;
-  const readOnly = isEdit ? !can(PERM.ROLE_UPDATE) : !can(PERM.ROLE_CREATE);
+  // Khớp API: ngoài quyền role.update còn phải "quản lý được" vai trò này (chống leo thang).
+  const manage = isEdit ? canManageRole(user, record) : { ok: true, reason: null };
+  const readOnly = isEdit ? !can(PERM.ROLE_UPDATE) || !manage.ok : !can(PERM.ROLE_CREATE);
 
   useEffect(() => {
     if (!open) return;
@@ -72,6 +75,7 @@ export default function RoleForm({ open, record, onClose }: RoleFormProps) {
   };
 
   const allCodes = perms.data?.map((p) => p.code) ?? [];
+  const grantable = grantablePermissions(user, allCodes);
 
   return (
     <Modal
@@ -160,6 +164,15 @@ export default function RoleForm({ open, record, onClose }: RoleFormProps) {
           </Col>
         </Row>
 
+        {isEdit && can(PERM.ROLE_UPDATE) && manage.reason && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="Chỉ xem"
+            description={manage.reason}
+          />
+        )}
         <Form.Item label="Phân quyền" required={false} style={{ marginBottom: 0 }}>
           {isOwner && (
             <Alert
@@ -182,7 +195,11 @@ export default function RoleForm({ open, record, onClose }: RoleFormProps) {
             <PermissionPicker permissions={perms.data ?? []} value={allCodes} disabled />
           ) : (
             <Form.Item name="permissions" noStyle>
-              <PermissionPicker permissions={perms.data ?? []} disabled={readOnly} />
+              <PermissionPicker
+                permissions={perms.data ?? []}
+                disabled={readOnly}
+                grantable={grantable}
+              />
             </Form.Item>
           )}
         </Form.Item>

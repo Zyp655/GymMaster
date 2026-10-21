@@ -1,13 +1,14 @@
 /* Báo cáo + dashboard */
 
+/* Màu dùng biến CSS sáng/tối (assets/css/custom.css: :root / :root[data-theme='dark']) – không cố định trắng/đen. */
 .rp-card-title {
   font-weight: 600;
-  color: #111827;
+  color: var(--gm-ink);
 }
 
 .rp-filter {
-  background: #fff;
-  border: 1px solid #eceff3;
+  background: var(--gm-surface);
+  border: 1px solid var(--gm-border);
   border-radius: 10px;
   padding: 12px;
   margin-bottom: 16px;
@@ -27,7 +28,7 @@
 }
 
 .rp-tab-head__note {
-  color: #6b7280;
+  color: var(--gm-text-secondary);
   font-size: 13px;
 }
 
@@ -58,7 +59,7 @@
 
 .rp-heat__hour {
   font-size: 10.5px;
-  color: #9ca3af;
+  color: var(--gm-text-secondary);
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -66,7 +67,7 @@
 .rp-heat__dow {
   font-size: 12px;
   font-weight: 600;
-  color: #4b5563;
+  color: var(--gm-tone-slate-fg);
 }
 
 .rp-heat__legend {
@@ -76,7 +77,7 @@
   gap: 3px;
   margin-top: 10px;
   font-size: 11.5px;
-  color: #6b7280;
+  color: var(--gm-text-secondary);
 }
 
 .rp-heat__legend i {
@@ -112,14 +113,14 @@
 }
 
 .rp-legend__label {
-  color: #4b5563;
+  color: var(--gm-tone-slate-fg);
   flex: 1;
   min-width: 0;
 }
 
 .rp-legend__value {
   font-weight: 600;
-  color: #111827;
+  color: var(--gm-ink);
   font-variant-numeric: tabular-nums;
 }
 
@@ -133,19 +134,23 @@
 
 .rp-delta__suffix {
   font-weight: 400;
-  color: #6b7280;
+  color: var(--gm-text-secondary);
 }
 
 .rp-delta--up {
-  color: #12805c;
+  color: var(--gm-tone-green-fg);
 }
 
 .rp-delta--down {
   color: #c0392b;
 }
 
+:root[data-theme='dark'] .rp-delta--down {
+  color: #f87171;
+}
+
 .rp-delta--flat {
-  color: #6b7280;
+  color: var(--gm-text-secondary);
 }
 
 /* ---- dashboard */
@@ -167,12 +172,17 @@
   background: #fffaf5;
 }
 
+:root[data-theme='dark'] .db-kpi-alert .ant-card {
+  border-color: rgba(249, 115, 22, 0.45) !important;
+  background: var(--gm-tone-orange-bg);
+}
+
 .db-rank {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 0;
-  border-bottom: 1px solid #f1f3f6;
+  border-bottom: 1px solid var(--gm-border);
 }
 
 .db-rank:last-child {
@@ -188,14 +198,14 @@
   justify-content: center;
   font-size: 12px;
   font-weight: 700;
-  background: #f1f3f6;
-  color: #4b5563;
+  background: var(--gm-tone-slate-bg);
+  color: var(--gm-tone-slate-fg);
   flex: 0 0 auto;
 }
 
 .db-rank__no--top {
-  background: #fff1e6;
-  color: #c2410c;
+  background: var(--gm-tone-orange-bg);
+  color: var(--gm-tone-orange-fg);
 }
 
 .db-rank__main {
@@ -205,7 +215,7 @@
 
 .db-rank__name {
   font-weight: 600;
-  color: #111827;
+  color: var(--gm-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -213,7 +223,7 @@
 
 .db-rank__meta {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--gm-text-secondary);
 }
 
 .db-rank__value {
@@ -226,7 +236,7 @@
   display: flex;
   gap: 10px;
   padding: 8px 0;
-  border-bottom: 1px solid #f1f3f6;
+  border-bottom: 1px solid var(--gm-border);
   cursor: pointer;
 }
 
@@ -235,7 +245,7 @@
 }
 
 .db-activity:hover .db-activity__text {
-  color: #0a3150;
+  color: var(--gm-tone-navy-fg);
 }
 
 .db-activity__dot {
@@ -248,13 +258,13 @@
 
 .db-activity__text {
   font-size: 13px;
-  color: #374151;
+  color: var(--gm-ink);
   line-height: 20px;
 }
 
 .db-activity__time {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--gm-text-secondary);
 }
 
 .db-shortcut {
@@ -270,8 +280,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #fff1e6;
-  color: #c2410c;
+  background: var(--gm-tone-orange-bg);
+  color: var(--gm-tone-orange-fg);
   font-size: 17px;
   flex: 0 0 auto;
 }

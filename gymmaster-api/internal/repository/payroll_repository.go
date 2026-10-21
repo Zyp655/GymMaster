@@ -351,3 +351,20 @@ func (r *payrollRepository) ListPayslipsByStaff(ctx context.Context, staffID uin
 		Scan(&rows).Error
 	return rows, err
 }
+
+// StaffBranchStatus kiểm tra nhân viên chấm công: exists = tài khoản nhân viên (không phải chỉ là hội viên)
+// còn hoạt động; inBranch = có vai trò tại chi nhánh branchID hoặc vai trò toàn hệ thống (branch_id NULL).
+// (Không nằm trong interface PayrollRepository để các fake cũ vẫn biên dịch; service dùng qua type assertion.)
+func (r *payrollRepository) StaffBranchStatus(ctx context.Context, staffID, branchID uint) (exists, inBranch bool, err error) {
+	var row struct {
+		Total    int64
+		InBranch int64
+	}
+	err = postgres.Conn(ctx, r.db).Table("users u").
+		Select("COUNT(*) AS total, COUNT(*) FILTER (WHERE ur.branch_id = ? OR ur.branch_id IS NULL) AS in_branch", branchID).
+		Joins("JOIN user_roles ur ON ur.user_id = u.id").
+		Joins("JOIN roles r ON r.id = ur.role_id").
+		Where("u.id = ? AND u.deleted_at IS NULL AND u.status = 'ACTIVE' AND r.code <> 'MEMBER'", staffID).
+		Scan(&row).Error
+	return row.Total > 0, row.InBranch > 0, err
+}

@@ -80,6 +80,7 @@ type (
 		FindFoodLogByID(ctx context.Context, id uint) (*entity.FoodLog, error)
 		CreateFoodLog(ctx context.Context, l *entity.FoodLog) error
 		DeleteFoodLog(ctx context.Context, id uint) error
+		UpdateFoodLog(ctx context.Context, l *entity.FoodLog) error
 
 		ListAnnouncements(ctx context.Context, q dto.Query, branchID uint) ([]AnnouncementRow, int64, error)
 		ListActiveAnnouncements(ctx context.Context, branchID uint, now time.Time) ([]AnnouncementRow, error)
@@ -300,6 +301,11 @@ func (r *engagementRepository) FindFoodLogByID(ctx context.Context, id uint) (*e
 
 func (r *engagementRepository) CreateFoodLog(ctx context.Context, l *entity.FoodLog) error {
 	return postgres.Conn(ctx, r.db).Create(l).Error
+}
+
+func (r *engagementRepository) UpdateFoodLog(ctx context.Context, l *entity.FoodLog) error {
+	return postgres.Conn(ctx, r.db).Model(&entity.FoodLog{}).Where("id = ?", l.ID).
+		Updates(map[string]any{"food_id": l.FoodID, "qty": l.Qty, "meal": l.Meal}).Error
 }
 
 func (r *engagementRepository) DeleteFoodLog(ctx context.Context, id uint) error {

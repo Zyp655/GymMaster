@@ -740,6 +740,29 @@ func workoutParsePerformedAt(s string, now time.Time) (time.Time, error) {
 	return time.Time{}, rescode.New(rescode.BadRequest, "Thời gian tập luyện không hợp lệ")
 }
 
+func (s *workoutService) memberOwnsPlanItem(ctx context.Context, memberID, planItemID uint) (bool, error) {
+	plans, err := s.repo.ListMemberPlans(ctx, memberID)
+	if err != nil || len(plans) == 0 {
+		return false, err
+	}
+	planIDs := make([]uint, 0, len(plans))
+	for _, p := range plans {
+		planIDs = append(planIDs, p.ID)
+	}
+	_, itemsByDay, err := s.repo.LoadPlanDetails(ctx, planIDs)
+	if err != nil {
+		return false, err
+	}
+	for _, items := range itemsByDay {
+		for _, it := range items {
+			if it.ID == planItemID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (s *workoutService) CreateWorkoutLog(ctx context.Context, req *v1.CreateWorkoutLogReq) (*v1.WorkoutLogItem, error) {
 	m, err := s.currentMember(ctx)
 	if err != nil {
@@ -747,6 +770,15 @@ func (s *workoutService) CreateWorkoutLog(ctx context.Context, req *v1.CreateWor
 	}
 	if req.Sets <= 0 || req.Reps <= 0 || req.Weight < 0 {
 		return nil, rescode.New(rescode.BadRequest, "Thông số hiệp, lần lặp và mức tạ không hợp lệ")
+	}
+	if req.PlanItemID != nil && *req.PlanItemID > 0 {
+		owned, err := s.memberOwnsPlanItem(ctx, m.ID, *req.PlanItemID)
+		if err != nil {
+			return nil, err
+		}
+		if !owned {
+			return nil, rescode.New(rescode.NotFound, "Không tìm thấy mục bài tập trong giáo án của bạn")
+		}
 	}
 	ex, err := s.repo.FindExerciseByID(ctx, req.ExerciseID)
 	if err != nil {

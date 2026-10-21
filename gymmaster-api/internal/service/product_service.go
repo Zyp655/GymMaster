@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"gorm.io/gorm"
@@ -258,7 +259,7 @@ func toProductRes(r repository.ProductRow, withBranch bool) *v1.Product {
 		MemberPrice: r.MemberPrice, ImageURL: r.ImageURL, MinStock: r.MinStock, Status: r.Status,
 		TotalStock: r.TotalStock, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	if withBranch {
-		stock, low := r.Stock, stockIsLow(r.Stock, r.MinStock)
+		stock, low := r.Stock, r.LowStock
 		out.Stock, out.LowStock = &stock, &low
 	}
 	return out
@@ -296,7 +297,7 @@ func (s *productService) Get(ctx context.Context, id uint) (*v1.ProductDetail, e
 	return &v1.ProductDetail{
 		Product: *toProductRes(*row, false),
 		Stocks: dto.Map(stocks, func(r repository.ProductStockRow) *v1.ProductStock {
-			return &v1.ProductStock{BranchID: r.BranchID, BranchName: r.BranchName, Quantity: r.Quantity, LowStock: stockIsLow(r.Quantity, r.MinStock)}
+			return &v1.ProductStock{BranchID: r.BranchID, BranchName: r.BranchName, Quantity: r.Quantity, LowStock: r.LowStock}
 		}),
 	}, nil
 }
@@ -322,6 +323,13 @@ func (s *productService) validate(ctx context.Context, in *v1.ProductInput, excl
 	if in.MinStock < 0 {
 		return rescode.New(rescode.BadRequest, "Tồn tối thiểu không được âm")
 	}
+	if in.MinStock > stockMaxLevel {
+		return rescode.New(rescode.BadRequest, "Tồn tối thiểu tối đa 100.000.000")
+	}
+	in.ImageURL = strings.TrimSpace(in.ImageURL)
+	if !productValidImageURL(in.ImageURL) {
+		return rescode.New(rescode.BadRequest, "URL ảnh không hợp lệ (chỉ chấp nhận http(s):// hoặc /uploads/...)")
+	}
 	if in.CategoryID != nil && *in.CategoryID > 0 {
 		if _, err := s.findCategory(ctx, *in.CategoryID); err != nil {
 			if errors.Is(err, errCategoryNotFound) {
@@ -343,13 +351,43 @@ func (s *productService) validate(ctx context.Context, in *v1.ProductInput, excl
 }
 
 // productCheckPrices: giá không âm, giá hội viên ≤ giá bán.
+// productMaxPrice: giá tối đa vừa cột NUMERIC(14,2).
+const productMaxPrice = 999_999_999_999
+
+// productValidImageURL: ảnh sản phẩm chỉ chấp nhận URL http(s) tuyệt đối hoặc đường dẫn tương đối /uploads/...
+// (chặn javascript:, data:, // … để tránh XSS khi hiển thị).
+func productValidImageURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	if strings.ContainsAny(raw, " \t\r\n\\") {
+		return false
+	}
+	if strings.HasPrefix(raw, "/uploads/") {
+		return !strings.Contains(raw, "..")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	return (scheme == "http" || scheme == "https") && u.Host != ""
+}
+
 func productCheckPrices(cost, sell float64, member *float64) error {
 	if cost < 0 || sell < 0 {
 		return rescode.New(rescode.BadRequest, "Giá không được âm")
 	}
+	if cost > productMaxPrice || sell > productMaxPrice {
+		return rescode.New(rescode.BadRequest, "Giá vượt quá giới hạn cho phép (tối đa 999.999.999.999đ)")
+	}
 	if member != nil {
 		if *member < 0 {
 			return rescode.New(rescode.BadRequest, "Giá hội viên không được âm")
+		}
+		if *member > productMaxPrice {
+			return rescode.New(rescode.BadRequest, "Giá hội viên vượt quá giới hạn cho phép")
 		}
 		if *member > sell {
 			return rescode.New(rescode.BadRequest, "Giá hội viên không được lớn hơn giá bán")
@@ -412,6 +450,9 @@ func (s *productService) Update(ctx context.Context, id uint, in v1.ProductInput
 	}
 	before := *p
 	applyProductInput(p, in)
+	// Giá vốn là bình quân gia quyền do phiếu nhập kho tính (stockWeightedCost) → KHÔNG cho client ghi đè khi
+	// cập nhật (trước đây PUT gửi lại giá vốn cũ trên form làm mất giá vốn mới vừa nhập kho). Repo cũng không ghi cột này.
+	p.CostPrice = before.CostPrice
 	p.UpdatedBy = reqctx.UserID(ctx)
 	if err := s.repo.UpdateProduct(ctx, p); err != nil {
 		return nil, mapDuplicate(err, "Mã SKU đã tồn tại")

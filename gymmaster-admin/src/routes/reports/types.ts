@@ -79,7 +79,7 @@ export function shortMoney(v: number): string {
 
 export const BLOCK_STYLE: CSSProperties = {
   borderRadius: 10,
-  border: '1px solid #ECEFF3',
+  border: '1px solid var(--gm-border)',
   height: '100%',
 };
 

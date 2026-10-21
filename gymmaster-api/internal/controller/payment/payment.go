@@ -2,11 +2,13 @@ package payment
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/gogf/gf/v2/frame/g"
 
 	"gymmaster-api/api/payment"
 	v1 "gymmaster-api/api/payment/v1"
+	"gymmaster-api/internal/pkg/clientip"
 	"gymmaster-api/internal/service"
 )
 
@@ -50,8 +52,23 @@ func (c *MemberControllerV1) CheckPromotion(ctx context.Context, req *v1.CheckPr
 	return c.svc.CheckPromotion(ctx, req)
 }
 
+// VNPayIPN trả JSON phẳng {"RspCode","Message"} với HTTP 200 theo đặc tả VNPay – ghi thẳng vào response
+// để middleware Response bỏ qua envelope {code,message,data}.
 func (c *PublicControllerV1) VNPayIPN(ctx context.Context, _ *v1.VNPayIPNReq) (res *v1.VNPayIPNRes, err error) {
-	return c.svc.HandleIPN(ctx, queryParams(ctx))
+	out, err := c.svc.HandleIPN(ctx, queryParams(ctx))
+	if err != nil || out == nil {
+		if err != nil {
+			g.Log().Warningf(ctx, "VNPay IPN: %v", err)
+		}
+		out = service.VNPayIPNResponseFor(err)
+	}
+	if r := g.RequestFromCtx(ctx); r != nil {
+		r.Response.ClearBuffer()
+		r.Response.WriteHeader(http.StatusOK)
+		r.Response.WriteJson(out)
+		return nil, nil
+	}
+	return out, nil
 }
 
 func (c *PublicControllerV1) VNPayReturn(ctx context.Context, _ *v1.VNPayReturnReq) (res *v1.VNPayReturnRes, err error) {
@@ -67,7 +84,7 @@ func clientIP(ctx context.Context) string {
 	if r == nil {
 		return "127.0.0.1"
 	}
-	return r.GetClientIp()
+	return clientip.Real(r)
 }
 
 func queryParams(ctx context.Context) map[string]string {

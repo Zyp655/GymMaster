@@ -62,11 +62,22 @@ type (
 		SetClassSubstituteTrainer(ctx context.Context, scheduleID uint, subTrainerID *uint, note string, updatedBy *uint) error
 		FindPTSessionByID(ctx context.Context, id uint) (*ImpactedPTSessionRow, error)
 		ReassignPTSessionTrainer(ctx context.Context, sessionID, newTrainerID uint, origTrainerID uint) error
+		// TrainerEligible: user tồn tại, ACTIVE, là HLV (vai trò TRAINER hoặc hồ sơ vị trí TRAINER) và được phân công
+		// tại chi nhánh branchID (hoặc toàn hệ thống).
+		TrainerEligible(ctx context.Context, trainerID, branchID uint) (bool, error)
+		// TrainerBusy trả "PT" nếu HLV có buổi PT khác (SCHEDULED/COMPLETED, trừ excludePTID) giao với [start, end),
+		// "CLASS" nếu HLV dạy (chính hoặc dạy thay) lớp chưa hủy khác (trừ excludeClassID), "" nếu trống.
+		TrainerBusy(ctx context.Context, trainerID uint, start, end time.Time, excludeClassID, excludePTID uint) (string, error)
+		// ListScheduledClassesBetween / ListScheduledPTSessionsBetween: buổi lớp / PT SCHEDULED giao với [fromAt, toAt)
+		// tại chi nhánh branchID (nil = mọi chi nhánh) – dùng cảnh báo khi thêm/sửa ngày lễ.
+		ListScheduledClassesBetween(ctx context.Context, branchID *uint, fromAt, toAt time.Time) ([]ImpactedClassRow, error)
+		ListScheduledPTSessionsBetween(ctx context.Context, branchID *uint, fromAt, toAt time.Time) ([]ImpactedPTSessionRow, error)
 
 		ListBranchHolidays(ctx context.Context, q dto.Query, branchID uint, year int) ([]BranchHolidayRow, int64, error)
 		ListUpcomingHolidays(ctx context.Context, branchID uint, fromDate time.Time) ([]BranchHolidayRow, error)
 		FindBranchHolidayByID(ctx context.Context, id uint) (*BranchHolidayRow, error)
 		CreateBranchHoliday(ctx context.Context, h *entity.BranchHoliday) error
+		UpdateBranchHoliday(ctx context.Context, h *entity.BranchHoliday) error
 		DeleteBranchHoliday(ctx context.Context, id uint) error
 		ExtendActiveTimeSubscriptions(ctx context.Context, branchID *uint, holidayDate time.Time) (int64, error)
 	}
@@ -95,26 +106,21 @@ func (r *scheduleExtRepository) ListTrainerAvailability(ctx context.Context, tra
 	return rows, err
 }
 
+// ReplaceTrainerAvailability thay toàn bộ khung giờ rảnh của HLV TẠI MỘT chi nhánh (branchID bắt buộc > 0);
+// lịch rảnh ở chi nhánh khác không bị đụng tới. Mọi slot được gán về branchID.
 func (r *scheduleExtRepository) ReplaceTrainerAvailability(ctx context.Context, trainerID, branchID uint, slots []entity.TrainerAvailability) error {
-	conn := postgres.Conn(ctx, r.db)
-	delTx := conn.Where("trainer_id = ?", trainerID)
-	if branchID > 0 {
-		delTx = delTx.Where("branch_id = ?", branchID)
+	if branchID == 0 {
+		return gorm.ErrMissingWhereClause
 	}
-	if err := delTx.Delete(&entity.TrainerAvailability{}).Error; err != nil {
+	conn := postgres.Conn(ctx, r.db)
+	if err := conn.Where("trainer_id = ? AND branch_id = ?", trainerID, branchID).Delete(&entity.TrainerAvailability{}).Error; err != nil {
 		return err
 	}
 	for _, s := range slots {
 		row := s
 		row.ID = 0
 		row.TrainerID = trainerID
-		if row.BranchID == 0 {
-			if branchID > 0 {
-				row.BranchID = branchID
-			} else {
-				row.BranchID = 1
-			}
-		}
+		row.BranchID = branchID
 		if err := conn.Create(&row).Error; err != nil {
 			return err
 		}
@@ -274,6 +280,64 @@ func (r *scheduleExtRepository) ReassignPTSessionTrainer(ctx context.Context, se
 		}).Error
 }
 
+func (r *scheduleExtRepository) TrainerEligible(ctx context.Context, trainerID, branchID uint) (bool, error) {
+	var n int64
+	err := postgres.Conn(ctx, r.db).Table("users u").
+		Where("u.id = ? AND u.deleted_at IS NULL AND u.status = 'ACTIVE'", trainerID).
+		Where(`(EXISTS (SELECT 1 FROM staff_profiles sp WHERE sp.user_id = u.id AND sp.position = 'TRAINER')
+			OR EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id AND r.code = 'TRAINER'))`).
+		Where(`EXISTS (SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+			WHERE ur.user_id = u.id AND r.code <> 'MEMBER' AND (ur.branch_id = ? OR ur.branch_id IS NULL))`, branchID).
+		Count(&n).Error
+	return n > 0, err
+}
+
+func (r *scheduleExtRepository) TrainerBusy(ctx context.Context, trainerID uint, start, end time.Time, excludeClassID, excludePTID uint) (string, error) {
+	conn := postgres.Conn(ctx, r.db)
+	var n int64
+	if err := conn.Table("pt_sessions").
+		Where("trainer_id = ? AND status IN ('SCHEDULED', 'COMPLETED') AND start_at < ? AND end_at > ? AND id <> ?",
+			trainerID, end, start, excludePTID).
+		Count(&n).Error; err != nil {
+		return "", err
+	}
+	if n > 0 {
+		return "PT", nil
+	}
+	if err := conn.Table("class_schedules").
+		Where("COALESCE(substitute_trainer_id, trainer_id) = ? AND status <> 'CANCELLED' AND start_at < ? AND end_at > ? AND id <> ?",
+			trainerID, end, start, excludeClassID).
+		Count(&n).Error; err != nil {
+		return "", err
+	}
+	if n > 0 {
+		return "CLASS", nil
+	}
+	return "", nil
+}
+
+func (r *scheduleExtRepository) ListScheduledClassesBetween(ctx context.Context, branchID *uint, fromAt, toAt time.Time) ([]ImpactedClassRow, error) {
+	tx := r.baseImpactedClass(ctx).
+		Where("cs.status = 'SCHEDULED' AND cs.start_at < ? AND cs.end_at > ?", toAt, fromAt)
+	if branchID != nil && *branchID > 0 {
+		tx = tx.Where("cs.branch_id = ?", *branchID)
+	}
+	var rows []ImpactedClassRow
+	err := tx.Order("cs.start_at ASC").Limit(500).Scan(&rows).Error
+	return rows, err
+}
+
+func (r *scheduleExtRepository) ListScheduledPTSessionsBetween(ctx context.Context, branchID *uint, fromAt, toAt time.Time) ([]ImpactedPTSessionRow, error) {
+	tx := r.baseImpactedPT(ctx).
+		Where("ps.status = 'SCHEDULED' AND ps.start_at < ? AND ps.end_at > ?", toAt, fromAt)
+	if branchID != nil && *branchID > 0 {
+		tx = tx.Where("ps.branch_id = ?", *branchID)
+	}
+	var rows []ImpactedPTSessionRow
+	err := tx.Order("ps.start_at ASC").Limit(500).Scan(&rows).Error
+	return rows, err
+}
+
 // ---- Branch Holidays ------------------------------------------------------------
 
 const branchHolidaySelect = `bh.*, COALESCE(b.name, 'Toàn hệ thống') AS branch_name`
@@ -330,6 +394,13 @@ func (r *scheduleExtRepository) FindBranchHolidayByID(ctx context.Context, id ui
 
 func (r *scheduleExtRepository) CreateBranchHoliday(ctx context.Context, h *entity.BranchHoliday) error {
 	return postgres.Conn(ctx, r.db).Create(h).Error
+}
+
+// UpdateBranchHoliday ghi các trường có thể sửa (Select để lưu cả giá trị zero như closed=false, giờ NULL).
+func (r *scheduleExtRepository) UpdateBranchHoliday(ctx context.Context, h *entity.BranchHoliday) error {
+	return postgres.Conn(ctx, r.db).Model(h).
+		Select("branch_id", "date", "name", "closed", "open_time", "close_time", "updated_at").
+		Updates(h).Error
 }
 
 func (r *scheduleExtRepository) DeleteBranchHoliday(ctx context.Context, id uint) error {

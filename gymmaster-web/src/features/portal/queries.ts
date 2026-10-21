@@ -7,6 +7,7 @@ import type {
   CheckPromotionParams,
   CreateDataRequestPayload,
   CreateFoodLogPayload,
+  UpdateFoodLogPayload,
   CreateGuestPassPayload,
   CreateMemberReviewPayload,
   CreateWorkoutLogPayload,
@@ -523,6 +524,27 @@ export function useMemberFoodLogsQuery(date?: string) {
   });
 }
 
+export function useUpdateMemberFoodLogMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: UpdateFoodLogPayload }) =>
+      portalApi.updateMemberFoodLog(id, payload),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: portalKeys.foodLogsAll() });
+    },
+  });
+}
+
+export function useDeleteMemberFoodLogMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => portalApi.deleteMemberFoodLog(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: portalKeys.foodLogsAll() });
+    },
+  });
+}
+
 export function useCreateMemberFoodLogMutation() {
   const qc = useQueryClient();
   return useMutation({
@@ -608,7 +630,18 @@ export function useMemberSessionsQuery() {
 export function useRevokeOtherMemberSessionsMutation() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => portalApi.revokeOtherMemberSessions(),
+    mutationFn: (currentSessionId?: number) =>
+      portalApi.revokeOtherMemberSessions(currentSessionId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: portalKeys.sessions() });
+    },
+  });
+}
+
+export function useRevokeMemberSessionMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => portalApi.revokeMemberSession(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: portalKeys.sessions() });
     },

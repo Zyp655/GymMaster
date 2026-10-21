@@ -49,6 +49,7 @@ import type {
   ChallengeMetric,
   ChallengeStatus,
   LoyaltyLedger,
+  LoyaltyLedgerListParams,
   LoyaltyReason,
   LoyaltyReward,
   LoyaltyRewardInput,
@@ -162,9 +163,7 @@ function RewardsTab({ canManage }: { canManage: boolean }) {
         dataIndex: 'reward_type',
         render: (t: RewardType, r) => (
           <Space>
-            <Tag color={t === 'VOUCHER' ? 'purple' : 'cyan'}>
-              {REWARD_TYPE_LABELS[t] ?? t}
-            </Tag>
+            <Tag color={t === 'VOUCHER' ? 'purple' : 'cyan'}>{REWARD_TYPE_LABELS[t] ?? t}</Tag>
             {t === 'VOUCHER' && r.discount_pct > 0 && <Tag color="gold">-{r.discount_pct}%</Tag>}
           </Space>
         ),
@@ -356,7 +355,13 @@ function ChallengesTab({ canManage }: { canManage: boolean }) {
 
   const table = useTableQuery<
     Challenge,
-    { branch_id?: number; metric?: ChallengeMetric; status?: ChallengeStatus; page?: number; limit?: number }
+    {
+      branch_id?: number;
+      metric?: ChallengeMetric;
+      status?: ChallengeStatus;
+      page?: number;
+      limit?: number;
+    }
   >({
     queryKey: [loyaltyApi.challengeKey, 'list'],
     queryFn: (p) => loyaltyApi.listChallenges(p),
@@ -579,12 +584,20 @@ function ChallengesTab({ canManage }: { canManage: boolean }) {
               </Form.Item>
             </Col>
             <Col xs={12}>
-              <Form.Item name="target" label="Mục tiêu cần đạt (buổi/lượt)" rules={[{ required: true }]}>
+              <Form.Item
+                name="target"
+                label="Mục tiêu cần đạt (buổi/lượt)"
+                rules={[{ required: true }]}
+              >
                 <InputNumber min={1} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col xs={12}>
-              <Form.Item name="reward_points" label="Điểm thưởng hoàn thành" rules={[{ required: true }]}>
+              <Form.Item
+                name="reward_points"
+                label="Điểm thưởng hoàn thành"
+                rules={[{ required: true }]}
+              >
                 <InputNumber min={10} step={50} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
@@ -874,10 +887,15 @@ function AdjustPointsTab({ canManage }: { canManage: boolean }) {
   const qc = useQueryClient();
   const [form] = Form.useForm<{ member_id: number; points: number; note: string }>();
 
-  const ledgerTable = useTableQuery<LoyaltyLedger, { member_id?: number; page?: number; limit?: number }>({
+  const { branchId } = useWorkingBranch();
+  const { branches } = useBranchOptions();
+  const ledgerTable = useTableQuery<LoyaltyLedger, LoyaltyLedgerListParams>({
     queryKey: [loyaltyApi.ledgerKey, 'list'],
     queryFn: (p) => loyaltyApi.listLedgers(p),
+    filterKeys: ['reason', 'branch_id'],
+    numberKeys: ['branch_id'],
     defaults: { order_by: 'id', order_dir: 'DESC' },
+    extraParams: branchId ? { branch_id: branchId } : {},
   });
 
   const adjustMut = useMutation({
@@ -910,9 +928,18 @@ function AdjustPointsTab({ canManage }: { canManage: boolean }) {
         title: 'Hội viên',
         key: 'member',
         render: (_, r) => (
-          <Space>
-            <Typography.Text strong>{r.member_name || `Hội viên #${r.member_id}`}</Typography.Text>
-            {r.member_code && <Tag className="code-text">{r.member_code}</Tag>}
+          <Space direction="vertical" size={0}>
+            <Space size={4} wrap>
+              <Typography.Text strong>
+                {r.member_name || `Hội viên #${r.member_id}`}
+              </Typography.Text>
+              {r.member_code && <Tag className="code-text">{r.member_code}</Tag>}
+            </Space>
+            {r.branch_name && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {r.branch_name}
+              </Typography.Text>
+            )}
           </Space>
         ),
       },
@@ -940,6 +967,12 @@ function AdjustPointsTab({ canManage }: { canManage: boolean }) {
         dataIndex: 'note',
         render: (v: string) => v || '—',
       },
+      {
+        title: 'Người thực hiện',
+        dataIndex: 'created_by_name',
+        width: 160,
+        render: (v: string) => v || 'Hệ thống',
+      },
     ],
     [],
   );
@@ -947,10 +980,7 @@ function AdjustPointsTab({ canManage }: { canManage: boolean }) {
   return (
     <Row gutter={[16, 16]}>
       <Col xs={24} lg={9}>
-        <Card
-          size="small"
-          title="Điều chỉnh điểm thưởng hội viên (Cộng / Trừ điểm)"
-        >
+        <Card size="small" title="Điều chỉnh điểm thưởng hội viên (Cộng / Trừ điểm)">
           {!canManage ? (
             <Alert
               type="warning"
@@ -1011,6 +1041,31 @@ function AdjustPointsTab({ canManage }: { canManage: boolean }) {
       </Col>
       <Col xs={24} lg={15}>
         <Card size="small" title="Nhật ký biến động điểm thưởng gần đây">
+          <FilterBar
+            searchPlaceholder="Tìm theo tên, mã hội viên hoặc ghi chú..."
+            colTextSearch={10}
+            filters={[
+              {
+                name: 'reason',
+                placeholder: 'Nguyên nhân',
+                options: (Object.keys(LOYALTY_REASON_LABELS) as LoyaltyReason[]).map((r) => ({
+                  label: LOYALTY_REASON_LABELS[r],
+                  value: r,
+                })),
+                col: 7,
+              },
+              ...(branchId
+                ? []
+                : [
+                    {
+                      name: 'branch_id',
+                      placeholder: 'Chi nhánh',
+                      options: branches.map((b) => ({ label: b.name, value: b.id })),
+                      col: 7,
+                    },
+                  ]),
+            ]}
+          />
           <DataTable<LoyaltyLedger>
             table={ledgerTable}
             columns={ledgerColumns}
@@ -1027,57 +1082,59 @@ export default function LoyaltyPage() {
   const canManage = can(PERM.LOYALTY_MANAGE);
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <PageTitle
-        title="Điểm thưởng, Huy hiệu & Thử thách"
-        subtitle="Thiết lập danh mục quà đổi điểm, thử thách vận động theo tháng, huy hiệu thành tích và điều chỉnh điểm hội viên"
-      />
+    <Card variant="borderless" className="page-card">
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <PageTitle
+          title="Điểm thưởng, Huy hiệu & Thử thách"
+          subtitle="Thiết lập danh mục quà đổi điểm, thử thách vận động theo tháng, huy hiệu thành tích và điều chỉnh điểm hội viên"
+        />
 
-      <Tabs
-        defaultActiveKey="rewards"
-        items={[
-          {
-            key: 'rewards',
-            label: (
-              <Space size={6}>
-                <GiftOutlined />
-                <span>Quà đổi điểm</span>
-              </Space>
-            ),
-            children: <RewardsTab canManage={canManage} />,
-          },
-          {
-            key: 'challenges',
-            label: (
-              <Space size={6}>
-                <FireOutlined />
-                <span>Thử thách phòng tập</span>
-              </Space>
-            ),
-            children: <ChallengesTab canManage={canManage} />,
-          },
-          {
-            key: 'badges',
-            label: (
-              <Space size={6}>
-                <SafetyCertificateOutlined />
-                <span>Huy hiệu</span>
-              </Space>
-            ),
-            children: <BadgesTab canManage={canManage} />,
-          },
-          {
-            key: 'adjust',
-            label: (
-              <Space size={6}>
-                <PlusCircleOutlined />
-                <span>Điều chỉnh điểm hội viên</span>
-              </Space>
-            ),
-            children: <AdjustPointsTab canManage={canManage} />,
-          },
-        ]}
-      />
-    </Space>
+        <Tabs
+          defaultActiveKey="rewards"
+          items={[
+            {
+              key: 'rewards',
+              label: (
+                <Space size={6}>
+                  <GiftOutlined />
+                  <span>Quà đổi điểm</span>
+                </Space>
+              ),
+              children: <RewardsTab canManage={canManage} />,
+            },
+            {
+              key: 'challenges',
+              label: (
+                <Space size={6}>
+                  <FireOutlined />
+                  <span>Thử thách phòng tập</span>
+                </Space>
+              ),
+              children: <ChallengesTab canManage={canManage} />,
+            },
+            {
+              key: 'badges',
+              label: (
+                <Space size={6}>
+                  <SafetyCertificateOutlined />
+                  <span>Huy hiệu</span>
+                </Space>
+              ),
+              children: <BadgesTab canManage={canManage} />,
+            },
+            {
+              key: 'adjust',
+              label: (
+                <Space size={6}>
+                  <PlusCircleOutlined />
+                  <span>Điều chỉnh điểm hội viên</span>
+                </Space>
+              ),
+              children: <AdjustPointsTab canManage={canManage} />,
+            },
+          ]}
+        />
+      </Space>
+    </Card>
   );
 }

@@ -81,11 +81,17 @@ type invoiceFakeRepo struct {
 	payments map[uint][]entity.Payment
 	refunds  map[uint][]entity.Refund
 	promos   *invoiceFakePromoRepo
+	// schedules: kỳ trả góp theo hóa đơn; pendingTxns: giao dịch VNPay PENDING theo hóa đơn.
+	schedules   map[uint][]entity.InstallmentSchedule
+	pendingTxns map[uint]*entity.OnlinePaymentTxn
+	// pendingLookup (tùy chọn) thay pendingTxns – nối với fake repo giao dịch VNPay trong test thanh toán trực tuyến.
+	pendingLookup func(ctx context.Context, invoiceID uint, since time.Time) (*entity.OnlinePaymentTxn, error)
 }
 
 func newInvoiceFakeRepo(promos *invoiceFakePromoRepo) *invoiceFakeRepo {
 	return &invoiceFakeRepo{invoices: map[uint]*entity.Invoice{}, items: map[uint][]entity.InvoiceItem{},
-		payments: map[uint][]entity.Payment{}, refunds: map[uint][]entity.Refund{}, promos: promos}
+		payments: map[uint][]entity.Payment{}, refunds: map[uint][]entity.Refund{}, promos: promos,
+		schedules: map[uint][]entity.InstallmentSchedule{}, pendingTxns: map[uint]*entity.OnlinePaymentTxn{}}
 }
 
 func (f *invoiceFakeRepo) id() uint { f.next++; return f.next }
@@ -128,6 +134,10 @@ func (f *invoiceFakeRepo) UpdateFields(_ context.Context, id uint, m map[string]
 			inv.PaidAmount = v.(float64)
 		case "refunded_amount":
 			inv.RefundedAmount = v.(float64)
+		case "total":
+			inv.Total = v.(float64)
+		case "discount":
+			inv.Discount = v.(float64)
 		case "status":
 			inv.Status = v.(string)
 		case "voided_at":
@@ -137,6 +147,10 @@ func (f *invoiceFakeRepo) UpdateFields(_ context.Context, id uint, m map[string]
 			inv.VoidedBy = v.(*uint)
 		case "void_reason":
 			inv.VoidReason = v.(string)
+		case "write_off_amount":
+			inv.WriteOffAmount = v.(float64)
+		case "write_off_reason":
+			inv.WriteOffReason = v.(string)
 		default:
 			panic("invoiceFakeRepo.UpdateFields: " + k)
 		}
@@ -196,6 +210,30 @@ func (f *invoiceFakeRepo) FindMember(context.Context, uint) (*entity.Member, err
 	return nil, gorm.ErrRecordNotFound
 }
 func (f *invoiceFakeRepo) UserName(context.Context, uint) (string, error) { return "Admin", nil }
+func (f *invoiceFakeRepo) InstallmentSchedules(_ context.Context, invoiceID uint, _ bool) ([]entity.InstallmentSchedule, error) {
+	return append([]entity.InstallmentSchedule(nil), f.schedules[invoiceID]...), nil
+}
+func (f *invoiceFakeRepo) SaveInstallmentSchedule(_ context.Context, sc *entity.InstallmentSchedule) error {
+	for invID, list := range f.schedules {
+		for i := range list {
+			if list[i].ID == sc.ID {
+				f.schedules[invID][i] = *sc
+				return nil
+			}
+		}
+	}
+	return gorm.ErrRecordNotFound
+}
+func (f *invoiceFakeRepo) PendingOnlineTxn(ctx context.Context, invoiceID uint, since time.Time) (*entity.OnlinePaymentTxn, error) {
+	if f.pendingLookup != nil {
+		return f.pendingLookup(ctx, invoiceID, since)
+	}
+	if t, ok := f.pendingTxns[invoiceID]; ok && t.Status == entity.OnlineTxnPending && !t.CreatedAt.Before(since) {
+		cp := *t
+		return &cp, nil
+	}
+	return nil, nil
+}
 
 // ---- Subscription repo ------------------------------------------------------------
 

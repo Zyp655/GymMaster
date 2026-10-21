@@ -36,6 +36,8 @@ import { usePermission } from '@/hooks/usePermission';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
 import { getErrorMessage, isFormError, setFormError, showError } from '@/utils/errors';
 import { DATE_FORMAT, toApiDate } from '@/utils/format';
+import { Link } from 'react-router-dom';
+import { isStaffGuardError } from './staffGuards';
 import {
   GENDER_OPTIONS,
   POSITION_OPTIONS,
@@ -132,14 +134,17 @@ export default function StaffForm({ open, record, onClose }: StaffFormProps) {
   const save = useSaveStaff();
   const [tab, setTab] = useState<TabKey>('info');
   const [rolesError, setRolesError] = useState<string | null>(null);
+  /** Lỗi chặn thao tác từ API (403 quyền cao hơn / 400 chính mình) – hiện đầu modal. */
+  const [guardError, setGuardError] = useState<string | null>(null);
   const roleOptions = useAssignableRoles(isOwner, open);
 
   const isEdit = !!record;
-  const readOnly = isEdit ? !can(PERM.STAFF_UPDATE) : !can(PERM.STAFF_CREATE);
+  const isSelf = !!record && record.id === user?.id;
+  // API từ chối sửa tài khoản của chính mình → chỉ xem (sửa tại trang Hồ sơ cá nhân).
+  const readOnly = isEdit ? !can(PERM.STAFF_UPDATE) || isSelf : !can(PERM.STAFF_CREATE);
   const position = Form.useWatch('position', form);
   const isTrainer = position === 'TRAINER';
   const allowedBranches = useMemo(() => user?.branch_ids ?? [], [user]);
-  const isSelf = !!record && record.id === user?.id;
   // Người không phải OWNER không được sửa tài khoản OWNER.
   const targetIsOwner = !!record?.roles.some((r) => r.role_code === ROLE.OWNER);
   const blocked = isEdit && !isOwner && targetIsOwner;
@@ -167,6 +172,7 @@ export default function StaffForm({ open, record, onClose }: StaffFormProps) {
     if (!open) return;
     setTab('info');
     setRolesError(null);
+    setGuardError(null);
     form.resetFields();
     if (record) {
       const p = record.staff_profile;
@@ -236,6 +242,7 @@ export default function StaffForm({ open, record, onClose }: StaffFormProps) {
 
   const onFinish = (v: FormValues) => {
     setRolesError(null);
+    setGuardError(null);
     const t = v.trainer_profile;
     const info: StaffInput = {
       full_name: v.full_name.trim(),
@@ -266,6 +273,13 @@ export default function StaffForm({ open, record, onClose }: StaffFormProps) {
     const onError = (error: unknown) => {
       const step = (error as { step?: string }).step;
       const msg = getErrorMessage(error);
+      // 403/400 "chính mình": không gắn vào ô nhập theo từ khóa – hiện nguyên thông điệp server.
+      if (isStaffGuardError(error)) {
+        setGuardError(
+          step === 'roles' ? `Đã lưu thông tin nhưng chưa gán được vai trò: ${msg}` : msg,
+        );
+        return;
+      }
       if (step === 'roles' || (isFormError(error) && /vai trò|chi nhánh/i.test(msg))) {
         setRolesError(
           step === 'roles' ? `Đã lưu thông tin nhưng chưa gán được vai trò: ${msg}` : msg,
@@ -700,6 +714,23 @@ export default function StaffForm({ open, record, onClose }: StaffFormProps) {
           message="Chỉ Chủ trung tâm mới được sửa tài khoản Chủ trung tâm."
         />
       )}
+      {isSelf && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginTop: 12 }}
+          message={
+            <>
+              Đây là tài khoản của bạn. Cập nhật thông tin cá nhân, mật khẩu tại trang{' '}
+              <Link to="/app/profile" onClick={onClose}>
+                Hồ sơ cá nhân
+              </Link>
+              .
+            </>
+          }
+        />
+      )}
+      {guardError && <Alert type="error" showIcon style={{ marginTop: 12 }} message={guardError} />}
       <Form<FormValues>
         form={form}
         layout="vertical"

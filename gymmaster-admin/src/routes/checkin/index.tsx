@@ -21,6 +21,7 @@ import { PERM } from '@/constants/permissions';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
+import { useAppSelector } from '@/store';
 import { showError } from '@/utils/errors';
 import CameraScanner from './CameraScanner';
 import { cameraScanSupported } from './barcode';
@@ -52,8 +53,20 @@ export default function CheckinPage() {
   const { branchId: working } = useWorkingBranch();
   const { branches } = useBranchOptions();
   const activeBranches = branches.filter((b) => b.status !== 'INACTIVE');
+  // Chi nhánh của nhân viên đăng nhập (lễ tân/quản lý được gán chi nhánh) – ưu tiên hơn chi nhánh đầu danh sách.
+  const ownBranchIds = useAppSelector((s) => s.auth.user?.branch_ids) ?? [];
+  const ownBranch = ownBranchIds[0] ?? null;
+  const isAllowed = (id: number | null) => !!id && (ownBranchIds.length === 0 || ownBranchIds.includes(id));
+  const defaultBranch = () => {
+    if (ownBranch && activeBranches.some((b) => b.id === ownBranch)) return ownBranch;
+    return activeBranches[0]?.id ?? null;
+  };
 
-  const [branchId, setBranchId] = useState<number | null>(() => working ?? readStoredBranch());
+  const [branchId, setBranchId] = useState<number | null>(() => {
+    if (working) return working;
+    const stored = readStoredBranch();
+    return isAllowed(stored) ? stored : ownBranch;
+  });
   const [tab, setTab] = useState<'qr' | 'manual'>('qr');
   const [code, setCode] = useState('');
   const [camera, setCamera] = useState(false);
@@ -70,10 +83,11 @@ export default function CheckinPage() {
     if (working) setBranchId(working);
   }, [working]);
   useEffect(() => {
-    if (!branchId && activeBranches.length > 0) setBranchId(activeBranches[0].id);
+    if (!branchId && activeBranches.length > 0) setBranchId(defaultBranch());
     else if (branchId && branches.length > 0 && !branches.some((b) => b.id === branchId)) {
-      setBranchId(activeBranches[0]?.id ?? null);
+      setBranchId(defaultBranch());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId, branches, activeBranches]);
   useEffect(() => {
     try {

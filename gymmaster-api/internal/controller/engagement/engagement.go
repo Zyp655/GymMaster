@@ -111,6 +111,10 @@ func (c *MemberControllerV1) CreateFoodLog(ctx context.Context, req *v1.CreateFo
 	return c.svc.CreateFoodLog(ctx, req)
 }
 
+func (c *MemberControllerV1) UpdateFoodLog(ctx context.Context, req *v1.UpdateFoodLogReq) (res *v1.UpdateFoodLogRes, err error) {
+	return c.svc.UpdateFoodLog(ctx, req)
+}
+
 func (c *MemberControllerV1) DeleteFoodLog(ctx context.Context, req *v1.DeleteFoodLogReq) (res *v1.DeleteEngagementRes, err error) {
 	return &v1.DeleteEngagementRes{}, c.svc.DeleteFoodLog(ctx, req.ID)
 }

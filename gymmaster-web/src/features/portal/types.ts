@@ -191,6 +191,8 @@ export interface ClassesResponse {
   to: string;
   advance_days: number;
   cancel_before_minutes: number;
+  /** Bị khóa đặt lớp đến thời điểm này (vắng mặt nhiều lần); null = không bị khóa. */
+  booking_blocked_until?: string | null;
   items: ScheduleItem[];
 }
 
@@ -378,12 +380,11 @@ export interface WorkoutPlanItem {
   video_url?: string;
   sets: number;
   reps: number | string;
-  weight?: number;
-  weight_kg?: number | null;
+  /** Mức tạ gợi ý (kg) – API trả `weight`. */
+  weight: number;
   rest_sec: number | null;
   note: string;
   sort?: number;
-  sort_order?: number;
 }
 
 export interface WorkoutPlanDay {
@@ -400,9 +401,8 @@ export interface WorkoutPlan {
   trainer_id: number;
   trainer_name?: string;
   pt_contract_id: number | null;
-  name?: string;
-  title?: string;
-  description?: string;
+  /** Tên giáo án – API trả `name`. */
+  name: string;
   goal: string;
   start_date: string | null;
   end_date: string | null;
@@ -418,12 +418,12 @@ export interface WorkoutLog {
   exercise_id: number;
   exercise_name?: string;
   muscle_group?: string;
-  performed_at?: string;
-  logged_at?: string;
+  /** Thời điểm tập – API trả `performed_at`. */
+  performed_at: string;
   sets: number;
   reps: number;
-  weight?: number;
-  weight_kg?: number;
+  /** Mức tạ thực tế (kg) – API trả `weight`. */
+  weight: number;
   volume?: number;
   note: string;
   created_at?: string;
@@ -451,8 +451,8 @@ export interface CreateWorkoutLogPayload {
   exercise_id: number;
   sets: number;
   reps: number;
-  weight?: number;
-  weight_kg?: number;
+  /** Mức tạ (kg) – API nhận `weight` (gửi `weight_kg` sẽ bị bỏ qua → lưu 0kg). */
+  weight: number;
   note?: string;
   performed_at?: string;
 }
@@ -813,6 +813,13 @@ export interface CreateFoodLogPayload {
   meal_type?: MealType | string;
   date?: string;
   eaten_at?: string;
+}
+
+/** PUT /member/food-logs/{id} – `qty` là SỐ KHẨU PHẦN (đã quy đổi từ gam nếu món tính theo gam). */
+export interface UpdateFoodLogPayload {
+  food_id: number;
+  qty: number;
+  meal: MealType;
 }
 
 export interface AnnouncementItem {

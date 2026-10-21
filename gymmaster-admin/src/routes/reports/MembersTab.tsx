@@ -1,8 +1,24 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Card, Col, Progress, Result, Row, Segmented, Space, Table, Typography } from 'antd';
+import {
+  Button,
+  Card,
+  Col,
+  Progress,
+  Result,
+  Row,
+  Segmented,
+  Space,
+  Table,
+  Typography,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { RetweetOutlined, TeamOutlined, UserAddOutlined, UserDeleteOutlined } from '@ant-design/icons';
+import {
+  RetweetOutlined,
+  TeamOutlined,
+  UserAddOutlined,
+  UserDeleteOutlined,
+} from '@ant-design/icons';
 import reportApi from '@/api/report';
 import type { CountShare, MemberPopulation, ReportGroupBy, RetentionRow } from '@/api/report';
 import StatCard, { SectionHeader } from '@/components/StatCard';

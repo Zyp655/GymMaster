@@ -22,6 +22,8 @@ type (
 		Delete(ctx context.Context, id uint, deletedBy *uint) error
 		// CountFutureSchedules đếm lịch lớp SCHEDULED chưa diễn ra đang dùng phòng.
 		CountFutureSchedules(ctx context.Context, id uint, now time.Time) (int64, error)
+		// MaxFutureScheduleCapacity: sức chứa lớn nhất của các lịch lớp SCHEDULED chưa kết thúc dùng phòng (0 nếu không có).
+		MaxFutureScheduleCapacity(ctx context.Context, id uint, now time.Time) (int, error)
 		ActiveOptions(ctx context.Context, branchIDs []uint) ([]entity.Room, error)
 	}
 
@@ -98,6 +100,14 @@ func (r *roomRepository) CountFutureSchedules(ctx context.Context, id uint, now 
 	var n int64
 	err := postgres.Conn(ctx, r.db).Table("class_schedules").
 		Where("room_id = ? AND status = 'SCHEDULED' AND start_at > ?", id, now).Count(&n).Error
+	return n, err
+}
+
+func (r *roomRepository) MaxFutureScheduleCapacity(ctx context.Context, id uint, now time.Time) (int, error) {
+	var n int
+	err := postgres.Conn(ctx, r.db).Table("class_schedules").
+		Where("room_id = ? AND status = 'SCHEDULED' AND end_at > ?", id, now).
+		Select("COALESCE(MAX(capacity), 0)").Scan(&n).Error
 	return n, err
 }
 

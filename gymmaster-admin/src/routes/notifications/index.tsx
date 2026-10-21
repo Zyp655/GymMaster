@@ -1,4 +1,19 @@
-import { App, Button, Card, Col, Empty, List, Pagination, Result, Row, Segmented, Select, Tag, Tooltip } from 'antd';
+import {
+  App,
+  Button,
+  Card,
+  Col,
+  Empty,
+  List,
+  Pagination,
+  Result,
+  Row,
+  Segmented,
+  Select,
+  Space,
+  Tag,
+  Tooltip,
+} from 'antd';
 import { CheckOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -65,7 +80,7 @@ export default function NotificationsPage() {
           />
         </Col>
         <Col>
-          <Button.Group>
+          <Space.Compact>
             <Button
               icon={<ReloadOutlined />}
               loading={table.isFetching}
@@ -82,7 +97,7 @@ export default function NotificationsPage() {
             >
               Đánh dấu tất cả đã đọc
             </Button>
-          </Button.Group>
+          </Space.Compact>
         </Col>
       </Row>
 
@@ -109,7 +124,10 @@ export default function NotificationsPage() {
         </Col>
       </Row>
 
-      <Card style={{ borderRadius: 10, border: '1px solid #ECEFF3' }} styles={{ body: { padding: 8 } }}>
+      <Card
+        style={{ borderRadius: 10, border: '1px solid var(--gm-border)' }}
+        styles={{ body: { padding: 8 } }}
+      >
         {table.isError ? (
           <Result
             status="warning"
@@ -157,7 +175,9 @@ export default function NotificationsPage() {
                         {NOTIFICATION_TYPE_LABEL[n.type] ?? n.type}
                       </Tag>
                     </div>
-                    {n.body && <div className="notif-row__body notif-row__body--full">{n.body}</div>}
+                    {n.body && (
+                      <div className="notif-row__body notif-row__body--full">{n.body}</div>
+                    )}
                     <Tooltip title={formatDateTime(n.created_at)}>
                       <div className="notif-row__time">
                         {dayjs(n.created_at).fromNow()} · {formatDateTime(n.created_at)}

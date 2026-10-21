@@ -1,6 +1,7 @@
+import { useEffect } from 'react';
 import { Button, Col, Form, Input, Row, Segmented, Space, Typography } from 'antd';
 import type { FormInstance } from 'antd';
-import { PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
+import { COUNTER_PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
 import type { PaymentMethod } from '@/api/invoice';
 import MoneyInput from '@/components/Money/MoneyInput';
 import { formatMoney } from '@/utils/format';
@@ -35,6 +36,13 @@ export default function PaymentFields({
   const amount = Form.useWatch(path('amount'), form) as number | null | undefined;
   const method = Form.useWatch(path('method'), form) as PaymentMethod | undefined;
   const rest = Math.max(0, max - (amount ?? 0));
+  const amountKey = path('amount').join('.');
+
+  // Tổng tiền (báo giá) thay đổi → kiểm tra lại số tiền thu đã nhập để báo lỗi ngay.
+  useEffect(() => {
+    const field = amountKey.split('.');
+    if (form.isFieldTouched(field)) void form.validateFields([field]).catch(() => undefined);
+  }, [max, amountKey, form]);
 
   return (
     <Row gutter={12}>
@@ -42,6 +50,7 @@ export default function PaymentFields({
         <Form.Item
           name={path('amount')}
           label={amountLabel}
+          validateFirst
           rules={[
             ...(allowZero ? [] : [{ required: true, message: 'Vui lòng nhập số tiền' }]),
             {
@@ -77,7 +86,8 @@ export default function PaymentFields({
             </Space>
           }
         >
-          <MoneyInput max={max} />
+          {/* Không đặt max cho ô nhập: InputNumber sẽ âm thầm kẹp giá trị khi blur thay vì báo lỗi. */}
+          <MoneyInput />
         </Form.Item>
       </Col>
       <Col xs={24} sm={12}>
@@ -86,7 +96,7 @@ export default function PaymentFields({
           label="Phương thức"
           rules={[{ required: true, message: 'Vui lòng chọn phương thức' }]}
         >
-          <Segmented block options={PAYMENT_METHOD_OPTIONS} />
+          <Segmented block options={COUNTER_PAYMENT_METHOD_OPTIONS} />
         </Form.Item>
       </Col>
       {!compact && (

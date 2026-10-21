@@ -288,9 +288,11 @@ func TestReportServiceExportInvoices(t *testing.T) {
 	assert.Equal(t, "BÁO CÁO HÓA ĐƠN", title)
 	header, _ := f.GetCellValue("Danh sách", "A4")
 	assert.Equal(t, "Số HĐ", header)
-	total, _ := f.GetCellValue("Danh sách", "I7") // dòng tổng sau 2 hóa đơn
+	wo, _ := f.GetCellValue("Danh sách", "I4")
+	assert.Equal(t, "Xóa nợ (hủy gói)", wo)
+	total, _ := f.GetCellValue("Danh sách", "J7") // dòng tổng sau 2 hóa đơn (cột I = xóa nợ)
 	assert.Contains(t, total, "1,500,000")
-	style, _ := f.GetCellStyle("Danh sách", "I5")
+	style, _ := f.GetCellStyle("Danh sách", "J5")
 	st, err := f.GetStyle(style)
 	require.NoError(t, err)
 	require.NotNil(t, st.CustomNumFmt)

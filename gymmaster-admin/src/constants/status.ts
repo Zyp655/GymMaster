@@ -104,7 +104,12 @@ export const ONLINE_TXN_STATUS_MAP: Record<string, StatusMeta> = {
   SUCCESS: { label: 'Thành công', color: 'green' },
   FAILED: { label: 'Thất bại', color: 'red' },
   EXPIRED: { label: 'Hết hạn', color: 'default' },
+  NEEDS_REFUND: { label: 'Đã nhận tiền – cần hoàn', color: 'volcano' },
+  REFUNDED: { label: 'Đã hoàn tiền', color: 'purple' },
 };
+
+/** Phương thức thu tại quầy (không gồm VNPay – VNPay chỉ do hội viên tự thanh toán trên cổng). */
+export const COUNTER_PAYMENT_METHODS = ['CASH', 'TRANSFER', 'CARD'] as const;
 
 const toOptions = (map: Record<string, StatusMeta>) =>
   Object.entries(map).map(([value, meta]) => ({ value, label: meta.label }));
@@ -114,6 +119,10 @@ export const FREEZE_STATUS_OPTIONS = toOptions(FREEZE_STATUS_MAP);
 export const INVOICE_STATUS_OPTIONS = toOptions(INVOICE_STATUS_MAP);
 export const PAYMENT_METHOD_STATUS_OPTIONS = toOptions(PAYMENT_METHOD_MAP);
 export const ONLINE_TXN_STATUS_OPTIONS = toOptions(ONLINE_TXN_STATUS_MAP);
+export const COUNTER_PAYMENT_METHOD_OPTIONS = COUNTER_PAYMENT_METHODS.map((value) => ({
+  value,
+  label: PAYMENT_METHOD_MAP[value].label,
+}));
 
 /* ------------------------------------------------ POS & kho (docs/api/pos-inventory.md) */
 
@@ -223,9 +232,11 @@ export const CASH_SESSION_STATUS_MAP: Record<string, StatusMeta> = {
 
 /** Trạng thái kỳ trả góp (`installment_schedules.status`). */
 export const INSTALLMENT_STATUS_MAP: Record<string, StatusMeta> = {
-  PENDING: { label: 'Chưa đến hạn', color: 'gold' },
+  PENDING: { label: 'Chờ thu', color: 'gold' },
   PAID: { label: 'Đã thu tiền', color: 'green' },
   OVERDUE: { label: 'Quá hạn', color: 'red' },
+  SETTLED: { label: 'Đã tất toán', color: 'cyan' },
+  CANCELLED: { label: 'Đã hủy', color: 'default' },
 };
 
 /** Trạng thái hợp đồng hội viên (`member_contracts.status`). */

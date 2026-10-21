@@ -15,6 +15,7 @@ import (
 	"gymmaster-api/internal/dto"
 	"gymmaster-api/internal/entity"
 	"gymmaster-api/internal/pkg/reqctx"
+	"gymmaster-api/internal/pkg/rescode"
 	"gymmaster-api/internal/pkg/token"
 	"gymmaster-api/internal/repository"
 )
@@ -198,6 +199,15 @@ func (f *fakeEngagementRepo) CreateFoodLog(_ context.Context, l *entity.FoodLog)
 	return nil
 }
 
+func (f *fakeEngagementRepo) UpdateFoodLog(_ context.Context, l *entity.FoodLog) error {
+	if _, ok := f.foodLogs[l.ID]; !ok {
+		return gorm.ErrRecordNotFound
+	}
+	cp := *l
+	f.foodLogs[l.ID] = &cp
+	return nil
+}
+
 func (f *fakeEngagementRepo) DeleteFoodLog(_ context.Context, id uint) error {
 	delete(f.foodLogs, id)
 	return nil
@@ -362,6 +372,31 @@ func TestEngagementService_NutritionBMRAndNPS(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 330.0, logsRes.TotalCalories)
 	assert.Equal(t, 62.0, logsRes.TotalProtein)
+
+	// Khẩu phần lẻ theo gam: 12,5 g món "100g" = 0,125 khẩu phần (không làm tròn thành 13 g).
+	small, err := svc.CreateFoodLog(m1Ctx, &v1.CreateFoodLogReq{FoodID: chicken.ID, Qty: 0.125, Meal: entity.MealSnack, EatenAt: "2026-10-14"})
+	require.NoError(t, err)
+	assert.Equal(t, 0.125, small.Qty)
+	assert.Equal(t, 20.6, small.Calories) // 165 × 0,125 = 20,625 → 20,6
+
+	// Vượt giới hạn 100 khẩu phần / không dương → 400 (không phải lỗi 500 tràn cột).
+	_, err = svc.CreateFoodLog(m1Ctx, &v1.CreateFoodLogReq{FoodID: chicken.ID, Qty: 10000, Meal: entity.MealLunch})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+	_, err = svc.CreateFoodLog(m1Ctx, &v1.CreateFoodLogReq{FoodID: chicken.ID, Qty: -1, Meal: entity.MealLunch})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+
+	// Sửa bản ghi của chính mình: đổi khẩu phần & bữa.
+	updated, err := svc.UpdateFoodLog(m1Ctx, &v1.UpdateFoodLogReq{ID: small.ID, FoodID: chicken.ID, Qty: 0.5, Meal: entity.MealDinner})
+	require.NoError(t, err)
+	assert.Equal(t, 0.5, updated.Qty)
+	assert.Equal(t, entity.MealDinner, updated.Meal)
+	// Hội viên khác không được sửa / xóa.
+	_, err = svc.UpdateFoodLog(m2Ctx, &v1.UpdateFoodLogReq{ID: small.ID, FoodID: chicken.ID, Qty: 1, Meal: entity.MealLunch})
+	assert.Equal(t, rescode.PermissionDenied.Code(), codeOf(err))
+	assert.Equal(t, rescode.PermissionDenied.Code(), codeOf(svc.DeleteFoodLog(m2Ctx, small.ID)))
+	_, err = svc.UpdateFoodLog(m1Ctx, &v1.UpdateFoodLogReq{ID: small.ID, FoodID: chicken.ID, Qty: 101, Meal: entity.MealLunch})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+	require.NoError(t, svc.DeleteFoodLog(m1Ctx, small.ID))
 
 	// Tạo khảo sát NPS & 3 hội viên trả lời: 1 Promoter (10), 1 Passive (8), 1 Detractor (5)
 	// NPS = (1 - 1) / 3 * 100 = 0; nếu thêm 1 Promoter nữa -> (2 - 1)/4 = +25

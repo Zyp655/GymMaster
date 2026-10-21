@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -28,8 +29,11 @@ type CheckinRuleInput struct {
 	Subscription          *entity.Subscription
 	Plan                  *entity.MembershipPlan
 	AccessHoursWindow     string
-	LastCheckinAt         *time.Time
-	CooldownMinutes       int
+	// AccessHoursJSON là membership_plans.access_hours (jsonb), hỗ trợ:
+	// [] (không giới hạn), ["09:00-16:00"], [{"dow":[1,2,3,4,5],"from":"09:00","to":"16:00"}].
+	AccessHoursJSON string
+	LastCheckinAt   *time.Time
+	CooldownMinutes int
 }
 
 // CheckinRuleViolation mô tả lý do từ chối check-in của một rule.
@@ -205,6 +209,18 @@ func (OffPeakHoursRule) Evaluate(_ context.Context, in *CheckinRuleInput) *Check
 	if in == nil {
 		return nil
 	}
+	if js := strings.TrimSpace(in.AccessHoursJSON); js != "" {
+		ok, label := evaluateAccessHoursJSON(in.Now, js)
+		if ok {
+			return nil
+		}
+		return &CheckinRuleViolation{
+			RuleName:   "off_peak_hours",
+			DenyReason: entity.CheckinDenyOutsideAccessHours,
+			Code:       rescode.OutsideAccessHours,
+			Message:    fmt.Sprintf("Gói tập Off-Peak chỉ cho phép check-in trong khung giờ %s", label),
+		}
+	}
 	window := strings.TrimSpace(in.AccessHoursWindow)
 	if window == "" && in.Plan != nil && len(in.Plan.AccessHours) > 0 {
 		window = strings.Trim(string(in.Plan.AccessHours), " \"[]")
@@ -302,4 +318,70 @@ func parseHHMM(s string) (int, bool) {
 		return 0, false
 	}
 	return h*60 + m, true
+}
+
+type accessHoursSlot struct {
+	Dow  []int  `json:"dow"`
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+var accessDowNames = map[int]string{0: "CN", 1: "T2", 2: "T3", 3: "T4", 4: "T5", 5: "T6", 6: "T7", 7: "CN"}
+
+// evaluateAccessHoursJSON trả ok=true nếu now nằm trong ít nhất một khung giờ (hoặc không cấu hình khung giờ hợp lệ).
+// dow: 1=Thứ 2 … 6=Thứ 7, 0 hoặc 7 = Chủ nhật; bỏ trống = mọi ngày. label mô tả các khung giờ để hiển thị.
+func evaluateAccessHoursJSON(now time.Time, raw string) (bool, string) {
+	var slots []accessHoursSlot
+	if err := json.Unmarshal([]byte(raw), &slots); err != nil {
+		var windows []string
+		if err := json.Unmarshal([]byte(raw), &windows); err != nil {
+			return true, ""
+		}
+		for _, w := range windows {
+			parts := strings.Split(w, "-")
+			if len(parts) == 2 {
+				slots = append(slots, accessHoursSlot{From: strings.TrimSpace(parts[0]), To: strings.TrimSpace(parts[1])})
+			}
+		}
+	}
+	labels := make([]string, 0, len(slots))
+	valid := 0
+	wd := int(now.Weekday())
+	for _, sl := range slots {
+		from, ok1 := parseHHMM(sl.From)
+		to, ok2 := parseHHMM(sl.To)
+		if !ok1 || !ok2 {
+			continue
+		}
+		valid++
+		label := sl.From + "-" + sl.To
+		if len(sl.Dow) > 0 {
+			days := make([]string, 0, len(sl.Dow))
+			for _, d := range sl.Dow {
+				days = append(days, accessDowNames[d])
+			}
+			label = strings.Join(days, ",") + " " + label
+		}
+		labels = append(labels, label)
+		if len(sl.Dow) > 0 {
+			match := false
+			for _, d := range sl.Dow {
+				if d%7 == wd {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		cur := now.Hour()*60 + now.Minute()
+		if (from <= to && cur >= from && cur <= to) || (from > to && (cur >= from || cur <= to)) {
+			return true, ""
+		}
+	}
+	if valid == 0 {
+		return true, ""
+	}
+	return false, strings.Join(labels, "; ")
 }

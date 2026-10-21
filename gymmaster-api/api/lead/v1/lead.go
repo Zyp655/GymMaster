@@ -85,7 +85,9 @@ type PublicClassSchedule struct {
 	EndAt          time.Time `json:"end_at"`
 	Capacity       int       `json:"capacity"`
 	BookedCount    int       `json:"booked_count"`
-	Status         string    `json:"status"`
+	// AvailableSlots = capacity − booked_count (không âm) – số chỗ còn trống để đặt.
+	AvailableSlots int    `json:"available_slots"`
+	Status         string `json:"status"`
 }
 
 type AtRiskMember struct {
@@ -135,7 +137,7 @@ type PublicClassSchedulesRes []*PublicClassSchedule
 // ---- Admin (/v1/admin) ----------------------------------------------------------
 
 type ListLeadsReq struct {
-	g.Meta     `path:"/leads" method:"get" tags:"CRM & Chăm sóc" summary:"Danh sách khách tiềm năng" perm:"lead.view,lead.manage"`
+	g.Meta `path:"/leads" method:"get" tags:"CRM & Chăm sóc" summary:"Danh sách khách tiềm năng" perm:"lead.view,lead.manage"`
 	dto.PageReq
 	BranchID   uint   `json:"branch_id"   in:"query"`
 	Status     string `json:"status"      in:"query" v:"in:NEW,CONTACTED,TRIAL,CONVERTED,LOST"`
@@ -157,12 +159,34 @@ type CreateLeadReq struct {
 }
 type CreateLeadRes = Lead
 
+// LeadUpdateInput: giống LeadInput nhưng KHÔNG có giá trị mặc định cho source/status –
+// bỏ trống thì giữ nguyên giá trị hiện tại (không bị reset về WALK_IN/NEW).
+type LeadUpdateInput struct {
+	BranchID       uint   `json:"branch_id"        v:"required|min:1#Vui lòng chọn chi nhánh"`
+	FullName       string `json:"full_name"        v:"required|length:2,150#Vui lòng nhập họ tên|Họ tên từ 2 đến 150 ký tự"`
+	Phone          string `json:"phone"            v:"required|length:9,20#Vui lòng nhập số điện thoại|Số điện thoại không hợp lệ"`
+	Email          string `json:"email"`
+	Source         string `json:"source"           v:"in:WEBSITE,WALK_IN,REFERRAL,FACEBOOK,OTHER#Nguồn không hợp lệ"`
+	InterestPlanID *uint  `json:"interest_plan_id"`
+	Status         string `json:"status"           v:"in:NEW,CONTACTED,TRIAL,CONVERTED,LOST#Trạng thái không hợp lệ"`
+	AssignedTo     *uint  `json:"assigned_to"`
+	TrialDate      string `json:"trial_date"`
+	Note           string `json:"note"`
+}
+
 type UpdateLeadReq struct {
 	g.Meta `path:"/leads/{id}" method:"put" tags:"CRM & Chăm sóc" summary:"Cập nhật khách tiềm năng" perm:"lead.manage"`
 	ID     uint `json:"id" in:"path" v:"required|min:1"`
-	LeadInput
+	LeadUpdateInput
 }
 type UpdateLeadRes = Lead
+
+type UpdateLeadStatusReq struct {
+	g.Meta `path:"/leads/{id}/status" method:"patch" tags:"CRM & Chăm sóc" summary:"Chuyển trạng thái khách tiềm năng (Kanban)" perm:"lead.manage"`
+	ID     uint   `json:"id"     in:"path" v:"required|min:1"`
+	Status string `json:"status"           v:"required|in:NEW,CONTACTED,TRIAL,CONVERTED,LOST#Vui lòng chọn trạng thái|Trạng thái không hợp lệ"`
+}
+type UpdateLeadStatusRes = Lead
 
 type DeleteLeadReq struct {
 	g.Meta `path:"/leads/{id}" method:"delete" tags:"CRM & Chăm sóc" summary:"Xóa khách tiềm năng" perm:"lead.manage"`

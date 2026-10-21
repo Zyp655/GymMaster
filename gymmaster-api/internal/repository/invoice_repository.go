@@ -87,6 +87,13 @@ type (
 		FindBranch(ctx context.Context, id uint) (*entity.Branch, error)
 		FindMember(ctx context.Context, id uint) (*entity.Member, error)
 		UserName(ctx context.Context, id uint) (string, error)
+
+		// InstallmentSchedules: các kỳ trả góp của hóa đơn (theo seq); lock = FOR UPDATE.
+		InstallmentSchedules(ctx context.Context, invoiceID uint, lock bool) ([]entity.InstallmentSchedule, error)
+		// SaveInstallmentSchedule ghi amount/paid_amount/status/paid_at/updated_at của một kỳ.
+		SaveInstallmentSchedule(ctx context.Context, sc *entity.InstallmentSchedule) error
+		// PendingOnlineTxn: giao dịch VNPay PENDING mới nhất của hóa đơn tạo từ thời điểm since (chưa hết hạn); nil nếu không có.
+		PendingOnlineTxn(ctx context.Context, invoiceID uint, since time.Time) (*entity.OnlinePaymentTxn, error)
 	}
 
 	invoiceRepository struct {
@@ -302,4 +309,32 @@ func (r *invoiceRepository) UserName(ctx context.Context, id uint) (string, erro
 		return "", err
 	}
 	return names[0], nil
+}
+
+func (r *invoiceRepository) InstallmentSchedules(ctx context.Context, invoiceID uint, lock bool) ([]entity.InstallmentSchedule, error) {
+	db := postgres.Conn(ctx, r.db).Table("installment_schedules s").Select("s.*").
+		Joins("JOIN installment_plans ip ON ip.id = s.plan_id").
+		Where("ip.invoice_id = ?", invoiceID).Order("s.seq")
+	if lock {
+		db = db.Clauses(clause.Locking{Strength: "UPDATE", Table: clause.Table{Name: "s"}})
+	}
+	var out []entity.InstallmentSchedule
+	err := db.Find(&out).Error
+	return out, err
+}
+
+func (r *invoiceRepository) SaveInstallmentSchedule(ctx context.Context, sc *entity.InstallmentSchedule) error {
+	return postgres.Conn(ctx, r.db).Model(&entity.InstallmentSchedule{}).Where("id = ?", sc.ID).Updates(map[string]any{
+		"amount": sc.Amount, "paid_amount": sc.PaidAmount, "status": sc.Status, "paid_at": sc.PaidAt, "updated_at": sc.UpdatedAt,
+	}).Error
+}
+
+func (r *invoiceRepository) PendingOnlineTxn(ctx context.Context, invoiceID uint, since time.Time) (*entity.OnlinePaymentTxn, error) {
+	var rows []entity.OnlinePaymentTxn
+	err := postgres.Conn(ctx, r.db).Where("invoice_id = ? AND status = ? AND created_at >= ?", invoiceID, entity.OnlineTxnPending, since).
+		Order("id DESC").Limit(1).Find(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
 }

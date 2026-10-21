@@ -25,7 +25,6 @@ import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import classApi from '@/api/class';
 import type { ClassSchedule, ClassScheduleListParams } from '@/api/class';
-import BranchSelect from '@/components/BranchSelect';
 import PageTitle from '@/components/PageTitle';
 import { PERM } from '@/constants/permissions';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -38,6 +37,7 @@ import CancelScheduleModal from './CancelScheduleModal';
 import ScheduleDrawer from './ScheduleDrawer';
 import ScheduleFormModal from './ScheduleFormModal';
 import { ScheduleAgenda, ScheduleTable } from './ScheduleListView';
+import BranchFilterSelect from './BranchFilterSelect';
 import WeekCalendar from './WeekCalendar';
 import { startOfWeek } from './constants';
 import { useBranchHours, useClassTypeOptions, useRoomOptions, useTrainerOptions } from './queries';
@@ -186,12 +186,11 @@ export default function ClassSchedulesPage() {
         </Space>
       </Col>
       <Col xs={24} sm={12} lg={4}>
-        <BranchSelect
-          allowAll
+        <BranchFilterSelect
           value={branchId}
           onChange={(v) =>
             set({
-              branch_id: v === null ? 'all' : (v as number),
+              branch_id: v === null ? 'all' : v,
               trainer_id: undefined,
               room_id: undefined,
             })

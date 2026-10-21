@@ -14,12 +14,14 @@ import (
 	"gymmaster-api/internal/pkg/reqctx"
 	"gymmaster-api/internal/pkg/rescode"
 	"gymmaster-api/internal/pkg/token"
+	"gymmaster-api/internal/repository"
 )
 
 type fakeBranchRepo struct {
 	nextID   uint
 	branches map[uint]*entity.Branch
 	staff    map[uint]int64
+	deps     map[uint]repository.BranchDependencies
 }
 
 func newFakeBranchRepo() *fakeBranchRepo {
@@ -66,6 +68,9 @@ func (f *fakeBranchRepo) Delete(_ context.Context, id uint, _ *uint) error {
 }
 func (f *fakeBranchRepo) CountStaff(_ context.Context, id uint) (int64, error) {
 	return f.staff[id], nil
+}
+func (f *fakeBranchRepo) Dependencies(_ context.Context, id uint) (repository.BranchDependencies, error) {
+	return f.deps[id], nil
 }
 
 func validBranch(code string) v1.BranchInput {
@@ -125,4 +130,31 @@ func TestBranchDelete_BlockedWhenHasStaff(t *testing.T) {
 	require.NoError(t, svc.Delete(ctx, b.ID))
 	_, err = svc.Get(ctx, b.ID)
 	assert.Equal(t, rescode.NotFound.Code(), codeOf(err))
+}
+
+// Hồi quy QA vòng 2: chi nhánh còn hội viên / gói tập hiệu lực / hóa đơn → 409, không xóa.
+func TestBranchDelete_BlockedWhenHasBusinessData(t *testing.T) {
+	for name, deps := range map[string]repository.BranchDependencies{
+		"còn hội viên": {Members: 2},
+		"còn gói tập":  {ActiveSubs: 1},
+		"còn hóa đơn":  {Invoices: 5},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeBranchRepo()
+			repo.deps = map[uint]repository.BranchDependencies{}
+			svc := NewBranchService(repo)
+			ctx := context.Background()
+			b, err := svc.Create(ctx, validBranch("DN01"))
+			require.NoError(t, err)
+			repo.deps[b.ID] = deps
+
+			err = svc.Delete(ctx, b.ID)
+			assert.Equal(t, rescode.Conflict.Code(), codeOf(err))
+			_, err = svc.Get(ctx, b.ID)
+			require.NoError(t, err, "chi nhánh vẫn còn")
+
+			repo.deps[b.ID] = repository.BranchDependencies{}
+			require.NoError(t, svc.Delete(ctx, b.ID))
+		})
+	}
 }

@@ -9,8 +9,32 @@ Base URL (dev): `http://localhost:8000/v1`. Swagger: `http://localhost:8000/swag
 { "code": 0, "message": "OK", "data": { } }
 ```
 - `code = 0` → thành công.
-- Lỗi nghiệp vụ là số 5 chữ số, **HTTP status = code / 100**.
-- Lỗi validate của GoFrame là `code = 51` → HTTP 400; `message` là câu lỗi tiếng Việt.
+- Lỗi nghiệp vụ là số 5 chữ số; **HTTP status là status chuẩn suy theo bảng dưới** (`rescode.HTTPStatus`).
+  FE nên dựa vào `code` trong body; HTTP status chỉ dùng để phân loại 4xx/5xx.
+- Lỗi validate / body sai kiểu dữ liệu → `code = 40000`, HTTP 400; `message` là câu tiếng Việt dùng nhãn
+  tiếng Việt của trường (vd "Chi nhánh là bắt buộc"), không lộ tên field Go. (Trước đây validate trả `code = 51`.)
+- Lỗi DB do dữ liệu đầu vào không còn trả 500: trùng khóa → 40900 "Dữ liệu đã tồn tại (trùng …)";
+  khóa ngoại không tồn tại → 40000 "Dữ liệu tham chiếu không tồn tại (…)"; xóa bản ghi đang được tham chiếu →
+  40900 "Không thể xóa vì dữ liệu đang được sử dụng"; chuỗi quá dài → 40000 "Dữ liệu quá dài"; số/ID vượt giới hạn
+  kiểu cột → 40000 "Giá trị số vượt giới hạn"; ký tự NUL → 40000 "Dữ liệu chứa ký tự không hợp lệ"
+  (bảng đầy đủ: `gymmaster-api/internal/pkg/dberr`).
+
+| Dải code | HTTP |
+|---|---|
+| 400xx | 400 |
+| 401xx | 401 |
+| 403xx | 403 |
+| 404xx | 404 |
+| 409xx | 409 |
+| 429xx | 429 |
+| 41xxx (gói tập) | 409 |
+| 42xxx (check-in bị từ chối: chưa ký HĐ, ngoài giờ, nợ trả góp, nghỉ lễ) | 403 |
+| 43xxx (lịch PT: ngoài lịch rảnh, HLV nghỉ) | 409 |
+| 44xxx (thanh toán: sai chữ ký, lệch tiền, hết hạn) | 400 |
+| 45xxx, 46xxx (POS/tồn kho, thiết bị/tủ đồ) | 409 |
+| 47001 (kỳ lương không hợp lệ) | 400 |
+| 47002, 47003 (ca thu ngân) | 409 |
+| 5xxxx | 500 |
 
 | code | HTTP | Ý nghĩa |
 |---|---|---|

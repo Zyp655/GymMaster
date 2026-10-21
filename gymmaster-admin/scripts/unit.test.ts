@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AxiosError } from 'axios';
 
+// QA vòng 2 (audit labels, dashboard, roles, 2FA, staff, CMS chat, Ctrl+K) – tách file riêng.
+import './admin-qa2.test.ts';
+
 import { auditActionLabel, auditEntityLabel } from '../src/api/audit.ts';
 import { NOTIFICATION_TYPE_LABEL, toAppLink } from '../src/api/notification.ts';
 import { PERM, PERMISSION_MODULE_LABELS, ROLE, ROLE_LABELS } from '../src/constants/permissions.ts';
@@ -295,5 +298,108 @@ describe('gymmaster-admin: reports/types & constants', () => {
     assert.equal(NOTIFICATION_TYPE_LABEL.BIRTHDAY, 'Sinh nhật hội viên');
     assert.equal(NOTIFICATION_TYPE_LABEL.LEAD_NEW, 'Khách tiềm năng mới');
     assert.equal(NOTIFICATION_TYPE_LABEL.CHECKIN, 'Check-in mới');
+  });
+});
+
+// ---- QA vòng 2 (ops): trang Cấu hình & chú thích lịch PT ----
+import { normalizeTagValues, rangeHint } from '../src/routes/settings/helpers.ts';
+import { legendStatusKeys } from '../src/routes/pt/constants.ts';
+
+describe('gymmaster-admin: settings helpers & PT legend', () => {
+  it('rangeHint: Switch không hiện khoảng, khóa thường có đơn vị, khóa không giới hạn', () => {
+    const base = { key: 'k', label: 'l', help: '', unit: 'ngày', min: 0, max: 90 };
+    assert.equal(rangeHint(base), 'Khoảng hợp lệ: 0 – 90 ngày');
+    assert.equal(rangeHint({ ...base, unit: '' }), 'Khoảng hợp lệ: 0 – 90');
+    assert.equal(rangeHint({ ...base, max: 1, boolean: true }), '');
+    assert.equal(rangeHint({ ...base, max: Number.MAX_SAFE_INTEGER }), '');
+    assert.equal(rangeHint({ ...base, min: 1, max: Number.MAX_SAFE_INTEGER }), 'Tối thiểu 1');
+  });
+
+  it('normalizeTagValues: bỏ trùng, bỏ chữ, giảm dần', () => {
+    assert.deepEqual(normalizeTagValues(['1', ' 7', 'abc', '3', '7']), [7, 3, 1]);
+    assert.deepEqual(normalizeTagValues([]), []);
+  });
+
+  it('legendStatusKeys: luôn có Vắng mặt; lịch HLV bỏ NO_SHOW_PENDING', () => {
+    assert.ok(legendStatusKeys('pt').includes('NO_SHOW'));
+    assert.ok(legendStatusKeys('pt').includes('NO_SHOW_PENDING'));
+    assert.ok(legendStatusKeys('trainer').includes('NO_SHOW'));
+    assert.ok(!legendStatusKeys('trainer').includes('NO_SHOW_PENDING'));
+  });
+});
+
+import {
+  ALL_BRANCHES,
+  fromSelectValue,
+  toSelectValue,
+} from '../src/components/BranchSelect/value.ts';
+
+describe('gymmaster-admin: BranchSelect value mapping', () => {
+  it('không có "Tất cả": null/undefined → undefined (hiện placeholder, không hiện "0")', () => {
+    assert.equal(toSelectValue(null, false), undefined);
+    assert.equal(toSelectValue(undefined, false), undefined);
+    assert.equal(toSelectValue(3, false), 3);
+    assert.deepEqual(toSelectValue([1, 2], false), [1, 2]);
+  });
+  it('có "Tất cả" (allowAll + toàn hệ thống): null ↔ 0 bên trong', () => {
+    assert.equal(toSelectValue(null, true), ALL_BRANCHES);
+    assert.equal(toSelectValue(undefined, true), undefined);
+    assert.equal(fromSelectValue(ALL_BRANCHES, true), null);
+    assert.equal(fromSelectValue(5, true), 5);
+  });
+  it('bỏ chọn / giá trị 0 khi không có "Tất cả" → undefined', () => {
+    assert.equal(fromSelectValue(undefined, false), undefined);
+    assert.equal(fromSelectValue(null, false), undefined);
+    assert.equal(fromSelectValue(ALL_BRANCHES, false), undefined);
+    assert.equal(fromSelectValue(2, false), 2);
+  });
+});
+
+import { resolveOkText } from '../src/components/ConfirmButton/okText.ts';
+
+describe('gymmaster-admin: ConfirmButton okText', () => {
+  it('ưu tiên okText → chữ trên nút → Xóa/Đồng ý', () => {
+    assert.equal(resolveOkText('Hủy đặt chỗ', 'Hủy', true), 'Hủy đặt chỗ');
+    assert.equal(resolveOkText(undefined, 'Từ chối', true), 'Từ chối');
+    assert.equal(resolveOkText(undefined, 'Giải phóng tủ', true), 'Giải phóng tủ');
+    assert.equal(resolveOkText(undefined, 'Duyệt', false), 'Duyệt');
+    assert.equal(
+      resolveOkText(undefined, undefined, true),
+      'Xóa',
+      'nút chỉ có icon (xóa) vẫn là "Xóa"',
+    );
+    assert.equal(resolveOkText(undefined, undefined, false), 'Đồng ý');
+    assert.equal(
+      resolveOkText(undefined, undefined, true, 'Từ chối'),
+      'Từ chối',
+      'nút icon có aria-label',
+    );
+    assert.equal(resolveOkText(undefined, undefined, true, 'Xóa'), 'Xóa');
+  });
+});
+
+import { holidayImpactSummary, normalizeHHMM } from '../src/routes/trainer-schedules/time.ts';
+
+describe('gymmaster-admin: lịch rảnh / ngày lễ – giờ HH:mm', () => {
+  it('chuẩn hóa giờ giống backend', () => {
+    assert.equal(normalizeHHMM('7:00'), '07:00');
+    assert.equal(normalizeHHMM(' 23:59 '), '23:59');
+    for (const bad of ['7h sáng', '24:00', '7:5', '', null, undefined, '07:60']) {
+      assert.equal(normalizeHHMM(bad), null, String(bad));
+    }
+    assert.ok(
+      (normalizeHHMM('9:00') ?? '') < (normalizeHHMM('10:00') ?? ''),
+      'so sánh chuỗi đúng sau chuẩn hóa',
+    );
+  });
+  it('tóm tắt lịch bị ảnh hưởng', () => {
+    assert.equal(holidayImpactSummary({}), null);
+    assert.deepEqual(
+      holidayImpactSummary({
+        affected_class_schedules: [{ id: 1, start_at: '', end_at: '' }],
+        affected_pt_sessions: [],
+      }),
+      { classes: 1, pt: 0 },
+    );
   });
 });

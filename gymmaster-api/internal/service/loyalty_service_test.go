@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,21 @@ type fakeLoyaltyRepo struct {
 	ledgers      []entity.LoyaltyLedger
 	promotions   []entity.Promotion
 	metricCounts map[string]int
+}
+
+func (f *fakeLoyaltyRepo) ListLedgers(_ context.Context, _ dto.Query, branchIDs []uint, memberID uint, reason string) ([]repository.LoyaltyLedgerRow, int64, error) {
+	out := []repository.LoyaltyLedgerRow{}
+	for _, l := range f.ledgers {
+		m := f.members[l.MemberID]
+		if m == nil || (memberID > 0 && l.MemberID != memberID) || (reason != "" && l.Reason != reason) {
+			continue
+		}
+		if branchIDs != nil && !slices.Contains(branchIDs, m.HomeBranchID) {
+			continue
+		}
+		out = append(out, repository.LoyaltyLedgerRow{LoyaltyLedger: l, MemberCode: m.MemberCode, MemberName: m.FullName, BranchID: m.HomeBranchID})
+	}
+	return out, int64(len(out)), nil
 }
 
 func newFakeLoyaltyRepo() *fakeLoyaltyRepo {
@@ -342,6 +358,8 @@ func (f *fakeLoyaltyRepo) SumReferralPoints(_ context.Context, memberID uint) (i
 func TestLoyaltyService_RedeemAndChallenges(t *testing.T) {
 	repo := newFakeLoyaltyRepo()
 	svc := NewLoyaltyService(repo, nil, nil)
+	// Cố định "hôm nay" trong khoảng thời gian thử thách (01–31/10/2026) để test không phụ thuộc ngày chạy.
+	svc.(*loyaltyService).now = func() time.Time { return time.Date(2026, 10, 15, 9, 0, 0, 0, time.Local) }
 
 	uid := uint(101)
 	repo.members[1] = &entity.Member{

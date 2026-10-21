@@ -4,7 +4,7 @@ Base URL (dev): `http://localhost:8000/v1`. Mọi endpoint cần `Authorization:
 Envelope, mã lỗi, phân trang: xem `sprint-01-auth-rbac-branch.md`. Tóm tắt:
 
 - Thành công: `{ "code": 0, "message": "OK", "data": ... }`.
-- Lỗi: `code` 5 chữ số, HTTP = code/100, `message` tiếng Việt hiển thị thẳng cho người dùng.
+- Lỗi: `code` 5 chữ số, HTTP status chuẩn theo bảng trong `sprint-01-auth-rbac-branch.md`, `message` tiếng Việt hiển thị thẳng cho người dùng.
   Lỗi validate tag: `code = 51` (HTTP 400). Nghiệp vụ: `40000` (400), `40300` (403), `40400` (404), `40900` (409).
 - Ngày `"YYYY-MM-DD"` (giờ Việt Nam). Thời điểm RFC3339. Tiền là `number` VND (giá bán/thu tiền làm tròn đến đồng;
   **giá vốn** `cost_price`/`unit_cost` có thể lẻ 2 chữ số thập phân).
@@ -126,7 +126,7 @@ dòng hoàn kho khi **hủy** hóa đơn cũng dùng số hóa đơn đó.
 - `cost_price`: **giá vốn bình quân gia quyền** (tự cập nhật khi nhập hàng – mục 4).
 - `member_price`: giá cho hội viên; `null` = hội viên mua theo giá bán.
 - `total_stock`: tổng tồn mọi chi nhánh. `stock`, `low_stock` chỉ có khi truyền `branch_id` (ngược lại `null`).
-- `low_stock` = `min_stock > 0 && stock < min_stock`.
+- `low_stock`: theo định nghĩa **Tồn thấp** dùng chung (xem mục `GET /admin/inventory/low-stock`).
 
 ### `ProductDetail` (`GET /{id}`, response của tạo/sửa) = `Product` +
 ```json
@@ -299,7 +299,10 @@ Mọi loại phiếu (`NK`, `DC`, `KK`, `TH`, cả số hóa đơn `HD…` để
 [ { "product_id": 8, "sku": "PRE-C4", "product_name": "Pre-workout Cellucor C4 Original 30 lần dùng", "unit": "hộp",
     "branch_id": 3, "branch_name": "GymMaster Quận 1", "quantity": 1, "min_stock": 2 } ]
 ```
-Chỉ xét dòng tồn đã tồn tại, sản phẩm `ACTIVE`, chi nhánh `ACTIVE`, `min_stock > 0` và `quantity < min_stock`.
+**Định nghĩa Tồn thấp (DUY NHẤT – dùng chung cho dashboard, báo cáo, `/inventory/stock?low_stock=true`, `low_stock_count`,
+`/products?low_stock=true`, POS, cron cảnh báo; mã: `repository.LowStockCond`):** dòng tồn **đã tồn tại** (sản phẩm đã từng
+nhập về chi nhánh đó), sản phẩm `ACTIVE` chưa xóa, chi nhánh `ACTIVE` chưa xóa, `min_stock > 0` và `quantity < min_stock`
+(tồn bằng đúng mức tối thiểu là đủ). Sản phẩm chưa từng nhập về chi nhánh (tồn hiển thị 0) **không** tính là tồn thấp ở chi nhánh đó.
 
 **Cho cron/dashboard (Go):** `module.NewStockService(d).ListLowStock(ctx, branchID *uint)` – cùng dữ liệu, `nil` = mọi chi nhánh,
 không kiểm tra phạm vi người dùng.

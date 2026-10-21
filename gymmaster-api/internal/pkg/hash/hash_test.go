@@ -1,6 +1,8 @@
 package hash
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,4 +26,17 @@ func TestHashAndRandomToken(t *testing.T) {
 	assert.Len(t, h1, 64)
 	assert.Equal(t, h1, SHA256(tok1))
 	assert.NotEqual(t, h1, SHA256(tok2))
+}
+
+func TestHashPassword_TooLong(t *testing.T) {
+	_, err := HashPassword(strings.Repeat("a", 73))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrPasswordTooLong))
+
+	// 25 ký tự "ậ" (3 byte/ký tự) = 75 byte → vượt giới hạn dù chỉ 25 ký tự.
+	_, err = HashPassword(strings.Repeat("ậ", 25))
+	assert.True(t, errors.Is(err, ErrPasswordTooLong))
+
+	_, err = HashPassword(strings.Repeat("a", 72))
+	assert.NoError(t, err)
 }

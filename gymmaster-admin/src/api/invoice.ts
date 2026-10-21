@@ -7,7 +7,13 @@ export type InvoiceStatus = 'UNPAID' | 'PARTIAL' | 'PAID' | 'VOID' | 'REFUNDED';
 export type InvoiceSource = 'COUNTER' | 'POS' | 'PORTAL';
 export type InvoiceItemType = 'MEMBERSHIP' | 'PT' | 'PRODUCT' | 'FEE' | 'OTHER';
 export type PaymentMethod = 'CASH' | 'TRANSFER' | 'CARD' | 'VNPAY';
-export type OnlineTxnStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'EXPIRED';
+export type OnlineTxnStatus =
+  | 'PENDING'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'EXPIRED'
+  | 'NEEDS_REFUND'
+  | 'REFUNDED';
 
 export interface InvoiceMemberRef {
   id: number;
@@ -43,6 +49,9 @@ export interface Invoice {
   voided_at: string | null;
   void_reason: string;
   created_at: string;
+  /** Phần nợ được xóa khi hủy gói (không phải giảm giá): total = subtotal − discount − write_off_amount. */
+  write_off_amount?: number;
+  write_off_reason?: string;
 }
 
 export interface InvoiceItem {
@@ -172,6 +181,12 @@ export interface OnlinePaymentTxn {
   bank_code: string;
   created_at: string;
   paid_at: string | null;
+  /** Phần đã ghi vào hóa đơn; amount − recorded_amount (chưa hoàn) là phần cần hoàn cho khách. */
+  recorded_amount?: number;
+  refunded_amount?: number;
+  /** Số còn có thể hoàn = amount − refunded_amount. */
+  refundable?: number;
+  note?: string;
 }
 
 export interface OnlinePaymentListParams extends ListParams {

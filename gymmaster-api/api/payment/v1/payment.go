@@ -90,11 +90,16 @@ type OnlineTxnItem struct {
 	MemberName    string     `json:"member_name"`
 	TxnRef        string     `json:"txn_ref"`
 	Amount        float64    `json:"amount"`
-	Status        string     `json:"status"`
+	Status        string     `json:"status"          dc:"PENDING | SUCCESS | FAILED | EXPIRED | NEEDS_REFUND (đã nhận tiền, cần hoàn) | REFUNDED"`
 	ProviderTxnNo string     `json:"provider_txn_no"`
 	BankCode      string     `json:"bank_code"`
 	CreatedAt     time.Time  `json:"created_at"`
 	PaidAt        *time.Time `json:"paid_at"`
+	// RecordedAmount: phần đã ghi nhận vào hóa đơn; Amount − RecordedAmount (chưa hoàn) là phần cần hoàn cho khách.
+	RecordedAmount float64 `json:"recorded_amount"`
+	RefundedAmount float64 `json:"refunded_amount"`
+	Refundable     float64 `json:"refundable"      dc:"Số còn có thể hoàn = amount − refunded_amount"`
+	Note           string  `json:"note"`
 }
 
 type ListOnlineTxnsReq struct {

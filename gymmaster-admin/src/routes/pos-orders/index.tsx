@@ -36,11 +36,13 @@ import FilterBar from '@/components/FilterBar';
 import MobileList from '@/components/MobileList';
 import type { MobileFetchArgs } from '@/components/MobileList';
 import MoneyText from '@/components/Money/MoneyText';
+import HelpLabel from '@/components/HelpLabel';
 import PageTitle from '@/components/PageTitle';
 import StatCard, { SectionHeader } from '@/components/StatCard';
 import StatusTag from '@/components/StatusTag';
 import { PERM } from '@/constants/permissions';
 import { INVOICE_STATUS_MAP, INVOICE_STATUS_OPTIONS } from '@/constants/status';
+import { REVENUE_HELP } from '@/constants/revenueBasis';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { usePermission } from '@/hooks/usePermission';
 import { useTableQuery } from '@/hooks/useTableQuery';
@@ -96,7 +98,7 @@ function PosDailySummary({
             label="Số đơn / SL bán"
             value={s?.order_count ?? 0}
             valueSuffix="đơn"
-            caption={`SL bán: ${formatNumber(s?.items_sold ?? 0)} sản phẩm`}
+            caption={`SL bán thuần: ${formatNumber(s?.items_sold ?? 0)} sản phẩm`}
             icon={<ShoppingOutlined />}
             loading={loading}
           />
@@ -113,7 +115,7 @@ function PosDailySummary({
         </Col>
         <Col xs={12} sm={8} lg={6}>
           <StatCard
-            label="Doanh thu thuần"
+            label={<HelpLabel help={REVENUE_HELP.posDaily}>Doanh thu thuần</HelpLabel>}
             value={s?.net_revenue ?? 0}
             currency
             caption={`Hoàn trả: ${formatMoney(s?.refund_amount ?? 0)}`}
@@ -171,14 +173,18 @@ function PosDailySummary({
                     render: (_, p) => (
                       <span>
                         {p.name}{' '}
-                        <Typography.Text type="secondary" className="code-text" style={{ fontSize: 12 }}>
+                        <Typography.Text
+                          type="secondary"
+                          className="code-text"
+                          style={{ fontSize: 12 }}
+                        >
                           ({p.sku})
                         </Typography.Text>
                       </span>
                     ),
                   },
                   {
-                    title: 'SL bán',
+                    title: 'SL bán (thuần)',
                     dataIndex: 'quantity',
                     align: 'right',
                     width: 80,
@@ -230,6 +236,7 @@ function PosOrdersDesktop() {
         title: 'Số HĐ',
         dataIndex: 'invoice_no',
         sorter: true,
+        width: 145,
         render: (v: string, r) => (
           <Button
             type="link"
@@ -245,11 +252,14 @@ function PosOrdersDesktop() {
         title: 'Ngày lập',
         dataIndex: 'issued_at',
         sorter: true,
+        width: 135,
         render: (v: string) => <DateText value={v} withTime />,
       },
       {
         title: 'Hội viên / Khách',
         key: 'member',
+        width: 150,
+        ellipsis: true,
         render: (_, r) =>
           r.member ? (
             <Space direction="vertical" size={0}>
@@ -262,11 +272,12 @@ function PosOrdersDesktop() {
             <Typography.Text type="secondary">Khách lẻ</Typography.Text>
           ),
       },
-      { title: 'Chi nhánh', dataIndex: 'branch_name' },
+      { title: 'Chi nhánh', dataIndex: 'branch_name', width: 140, ellipsis: true },
       {
         title: 'Giảm giá',
         dataIndex: 'discount',
         align: 'right',
+        width: 95,
         responsive: ['lg'],
         render: (v: number) => (v > 0 ? <MoneyText value={v} /> : '—'),
       },
@@ -275,6 +286,7 @@ function PosOrdersDesktop() {
         dataIndex: 'total',
         sorter: true,
         align: 'right',
+        width: 110,
         render: (v: number) => <MoneyText value={v} strong />,
       },
       {
@@ -282,6 +294,7 @@ function PosOrdersDesktop() {
         dataIndex: 'paid_amount',
         sorter: true,
         align: 'right',
+        width: 115,
         render: (v: number, r) => (
           <Space direction="vertical" size={0} align="end">
             <MoneyText value={v} />
@@ -297,19 +310,23 @@ function PosOrdersDesktop() {
         title: 'Trạng thái',
         dataIndex: 'status',
         sorter: true,
+        width: 135,
         render: (v: string) => <StatusTag status={v} map={INVOICE_STATUS_MAP} />,
       },
       {
         title: 'Thu ngân',
         dataIndex: 'issued_by_name',
-        responsive: ['md'],
+        width: 130,
+        ellipsis: true,
+        // Chỉ hiện trên màn rất rộng – ở 1440px các cột chính (trạng thái) không bị cột thao tác cố định che.
+        responsive: ['xxl'],
         render: (v: string) => v || '—',
       },
       {
         title: '',
         key: 'actions',
         fixed: 'right',
-        width: 110,
+        width: 80,
         render: (_, r) => (
           <Space size={4}>
             <Tooltip title="Chi tiết / Trả hàng">
@@ -395,7 +412,14 @@ function PosOrdersDesktop() {
         </Col>
       </FilterBar>
 
-      <DataTable<Invoice> table={table} columns={columns} emptyText="Chưa có đơn hàng POS nào" />
+      <DataTable<Invoice>
+        table={table}
+        columns={columns}
+        emptyText="Chưa có đơn hàng POS nào"
+        // Độ rộng cột cố định: ở 1440px cột trạng thái không bị cột thao tác cố định che/cắt chữ.
+        tableLayout="fixed"
+        scroll={{ x: 1105 }}
+      />
       <OrderDrawer invoiceId={selectedId} onClose={closeOrder} />
     </Card>
   );
@@ -445,7 +469,10 @@ function PosOrdersMobile() {
         searchPlaceholder="Tìm mã HĐ, tên/mã/SĐT hội viên..."
         emptyText="Chưa có đơn hàng POS nào"
         stats={[
-          ['Đơn hôm nay', `${formatNumber(s?.order_count ?? 0)} (${formatNumber(s?.items_sold ?? 0)} SP)`],
+          [
+            'Đơn hôm nay',
+            `${formatNumber(s?.order_count ?? 0)} (${formatNumber(s?.items_sold ?? 0)} SP)`,
+          ],
           ['DT thuần', formatMoney(s?.net_revenue ?? 0)],
           ['Lãi gộp', formatMoney(s?.gross_profit ?? 0)],
         ]}

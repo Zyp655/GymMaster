@@ -198,7 +198,7 @@ func TestLockerService_AssignReleaseBoardAndExpire(t *testing.T) {
 		Code:       "A-01",
 		Zone:       "Khu Nam",
 		Size:       "STANDARD",
-		MonthlyFee: 150000,
+		MonthlyFee: lockerFeePtr(150000),
 	})
 	require.NoError(t, err)
 
@@ -207,7 +207,7 @@ func TestLockerService_AssignReleaseBoardAndExpire(t *testing.T) {
 		Code:       "A-02",
 		Zone:       "Khu Nam",
 		Size:       "LARGE",
-		MonthlyFee: 200000,
+		MonthlyFee: lockerFeePtr(200000),
 	})
 	require.NoError(t, err)
 
@@ -265,3 +265,72 @@ func TestLockerService_AssignReleaseBoardAndExpire(t *testing.T) {
 	assert.Equal(t, 1, expiredCount)
 	assert.Equal(t, entity.LockerStatusAvailable, repo.lockers[l2.ID].Status)
 }
+
+func TestCheckLockerStatusChange(t *testing.T) {
+	rid := uint(1)
+	rented := &repository.LockerRow{RentalID: &rid, RentalType: entity.LockerRentalMonthly}
+	free := &repository.LockerRow{}
+
+	assert.Error(t, checkLockerStatusChange(rented, entity.LockerStatusAvailable), "tủ đang thuê không được đặt AVAILABLE")
+	assert.Error(t, checkLockerStatusChange(rented, entity.LockerStatusOccupied))
+	assert.NoError(t, checkLockerStatusChange(rented, entity.LockerStatusBroken))
+	assert.NoError(t, checkLockerStatusChange(rented, entity.LockerStatusRented))
+
+	assert.NoError(t, checkLockerStatusChange(free, entity.LockerStatusAvailable))
+	assert.NoError(t, checkLockerStatusChange(free, entity.LockerStatusBroken))
+	assert.Error(t, checkLockerStatusChange(free, entity.LockerStatusRented), "RENTED chỉ có qua gán tủ")
+}
+
+func (f *fakeLockerRepo) EndRentalForVoidedInvoice(_ context.Context, rentalID uint, now time.Time) (bool, error) {
+	r, ok := f.rentals[rentalID]
+	if !ok || r.Status != entity.LockerRentalActive {
+		return false, nil
+	}
+	r.Status, r.EndAt = entity.LockerRentalEnded, &now
+	if l, ok := f.lockers[r.LockerID]; ok && l.Status != entity.LockerStatusBroken {
+		l.Status = entity.LockerStatusAvailable
+	}
+	return true, nil
+}
+
+func TestLockerService_InvoiceVoidEndsRental(t *testing.T) {
+	repo := newFakeLockerRepo()
+	svc := NewLockerService(repo, nil, nil).(*lockerService)
+	now := time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	repo.lockers[1] = &entity.Locker{ID: 1, BranchID: 1, Code: "A-01", Status: entity.LockerStatusRented}
+	repo.lockers[2] = &entity.Locker{ID: 2, BranchID: 1, Code: "A-02", Status: entity.LockerStatusBroken}
+	repo.rentals[5] = &entity.LockerRental{ID: 5, LockerID: 1, MemberID: 10, Type: entity.LockerRentalMonthly, Status: entity.LockerRentalActive}
+	repo.rentals[6] = &entity.LockerRental{ID: 6, LockerID: 2, MemberID: 10, Type: entity.LockerRentalMonthly, Status: entity.LockerRentalActive}
+	inv := &entity.Invoice{}
+	ref := func(id uint) *entity.InvoiceItem { return &entity.InvoiceItem{ItemType: entity.InvoiceItemLocker, RefID: &id} }
+
+	require.NoError(t, svc.onInvoiceVoid(context.Background(), inv, ref(5)))
+	assert.Equal(t, entity.LockerRentalEnded, repo.rentals[5].Status)
+	assert.Equal(t, entity.LockerStatusAvailable, repo.lockers[1].Status)
+
+	require.NoError(t, svc.onInvoiceVoid(context.Background(), inv, ref(6)))
+	assert.Equal(t, entity.LockerRentalEnded, repo.rentals[6].Status)
+	assert.Equal(t, entity.LockerStatusBroken, repo.lockers[2].Status, "tủ hỏng giữ BROKEN")
+
+	// Idempotent + dòng không có ref_id.
+	require.NoError(t, svc.onInvoiceVoid(context.Background(), inv, ref(5)))
+	require.NoError(t, svc.onInvoiceVoid(context.Background(), inv, &entity.InvoiceItem{ItemType: entity.InvoiceItemLocker}))
+}
+
+func TestLockerService_CreateRespectsZeroFee(t *testing.T) {
+	repo := newFakeLockerRepo()
+	svc := NewLockerService(repo, nil, nil)
+	ctx := reqctx.WithAuth(context.Background(), &token.Payload{UserID: 1, Roles: []string{consts.RoleOwner}})
+	l, err := svc.CreateLocker(ctx, &v1.CreateLockerReq{BranchID: 1, Code: "free-01", MonthlyFee: new(float64)})
+	require.NoError(t, err)
+	assert.Equal(t, 0.0, l.MonthlyFee, "phí 0 phải được giữ nguyên")
+	def, err := svc.CreateLocker(ctx, &v1.CreateLockerReq{BranchID: 1, Code: "def-01"})
+	require.NoError(t, err)
+	assert.Equal(t, 150000.0, def.MonthlyFee, "bỏ trống → 150.000đ")
+	neg := -1.0
+	_, err = svc.CreateLocker(ctx, &v1.CreateLockerReq{BranchID: 1, Code: "neg-01", MonthlyFee: &neg})
+	require.Error(t, err)
+}
+
+func lockerFeePtr(v float64) *float64 { return &v }

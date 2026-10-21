@@ -83,7 +83,8 @@ const (
 
 	PermAuditView = "audit.view"
 
-	PermJobView = "job.view"
+	PermJobView   = "job.view"
+	PermJobManage = "job.manage" // chạy job thủ công, gửi email thử
 
 	PermWorkoutView   = "workout.view"
 	PermWorkoutManage = "workout.manage"
@@ -131,20 +132,18 @@ const (
 	PermDataRequestProcess  = "data_request.process"
 
 	// Bổ sung chi tiết phân quyền theo §16.3 & Sprint 29–30
-	PermEquipmentReport   = "equipment.report"
-	PermLeadConvert       = "lead.convert"
-	PermAttendanceView    = "attendance.view"
-	PermPayrollLock       = "payroll.lock"
-	PermExpenseApprove    = "expense.approve"
-	PermInstallmentManage = "installment.manage"
-	PermReportProfitLoss  = "report.profit_loss"
-	PermLoyaltyAdjust     = "loyalty.adjust"
-	PermNutritionManage   = "nutrition.manage"
+	PermEquipmentReport    = "equipment.report"
+	PermLeadConvert        = "lead.convert"
+	PermAttendanceView     = "attendance.view"
+	PermPayrollLock        = "payroll.lock"
+	PermExpenseApprove     = "expense.approve"
+	PermInstallmentManage  = "installment.manage"
+	PermReportProfitLoss   = "report.profit_loss"
+	PermLoyaltyAdjust      = "loyalty.adjust"
+	PermNutritionManage    = "nutrition.manage"
 	PermAnnouncementManage = "announcement.manage"
-	PermSurveyManage      = "survey.manage"
-	PermCmsManage         = "cms.manage"
-	PermImportLegacy      = "import.legacy"
-	PermSetupWizard       = "setup.wizard"
+	PermSurveyManage       = "survey.manage"
+	PermCmsManage          = "cms.manage"
+	PermImportLegacy       = "import.legacy"
+	PermSetupWizard        = "setup.wizard"
 )
-
-

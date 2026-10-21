@@ -91,7 +91,7 @@ type MaintenanceMonthCost struct {
 // ---- Thiết bị (/equipments) -----------------------------------------------------
 
 type ListEquipmentsReq struct {
-	g.Meta   `path:"/equipments" method:"get" tags:"Thiết bị" summary:"Danh sách thiết bị phòng tập" perm:"equipment.view,equipment.manage"`
+	g.Meta `path:"/equipments" method:"get" tags:"Thiết bị" summary:"Danh sách thiết bị phòng tập" perm:"equipment.view,equipment.manage"`
 	dto.PageReq
 	BranchID uint   `json:"branch_id" in:"query"`
 	RoomID   uint   `json:"room_id"   in:"query"`
@@ -127,7 +127,7 @@ type DeleteEquipmentReq struct {
 type DeleteEquipmentRes struct{}
 
 type ReportIssueReq struct {
-	g.Meta      `path:"/equipments/{id}/report-issue" method:"post" tags:"Thiết bị" summary:"Báo hỏng thiết bị" perm:"equipment.manage"`
+	g.Meta      `path:"/equipments/{id}/report-issue" method:"post" tags:"Thiết bị" summary:"Báo hỏng thiết bị" perm:"equipment.view,equipment.manage"`
 	ID          uint   `json:"id"          in:"path" v:"required|min:1"`
 	Description string `json:"description" v:"required#Vui lòng nhập mô tả sự cố"`
 }
@@ -136,7 +136,7 @@ type ReportIssueRes = MaintenanceLog
 // ---- Bảo trì (/maintenance-logs) ------------------------------------------------
 
 type ListMaintenanceLogsReq struct {
-	g.Meta      `path:"/maintenance-logs" method:"get" tags:"Thiết bị" summary:"Danh sách phiếu bảo trì / sửa chữa" perm:"equipment.view,equipment.manage"`
+	g.Meta `path:"/maintenance-logs" method:"get" tags:"Thiết bị" summary:"Danh sách phiếu bảo trì / sửa chữa" perm:"equipment.view,equipment.manage"`
 	dto.PageReq
 	EquipmentID uint   `json:"equipment_id" in:"query"`
 	BranchID    uint   `json:"branch_id"    in:"query"`

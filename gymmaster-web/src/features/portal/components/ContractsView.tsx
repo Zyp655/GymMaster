@@ -21,6 +21,7 @@ import {
 import { EmptyState } from '@/components/common/EmptyState';
 import { LoadError } from '@/components/common/LoadError';
 import { Badge } from '@/components/ui/badge';
+import { RichHtml } from '@/components/ui/rich-html';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -236,7 +237,7 @@ export function ContractsView() {
                   <FormItem>
                     <FormLabel>{t('branchLabel')}</FormLabel>
                     <Select
-                      value={field.value ? String(field.value) : undefined}
+                      value={field.value ? String(field.value) : ''}
                       onValueChange={val => field.onChange(Number(val))}
                     >
                       <FormControl>
@@ -317,14 +318,19 @@ export function ContractsView() {
                     key={pass.id}
                     className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-line bg-canvas p-4"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="rounded-xl bg-white p-2.5 shadow-xs">
+                    <div className="flex min-w-0 items-center gap-4">
+                      <div className="shrink-0 rounded-xl bg-white p-2.5 shadow-xs">
                         <QRCodeSVG value={passToken} size={84} />
                       </div>
-                      <div className="grid gap-1">
+                      <div className="grid min-w-0 gap-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-h4 font-semibold text-primary">{passName}</span>
-                          <Badge variant={isUsed ? 'neutral' : 'success'}>
+                          <span className="min-w-0 text-h4 font-semibold break-words text-primary">
+                            {passName}
+                          </span>
+                          <Badge
+                            variant={isUsed ? 'neutral' : 'success'}
+                            className="max-w-full shrink whitespace-normal"
+                          >
                             {isUsed
                               ? t('usedBadge', { time: formatDateTime(pass.used_at!) })
                               : t('unusedBadge', { date: formatDate(pass.valid_date) })}
@@ -334,7 +340,9 @@ export function ContractsView() {
                           {passPhone}
                           {pass.branch_name ? ` · ${pass.branch_name}` : ''}
                         </p>
-                        <p className="font-mono text-body font-bold text-brand-600">{passToken}</p>
+                        <p className="font-mono text-body font-bold break-all text-brand-600">
+                          {passToken}
+                        </p>
                       </div>
                     </div>
 
@@ -342,6 +350,7 @@ export function ContractsView() {
                       type="button"
                       variant="outline"
                       size="sm"
+                      className="h-auto max-w-full break-all whitespace-normal"
                       onClick={() => void handleCopyToken(passToken)}
                     >
                       {copiedToken === passToken ? (
@@ -378,9 +387,8 @@ function ContractCard({ contract }: { contract: MemberContractItem }) {
     contract.title || contract.name || contract.template_name || `Hợp đồng #${contract.id}`;
   const contractVersion = contract.version ?? contract.template_version ?? 1;
   const contractStatus = (contract.status === 'SIGNED' ? 'SIGNED' : 'PENDING') as
-    | 'PENDING'
-    | 'SIGNED';
-  const contractBody = contract.content || contract.rendered_html || contract.body_html || '';
+    'PENDING' | 'SIGNED';
+  const contractBody = contract.rendered_html || contract.body_html || contract.content || '';
   const sigImg = contract.signature_data || contract.signature_url;
 
   function getCoords(
@@ -389,23 +397,24 @@ function ContractCard({ contract }: { contract: MemberContractItem }) {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
+    // Canvas co giãn theo CSS (w-full) → quy đổi toạ độ màn hình sang toạ độ bản vẽ.
+    const sx = rect.width ? canvas.width / rect.width : 1;
+    const sy = rect.height ? canvas.height / rect.height : 1;
     if ('touches' in e) {
       const touch = e.touches[0];
       if (!touch) return null;
       return {
-        x: touch.clientX - rect.left,
-        y: touch.clientY - rect.top,
+        x: (touch.clientX - rect.left) * sx,
+        y: (touch.clientY - rect.top) * sy,
       };
     }
     return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+      x: (e.clientX - rect.left) * sx,
+      y: (e.clientY - rect.top) * sy,
     };
   }
 
-  function startDraw(
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>,
-  ) {
+  function startDraw(e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) {
     const pos = getCoords(e);
     const ctx = canvasRef.current?.getContext('2d');
     if (!pos || !ctx) return;
@@ -419,9 +428,7 @@ function ContractCard({ contract }: { contract: MemberContractItem }) {
     setErrorMsg(null);
   }
 
-  function moveDraw(
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>,
-  ) {
+  function moveDraw(e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) {
     if (!isDrawing) return;
     const pos = getCoords(e);
     const ctx = canvasRef.current?.getContext('2d');
@@ -462,7 +469,8 @@ function ContractCard({ contract }: { contract: MemberContractItem }) {
         return offscreen.toDataURL('image/png');
       }
     }
-    return `data:text/plain;base64,${btoa(unescape(encodeURIComponent(trimmed)))}`;
+    // API chỉ nhận ảnh PNG (data:image/png;base64) – không có canvas thì không tạo được chữ ký.
+    return null;
   }
 
   async function handleSign() {
@@ -490,16 +498,21 @@ function ContractCard({ contract }: { contract: MemberContractItem }) {
   return (
     <div className="grid gap-4 rounded-xl border border-line bg-canvas p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-h4 font-semibold text-primary">{contractTitle}</h3>
-          <Badge variant="outline">{t('versionLabel', { version: contractVersion })}</Badge>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h3 className="min-w-0 text-h4 font-semibold break-words text-primary">
+            {contractTitle}
+          </h3>
+          <Badge variant="outline" className="shrink-0">
+            {t('versionLabel', { version: contractVersion })}
+          </Badge>
         </div>
         <ContractStatusBadge status={contractStatus} />
       </div>
 
-      <div className="max-h-56 overflow-y-auto whitespace-pre-line rounded-xl border border-line bg-surface p-4 text-body text-secondary">
-        {contractBody}
-      </div>
+      <RichHtml
+        html={contractBody}
+        className="max-h-96 overflow-y-auto rounded-xl border border-line bg-surface p-4 text-body text-secondary"
+      />
 
       {contractStatus === 'SIGNED' ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-success-50 p-3.5 text-success">
@@ -542,7 +555,7 @@ function ContractCard({ contract }: { contract: MemberContractItem }) {
             onTouchStart={startDraw}
             onTouchMove={moveDraw}
             onTouchEnd={stopDraw}
-            className="h-36 w-full cursor-crosshair touch-none rounded-xl border border-dashed border-line bg-white"
+            className="h-36 w-full max-w-full min-w-0 cursor-crosshair touch-none rounded-xl border border-dashed border-line bg-white"
           />
 
           <div className="grid gap-1.5">

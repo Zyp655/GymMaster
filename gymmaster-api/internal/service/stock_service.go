@@ -95,6 +95,19 @@ var stockVNLoc = func() *time.Location {
 
 // ---- Hàm thuần ------------------------------------------------------------------
 
+// Giới hạn số lượng / đơn giá phiếu kho: cột quantity/balance_after là INTEGER (≤ 2.147.483.647), unit_cost là
+// NUMERIC(14,2) – vượt giới hạn trước đây ra lỗi 500 (numeric overflow) hoặc tràn số nguyên.
+const (
+	stockMaxLineQty  = 1_000_000       // số lượng tối đa một dòng phiếu nhập / điều chuyển / kiểm kê
+	stockMaxLevel    = 100_000_000     // tồn tối đa của một sản phẩm tại một chi nhánh sau biến động
+	stockMaxUnitCost = productMaxPrice // đơn giá nhập tối đa (999.999.999.999đ)
+)
+
+var (
+	errStockLineQtyTooLarge = rescode.New(rescode.BadRequest, "Số lượng mỗi dòng tối đa 1.000.000")
+	errStockUnitCostTooHigh = rescode.New(rescode.BadRequest, "Đơn giá nhập vượt quá giới hạn cho phép (tối đa 999.999.999.999đ)")
+)
+
 // stockRoundCost làm tròn giá vốn đến 2 chữ số thập phân (cột NUMERIC(14,2)).
 func stockRoundCost(v float64) float64 { return math.Round(v*100) / 100 }
 
@@ -114,12 +127,11 @@ func stockWeightedCost(oldQty int, oldCost float64, addQty int, addCost float64)
 	return stockRoundCost((float64(oldQty)*oldCost + float64(addQty)*addCost) / float64(oldQty+addQty))
 }
 
-// stockCrossedLow: cảnh báo chỉ khi tồn VỪA vượt xuống dưới ngưỡng (cũ ≥ min, mới < min).
+// stockCrossedLow: cảnh báo chỉ khi tồn VỪA vượt xuống dưới ngưỡng (cũ ≥ min, mới < min) – cùng ngưỡng
+// "quantity < min_stock" với repository.LowStockCond (định nghĩa tồn thấp dùng chung cho mọi màn hình/báo cáo).
 func stockCrossedLow(oldQty, newQty, minStock int) bool {
 	return minStock > 0 && oldQty >= minStock && newQty < minStock
 }
-
-func stockIsLow(qty, minStock int) bool { return minStock > 0 && qty < minStock }
 
 func stockShortage(p *entity.Product, available, need int) error {
 	return rescode.New(rescode.Conflict, fmt.Sprintf("Sản phẩm \"%s\" không đủ hàng tại chi nhánh (còn %d %s, cần %d)",
@@ -189,6 +201,10 @@ func (s *stockService) applyStockChange(ctx context.Context, productID, branchID
 		newQty := old + qty
 		if newQty < 0 {
 			return stockShortage(p, old, -qty)
+		}
+		if newQty > stockMaxLevel {
+			return rescode.New(rescode.BadRequest, fmt.Sprintf("Tồn kho của %s sau biến động (%d) vượt quá giới hạn %d",
+				p.Name, newQty, stockMaxLevel))
 		}
 		if err := s.repo.SetLevel(ctx, productID, branchID, newQty); err != nil {
 			if isCheckViolation(err) {
@@ -283,6 +299,12 @@ func (s *stockService) Import(ctx context.Context, req *v1.ImportReq) (*v1.Vouch
 		}
 		if it.UnitCost < 0 {
 			return nil, rescode.New(rescode.BadRequest, "Đơn giá nhập không được âm")
+		}
+		if it.Quantity > stockMaxLineQty {
+			return nil, errStockLineQtyTooLarge
+		}
+		if it.UnitCost > stockMaxUnitCost {
+			return nil, errStockUnitCostTooHigh
 		}
 	}
 	if _, err := s.checkBranch(ctx, req.BranchID, true, "chi nhánh nhập"); err != nil {
@@ -395,6 +417,9 @@ func (s *stockService) Transfer(ctx context.Context, req *v1.TransferReq) (*v1.V
 		if it == nil || it.ProductID == 0 || it.Quantity <= 0 {
 			return nil, rescode.New(rescode.BadRequest, "Số lượng điều chuyển phải lớn hơn 0")
 		}
+		if it.Quantity > stockMaxLineQty {
+			return nil, errStockLineQtyTooLarge
+		}
 		ids, qtys = append(ids, it.ProductID), append(qtys, it.Quantity)
 	}
 	from, err := s.checkBranch(ctx, req.FromBranchID, true, "chi nhánh xuất")
@@ -480,6 +505,9 @@ func (s *stockService) Adjust(ctx context.Context, req *v1.AdjustReq) (*v1.Vouch
 		}
 		if *it.ActualQuantity < 0 {
 			return nil, rescode.New(rescode.BadRequest, "Số lượng thực tế không được âm")
+		}
+		if *it.ActualQuantity > stockMaxLevel {
+			return nil, rescode.New(rescode.BadRequest, "Số lượng thực tế vượt quá giới hạn cho phép (tối đa 100.000.000)")
 		}
 		if seen[it.ProductID] {
 			return nil, rescode.New(rescode.BadRequest, fmt.Sprintf("Sản phẩm #%d bị lặp trong phiếu kiểm kê", it.ProductID))
@@ -573,7 +601,7 @@ func (s *stockService) Stock(ctx context.Context, req *v1.StockReq) (*v1.StockRe
 		return &v1.StockRow{ProductID: r.ProductID, SKU: r.SKU, Barcode: r.Barcode, ProductName: r.ProductName,
 			CategoryID: r.CategoryID, CategoryName: r.CategoryName, Unit: r.Unit, ImageURL: r.ImageURL,
 			BranchID: r.BranchID, BranchName: r.BranchName, Quantity: r.Quantity, MinStock: r.MinStock,
-			LowStock: stockIsLow(r.Quantity, r.MinStock), CostPrice: r.CostPrice,
+			LowStock: r.LowStock, CostPrice: r.CostPrice,
 			StockValue: roundMoneyVND(float64(r.Quantity) * r.CostPrice), SellPrice: r.SellPrice}
 	})
 	return &v1.StockRes{

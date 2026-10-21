@@ -148,8 +148,8 @@ func (c *Controller) AdminUpdateContactMessage(ctx context.Context, req *v1.Admi
 
 // Shared endpoints (Conversations, Notification Preferences, Calendar Token)
 
-func (c *SharedPortalController) ListConversations(ctx context.Context, _ *v1.ListConversationsReq) (v1.ListConversationsRes, error) {
-	return c.svc.ListConversations(ctx)
+func (c *SharedPortalController) ListConversations(ctx context.Context, req *v1.ListConversationsReq) (v1.ListConversationsRes, error) {
+	return c.svc.ListConversations(ctx, req)
 }
 
 func (c *SharedPortalController) ListMessages(ctx context.Context, req *v1.ListMessagesReq) (v1.ListMessagesRes, error) {

@@ -129,7 +129,7 @@ type Product struct {
 	Status       string    `json:"status"`
 	TotalStock   int       `json:"total_stock"  dc:"Tổng tồn mọi chi nhánh"`
 	Stock        *int      `json:"stock"        dc:"Tồn tại branch_id (chỉ có khi lọc branch_id)"`
-	LowStock     *bool     `json:"low_stock"    dc:"stock < min_stock (chỉ có khi lọc branch_id)"`
+	LowStock     *bool     `json:"low_stock"    dc:"Tồn thấp theo định nghĩa chung (dòng tồn đã có, quantity < min_stock; chỉ có khi lọc branch_id)"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -153,11 +153,11 @@ type ProductInput struct {
 	Name        string   `json:"name"         v:"required|max-length:150#Vui lòng nhập tên sản phẩm|Tên tối đa 150 ký tự"`
 	CategoryID  *uint    `json:"category_id"`
 	Unit        string   `json:"unit"         v:"max-length:20#Đơn vị tính tối đa 20 ký tự" d:"cái"`
-	CostPrice   float64  `json:"cost_price"   v:"min:0#Giá vốn không được âm"`
-	SellPrice   float64  `json:"sell_price"   v:"required|min:0#Vui lòng nhập giá bán|Giá bán không được âm"`
-	MemberPrice *float64 `json:"member_price" dc:"Giá hội viên, ≤ giá bán; null = như giá bán"`
-	ImageURL    string   `json:"image_url"    v:"max-length:500#URL ảnh tối đa 500 ký tự" dc:"URL từ POST /admin/uploads"`
-	MinStock    int      `json:"min_stock"    v:"min:0#Tồn tối thiểu không được âm"`
+	CostPrice   float64  `json:"cost_price"   v:"min:0|max:999999999999#Giá vốn không được âm|Giá vốn vượt quá giới hạn cho phép" dc:"Giá vốn ban đầu – CHỈ dùng khi tạo; khi cập nhật bị bỏ qua (giá vốn bình quân do phiếu nhập kho tính)"`
+	SellPrice   float64  `json:"sell_price"   v:"required|min:0|max:999999999999#Vui lòng nhập giá bán|Giá bán không được âm|Giá bán vượt quá giới hạn cho phép"`
+	MemberPrice *float64 `json:"member_price" v:"min:0|max:999999999999#Giá hội viên không được âm|Giá hội viên vượt quá giới hạn cho phép" dc:"Giá hội viên, ≤ giá bán; null = như giá bán"`
+	ImageURL    string   `json:"image_url"    v:"max-length:500#URL ảnh tối đa 500 ký tự" dc:"URL từ POST /admin/uploads (http(s):// hoặc /uploads/...)"`
+	MinStock    int      `json:"min_stock"    v:"min:0|max:100000000#Tồn tối thiểu không được âm|Tồn tối thiểu tối đa 100.000.000"`
 	Status      string   `json:"status"       v:"required|in:ACTIVE,INACTIVE#Vui lòng chọn trạng thái|Trạng thái không hợp lệ" d:"ACTIVE"`
 }
 

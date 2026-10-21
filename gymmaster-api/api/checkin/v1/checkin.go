@@ -66,13 +66,16 @@ type CheckinItem struct {
 	PlanType        *string    `json:"plan_type"`
 	CheckedInAt     time.Time  `json:"checked_in_at"`
 	CheckedOutAt    *time.Time `json:"checked_out_at"`
-	Method          string     `json:"method"       dc:"QR | MANUAL"`
+	Method          string     `json:"method"       dc:"QR | MANUAL | DEVICE"`
 	Result          string     `json:"result"       dc:"ALLOWED | DENIED"`
 	DenyReason      string     `json:"deny_reason"`
 	DenyMessage     string     `json:"deny_message"`
 	StaffID         *uint      `json:"staff_id"`
 	StaffName       *string    `json:"staff_name"`
 	Note            string     `json:"note"`
+	DeviceID        *uint      `json:"device_id,omitempty"`
+	DayPassID       *uint      `json:"day_pass_id,omitempty"     dc:"Lượt vào bằng vé ngày / vé khách (DP-...)"`
+	TrialPassID     *uint      `json:"trial_pass_id,omitempty"   dc:"Lượt vào bằng vé tập thử (TP-...)"`
 }
 
 // PresentItem là hội viên đang trong phòng tập.
@@ -136,7 +139,7 @@ type ListReq struct {
 	BranchID uint   `json:"branch_id" in:"query"`
 	MemberID uint   `json:"member_id" in:"query"`
 	Result   string `json:"result"    in:"query" v:"in:ALLOWED,DENIED#Kết quả không hợp lệ"`
-	Method   string `json:"method"    in:"query" v:"in:QR,MANUAL#Phương thức không hợp lệ"`
+	Method   string `json:"method"    in:"query" v:"in:QR,MANUAL,DEVICE#Phương thức không hợp lệ"`
 	From     string `json:"from"      in:"query" v:"date-format:Y-m-d#Từ ngày phải có dạng YYYY-MM-DD" dc:"YYYY-MM-DD (giờ VN), tính cả ngày"`
 	To       string `json:"to"        in:"query" v:"date-format:Y-m-d#Đến ngày phải có dạng YYYY-MM-DD" dc:"YYYY-MM-DD (giờ VN), tính cả ngày"`
 }

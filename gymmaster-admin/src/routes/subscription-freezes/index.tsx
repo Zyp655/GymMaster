@@ -78,9 +78,14 @@ function FreezesDesktop() {
       {
         title: 'Lý do',
         dataIndex: 'reason',
+        width: 220,
+        onCell: () => ({ style: { minWidth: 160 } }),
         render: (v: string) =>
           v ? (
-            <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth: 180 }}>
+            <Typography.Text
+              ellipsis={{ tooltip: v }}
+              style={{ display: 'block', minWidth: 140, maxWidth: 220 }}
+            >
               {v}
             </Typography.Text>
           ) : (

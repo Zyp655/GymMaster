@@ -9,6 +9,6 @@ import (
 )
 
 func RegisterBranch(d *Deps, admin *ghttp.RouterGroup) {
-	svc := service.NewBranchService(repository.NewBranchRepository(d.DB))
+	svc := service.NewBranchService(repository.NewBranchRepository(d.DB), d.Audit)
 	admin.Bind(branchctrl.NewV1(svc))
 }

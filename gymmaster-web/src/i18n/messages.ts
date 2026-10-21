@@ -1,5 +1,6 @@
 import auth from '../../messages/vi/auth.json';
 import common from '../../messages/vi/common.json';
+import landing from '../../messages/vi/landing.json';
 import portal from '../../messages/vi/portal.json';
 
 /**
@@ -9,6 +10,7 @@ export const messages = {
   common,
   auth,
   portal,
+  landing,
 };
 
 export type Messages = typeof messages;

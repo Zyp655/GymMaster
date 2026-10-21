@@ -299,7 +299,7 @@ export default function BookingsPanel({ schedule }: { schedule: ClassSchedule })
             borderRadius: 8,
             padding: 12,
             marginBottom: 12,
-            background: '#fff8f1',
+            background: 'var(--gm-unread)',
           }}
         >
           <Typography.Text strong>Đặt chỗ tại quầy</Typography.Text>

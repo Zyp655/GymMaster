@@ -40,6 +40,7 @@ type SessionItem struct {
 	LastUsedAt *time.Time `json:"last_used_at"`
 	ExpiresAt  time.Time  `json:"expires_at"`
 	CreatedAt  time.Time  `json:"created_at"`
+	IsCurrent  bool       `json:"is_current" dc:"Phiên của access token đang gọi API"`
 }
 
 type ConsentItem struct {
@@ -58,7 +59,7 @@ type DataRequestItem struct {
 	Type        string         `json:"type"`
 	Status      string         `json:"status"`
 	Reason      string         `json:"reason"`
-	FileURL     string         `json:"file_url"`
+	FileURL     string         `json:"file_url" dc:"Yêu cầu EXPORT đã xong: đường dẫn tải bản trích xuất (GET, cần access token)"`
 	HandledBy   *uint          `json:"handled_by"`
 	HandlerName string         `json:"handler_name,omitempty"`
 	Note        string         `json:"note"`
@@ -107,9 +108,9 @@ type RevokeSessionReq struct {
 type DeletePrivacyRes struct{}
 
 type RevokeOtherSessionsReq struct {
-	g.Meta           `path:"/security/sessions/revoke-others" method:"post" tags:"Bảo mật & Quyền riêng tư" summary:"Đăng xuất khỏi tất cả thiết bị khác"`
-	CurrentSessionID uint   `json:"current_session_id"`
-	RefreshToken     string `json:"refresh_token"`
+	g.Meta           `path:"/security/sessions/revoke-others" method:"post" tags:"Bảo mật & Quyền riêng tư" summary:"Đăng xuất khỏi tất cả thiết bị khác (giữ phiên hiện tại)"`
+	CurrentSessionID uint   `json:"current_session_id" dc:"Không bắt buộc: phiên hiện tại lấy từ access token (claim sid); chỉ cần với token cũ"`
+	RefreshToken     string `json:"refresh_token"      dc:"Không bắt buộc: refresh token của phiên hiện tại (dùng khi access token không có sid)"`
 }
 type RevokeOtherSessionsRes struct {
 	RevokedCount int64 `json:"revoked_count"`
@@ -144,18 +145,25 @@ type CreateDataRequestReq struct {
 }
 type CreateDataRequestRes = DataRequestItem
 
+type DownloadDataRequestReq struct {
+	g.Meta `path:"/data-requests/{id}/download" method:"get" tags:"Cổng hội viên" summary:"Tải bản trích xuất dữ liệu cá nhân (JSON) của yêu cầu EXPORT đã hoàn tất" role:"MEMBER"`
+	ID     uint `json:"id" in:"path" v:"required|min:1"`
+}
+type DownloadDataRequestRes struct{}
+
 // ---- Admin Privacy (/v1/admin) --------------------------------------------------
 
 type ListDataRequestsReq struct {
-	g.Meta `path:"/data-requests" method:"get" tags:"Bảo mật & Quyền riêng tư" summary:"Danh sách yêu cầu dữ liệu cá nhân (Nghị định 13/2023)" perm:"privacy.manage"`
+	g.Meta `path:"/data-requests" method:"get" tags:"Bảo mật & Quyền riêng tư" summary:"Danh sách yêu cầu dữ liệu cá nhân (Nghị định 13/2023)" perm:"privacy.manage,data_request.process"`
 	dto.PageReq
-	Status string `json:"status" in:"query"`
-	Type   string `json:"type"   in:"query"`
+	Status   string `json:"status"    in:"query"`
+	Type     string `json:"type"      in:"query"`
+	BranchID uint   `json:"branch_id" in:"query" dc:"Lọc theo chi nhánh gốc của hội viên; 0 = mọi chi nhánh được phép"`
 }
 type ListDataRequestsRes = dto.PageRes[*DataRequestItem]
 
 type ProcessDataRequestReq struct {
-	g.Meta `path:"/data-requests/{id}/process" method:"post" tags:"Bảo mật & Quyền riêng tư" summary:"Duyệt hoặc từ chối yêu cầu dữ liệu cá nhân" perm:"privacy.manage"`
+	g.Meta `path:"/data-requests/{id}/process" method:"post" tags:"Bảo mật & Quyền riêng tư" summary:"Duyệt hoặc từ chối yêu cầu dữ liệu cá nhân" perm:"data_request.process"`
 	ID     uint   `json:"id"     in:"path" v:"required|min:1"`
 	Action string `json:"action"           v:"required|in:APPROVE,REJECT#Hành động xử lý không hợp lệ"`
 	Note   string `json:"note"             v:"max-length:255"`

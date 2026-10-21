@@ -1,14 +1,44 @@
-import { useEffect } from 'react';
-import { App, Col, Form, Input, InputNumber, Modal, Row, Segmented, Select, Switch } from 'antd';
+import { useEffect, useState } from 'react';
+import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  App,
+  Button,
+  Col,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Row,
+  Segmented,
+  Select,
+  Space,
+  Switch,
+  TimePicker,
+} from 'antd';
+import dayjs, { type Dayjs } from 'dayjs';
 import type { MembershipPlan, MembershipPlanInput } from '@/api/plan';
 import { MoneyInput } from '@/components/Money';
 import { PERM } from '@/constants/permissions';
 import { usePermission } from '@/hooks/usePermission';
-import { setFormError, showError } from '@/utils/errors';
+import { getErrorMessage, isFormError, setFormError, showError } from '@/utils/errors';
 import { ACCESS_SCOPE_LABELS, PLAN_TYPE_OPTIONS } from './constants';
 import { useSavePlan } from './queries';
 
-type FormValues = Omit<MembershipPlanInput, 'session_count'> & { session_count?: number | null };
+type AccessSlotValue = { dow?: number[]; range?: [Dayjs, Dayjs] };
+type FormValues = Omit<MembershipPlanInput, 'session_count' | 'access_hours'> & {
+  session_count?: number | null;
+  access_hours?: AccessSlotValue[];
+};
+
+const DOW_OPTIONS = [
+  { value: 1, label: 'T2' },
+  { value: 2, label: 'T3' },
+  { value: 3, label: 'T4' },
+  { value: 4, label: 'T5' },
+  { value: 5, label: 'T6' },
+  { value: 6, label: 'T7' },
+  { value: 0, label: 'CN' },
+];
 
 export interface PlanFormProps {
   open: boolean;
@@ -25,13 +55,22 @@ export default function PlanForm({ open, record, onClose }: PlanFormProps) {
   const isEdit = !!record;
   const readOnly = !can(PERM.PLAN_MANAGE);
   const type = Form.useWatch('type', form);
+  // Lỗi API về khung giờ: Form.List không có ô nhập riêng → hiện ngay dưới danh sách khung giờ.
+  const [accessHoursError, setAccessHoursError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setAccessHoursError(null);
     form.resetFields();
     form.setFieldsValue(
       record
-        ? { ...record }
+        ? {
+            ...record,
+            access_hours: (record.access_hours ?? []).map((s) => ({
+              dow: (s.dow ?? []).map((d) => (d === 7 ? 0 : d)),
+              range: [dayjs(s.from, 'HH:mm'), dayjs(s.to, 'HH:mm')] as [Dayjs, Dayjs],
+            })),
+          }
         : {
             type: 'TIME',
             duration_days: 30,
@@ -41,6 +80,8 @@ export default function PlanForm({ open, record, onClose }: PlanFormProps) {
             max_freeze_times: 0,
             includes_classes: false,
             transfer_fee: 0,
+            guest_passes_per_month: 0,
+            access_hours: [],
             status: 'ACTIVE',
             sort_order: 0,
           },
@@ -61,6 +102,14 @@ export default function PlanForm({ open, record, onClose }: PlanFormProps) {
       max_freeze_times: v.max_freeze_times ?? 0,
       includes_classes: !!v.includes_classes,
       transfer_fee: v.transfer_fee ?? 0,
+      guest_passes_per_month: v.guest_passes_per_month ?? 0,
+      access_hours: (v.access_hours ?? [])
+        .filter((s) => s.range?.[0] && s.range?.[1])
+        .map((s) => ({
+          dow: s.dow ?? [],
+          from: s.range![0].format('HH:mm'),
+          to: s.range![1].format('HH:mm'),
+        })),
       status: v.status,
       sort_order: v.sort_order ?? 0,
     };
@@ -72,6 +121,10 @@ export default function PlanForm({ open, record, onClose }: PlanFormProps) {
           onClose();
         },
         onError: (e) => {
+          if (isFormError(e) && /khung giờ/i.test(getErrorMessage(e))) {
+            setAccessHoursError(getErrorMessage(e));
+            return;
+          }
           const mapped = setFormError(form, e, {
             code: /mã/i,
             name: /tên/i,
@@ -80,6 +133,7 @@ export default function PlanForm({ open, record, onClose }: PlanFormProps) {
             duration_days: /thời hạn/i,
             price: /giá/i,
             transfer_fee: /chuyển nhượng/i,
+            guest_passes_per_month: /vé mời/i,
             description: /mô tả/i,
           });
           if (!mapped) showError(e, 'Không thể lưu gói tập');
@@ -112,6 +166,9 @@ export default function PlanForm({ open, record, onClose }: PlanFormProps) {
         layout="vertical"
         disabled={readOnly}
         onFinish={onFinish}
+        onValuesChange={(changed: Partial<FormValues>) => {
+          if ('access_hours' in changed) setAccessHoursError(null);
+        }}
         style={{ marginTop: 12 }}
       >
         <Row gutter={16}>
@@ -275,6 +332,74 @@ export default function PlanForm({ open, record, onClose }: PlanFormProps) {
                   { label: 'Ngừng bán', value: 'INACTIVE' },
                 ]}
               />
+            </Form.Item>
+          </Col>
+          <Col xs={12} sm={8}>
+            <Form.Item
+              name="guest_passes_per_month"
+              label="Vé mời khách / tháng"
+              tooltip="Số vé tập thử hội viên được tự tạo cho bạn bè mỗi tháng trên cổng hội viên. 0 = không có."
+              rules={[
+                { type: 'number', min: 0, max: 30, message: 'Số vé mời mỗi tháng từ 0 đến 30' },
+              ]}
+            >
+              <InputNumber min={0} max={30} precision={0} suffix="vé" style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+          <Col xs={24}>
+            <Form.Item
+              label="Khung giờ được vào tập"
+              tooltip="Dùng cho gói Off-Peak. Để trống = vào tập mọi giờ mở cửa. Không chọn thứ = áp dụng mọi ngày."
+              style={{ marginBottom: 8 }}
+            >
+              <Form.List name="access_hours">
+                {(fields, { add, remove }) => (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    {fields.map((f) => (
+                      <Row key={f.key} gutter={8} align="middle" wrap={false}>
+                        <Col flex="auto">
+                          <Form.Item name={[f.name, 'dow']} noStyle>
+                            <Select
+                              mode="multiple"
+                              allowClear
+                              placeholder="Mọi ngày"
+                              options={DOW_OPTIONS}
+                              style={{ width: '100%' }}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col flex="220px">
+                          <Form.Item
+                            name={[f.name, 'range']}
+                            noStyle
+                            rules={[{ required: true, message: 'Chọn giờ bắt đầu và kết thúc' }]}
+                          >
+                            <TimePicker.RangePicker
+                              format="HH:mm"
+                              minuteStep={15}
+                              placeholder={['Từ', 'Đến']}
+                              style={{ width: '100%' }}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col flex="none">
+                          <Button
+                            type="text"
+                            danger
+                            icon={<MinusCircleOutlined />}
+                            aria-label="Xóa khung giờ"
+                            onClick={() => remove(f.name)}
+                          />
+                        </Col>
+                      </Row>
+                    ))}
+                    <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ dow: [] })}>
+                      Thêm khung giờ
+                    </Button>
+                    {accessHoursError && <Form.ErrorList errors={[accessHoursError]} />}
+                  </Space>
+                )}
+              </Form.List>
             </Form.Item>
           </Col>
           <Col xs={24}>

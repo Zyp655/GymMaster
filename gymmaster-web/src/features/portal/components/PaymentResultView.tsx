@@ -7,9 +7,9 @@ import {
   CheckCircleIcon,
   CreditCardIcon,
   DocumentTextIcon,
+  ExclamationTriangleIcon,
   XCircleIcon,
 } from '@heroicons/react/24/outline';
-import { LoadError } from '@/components/common/LoadError';
 import { Logo } from '@/components/layout/Logo';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -24,17 +24,29 @@ export function PaymentResultView() {
 
   const query = useVerifyVNPayReturnQuery(queryString, Boolean(queryString));
 
+  // Chỉ tin kết quả do API xác minh chữ ký VNPay. Tham số trên URL có thể bị sửa (vnp_ResponseCode=00 giả)
+  // → không có kết quả xác minh thì hiển thị "Không xác minh được giao dịch", tuyệt đối không báo thành công.
   const fallbackTxnRef = searchParams.get('vnp_TxnRef') ?? '';
-  const fallbackAmount = Number(searchParams.get('vnp_Amount') ?? 0) / 100;
-  const fallbackResponseCode = searchParams.get('vnp_ResponseCode') ?? '';
-  const fallbackSuccess = fallbackResponseCode === '00';
-
   const data = query.data;
-  const isSuccess = data ? data.success : fallbackSuccess;
+  const status: 'success' | 'failed' | 'unverified' = data
+    ? data.success
+      ? 'success'
+      : 'failed'
+    : 'unverified';
   const txnRef = data?.txn_ref || fallbackTxnRef;
   const invoiceNo = data?.invoice_no || (data?.invoice_id ? `#${data.invoice_id}` : '—');
-  const amount = data?.amount ?? fallbackAmount;
-  const responseCode = data?.response_code || fallbackResponseCode || '—';
+  const amount = data?.amount;
+  const responseCode = data?.response_code || '—';
+  const title =
+    status === 'success'
+      ? t('successTitle')
+      : status === 'failed'
+        ? t('failedTitle')
+        : t('unverifiedTitle');
+  const description =
+    status === 'unverified'
+      ? t('unverifiedDesc')
+      : data?.message || (status === 'success' ? t('successDesc') : t('failedDesc'));
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center bg-canvas px-4 py-12">
@@ -52,30 +64,28 @@ export function PaymentResultView() {
             <Skeleton className="h-5 w-80 max-w-full" />
             <p className="text-body text-secondary">{t('verifying')}</p>
           </div>
-        ) : query.isError && !fallbackTxnRef ? (
-          <LoadError error={query.error} onRetry={() => void query.refetch()} />
         ) : (
           <>
-            <div className="grid justify-items-center gap-3 text-center">
+            <div className="grid justify-items-center gap-3 text-center" data-status={status}>
               <div
                 className={
-                  isSuccess
+                  status === 'success'
                     ? 'flex size-16 items-center justify-center rounded-full bg-success-50 text-success'
-                    : 'flex size-16 items-center justify-center rounded-full bg-danger-50 text-danger'
+                    : status === 'failed'
+                      ? 'flex size-16 items-center justify-center rounded-full bg-danger-50 text-danger'
+                      : 'flex size-16 items-center justify-center rounded-full bg-warning-50 text-warning'
                 }
               >
-                {isSuccess ? (
+                {status === 'success' ? (
                   <CheckCircleIcon className="size-10" />
-                ) : (
+                ) : status === 'failed' ? (
                   <XCircleIcon className="size-10" />
+                ) : (
+                  <ExclamationTriangleIcon className="size-10" />
                 )}
               </div>
-              <h1 className="text-h2 font-semibold text-primary">
-                {isSuccess ? t('successTitle') : t('failedTitle')}
-              </h1>
-              <p className="text-body text-secondary">
-                {data?.message || (isSuccess ? t('successDesc') : t('failedDesc'))}
-              </p>
+              <h1 className="text-h2 font-semibold text-primary">{title}</h1>
+              <p className="text-body text-secondary">{description}</p>
             </div>
 
             <div className="grid gap-3 rounded-2xl bg-canvas p-4 text-body">
@@ -90,7 +100,7 @@ export function PaymentResultView() {
               <div className="flex items-center justify-between gap-2">
                 <span className="text-secondary">{t('amount')}</span>
                 <span className="text-h4 font-semibold text-brand-600">
-                  {formatCurrency(amount)}
+                  {amount !== undefined ? formatCurrency(amount) : '—'}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2">

@@ -37,6 +37,8 @@ type classFakeStore struct {
 	rooms     map[uint]*entity.Room
 	trainers  map[uint][]uint // trainerID -> branchIDs
 	pts       []classFakePT
+	// removedReviews: (member, schedule) đã gỡ đánh giá khi sửa điểm danh ATTENDED → NO_SHOW.
+	removedReviews [][2]uint
 }
 
 func newClassFakeStore() *classFakeStore {
@@ -553,4 +555,12 @@ func classTrainerCtx() context.Context {
 		UserID: 10, Roles: []string{consts.RoleTrainer}, BranchIDs: []uint{1},
 		Permissions: []string{consts.PermClassView, consts.PermBookingManage},
 	})
+}
+
+// DeleteClassReview: ghi lại các lần gỡ đánh giá (bookingReviewRemover).
+func (r bookingFakeRepo) DeleteClassReview(_ context.Context, memberID, scheduleID uint) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.removedReviews = append(r.removedReviews, [2]uint{memberID, scheduleID})
+	return nil
 }

@@ -9,6 +9,6 @@ import (
 )
 
 func RegisterRole(d *Deps, admin *ghttp.RouterGroup) {
-	svc := service.NewRoleService(repository.NewRoleRepository(d.DB), d.Tx)
+	svc := service.NewRoleService(repository.NewRoleRepository(d.DB), d.Tx, d.Audit)
 	admin.Bind(rolectrl.NewV1(svc))
 }

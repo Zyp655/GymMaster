@@ -6,6 +6,7 @@ import {
   Col,
   DatePicker,
   Empty,
+  Grid,
   Input,
   Row,
   Space,
@@ -84,6 +85,8 @@ function VoucherLink({ no, onOpen }: { no: string; onOpen: (no: string) => void 
 
 function StockTab({ onHistory }: { onHistory: (productId: number) => void }) {
   const { branchId } = useWorkingBranch();
+  // Màn hình hẹp (< 576px): gộp chi nhánh + tồn vào ô sản phẩm để không phải cuộn ngang mới thấy.
+  const isMobile = !Grid.useBreakpoint().sm;
   const url = useUrlParams();
   const categories = useQuery({
     queryKey: [productCategoryApi.key, 'list'],
@@ -106,21 +109,38 @@ function StockTab({ onHistory }: { onHistory: (productId: number) => void }) {
       title: 'Sản phẩm',
       dataIndex: 'name',
       sorter: true,
+      width: isMobile ? 260 : 300,
       render: (_, r) => (
-        <Space>
+        <Space align="start">
           <ProductThumb src={r.image_url} size={36} />
-          <span>
-            {r.product_name}
-            <br />
+          <div style={{ maxWidth: isMobile ? 200 : 240, minWidth: 0 }}>
+            <Typography.Text ellipsis={{ tooltip: r.product_name }} style={{ display: 'block' }}>
+              {r.product_name}
+            </Typography.Text>
             <Typography.Text type="secondary" className="code-text" style={{ fontSize: 12 }}>
               {r.sku}
             </Typography.Text>
-          </span>
+            {isMobile && (
+              <div style={{ fontSize: 12, marginTop: 2 }}>
+                {!branchId && <Typography.Text type="secondary">{r.branch_name} · </Typography.Text>}
+                <b style={{ color: r.low_stock ? '#ea580c' : undefined }}>
+                  Tồn {formatNumber(r.quantity)} {r.unit}
+                </b>
+                {r.low_stock && (
+                  <Tag color="orange" bordered={false} style={{ marginLeft: 4 }}>
+                    Tồn thấp
+                  </Tag>
+                )}
+              </div>
+            )}
+          </div>
         </Space>
       ),
     },
-    ...(branchId ? [] : [{ title: 'Chi nhánh', dataIndex: 'branch_name', key: 'branch_id', sorter: true }]),
-    { title: 'Danh mục', dataIndex: 'category_name', render: (v: string) => v || '—' },
+    ...(branchId
+      ? []
+      : [{ title: 'Chi nhánh', dataIndex: 'branch_name', key: 'branch_id', sorter: true, width: 170 }]),
+    { title: 'Danh mục', dataIndex: 'category_name', width: 140, render: (v: string) => v || '—' },
     {
       title: 'Tồn',
       dataIndex: 'quantity',

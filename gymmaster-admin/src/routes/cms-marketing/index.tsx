@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  App,
   Badge,
   Button,
   Card,
@@ -19,7 +20,6 @@ import {
   Tabs,
   Tag,
   Typography,
-  message,
 } from 'antd';
 import {
   CalendarOutlined,
@@ -39,10 +39,39 @@ import {
   type PublicTrainerItem,
   type TestimonialItem,
 } from '@/api/cms-system';
+import { appConfig } from '@/config';
+import { PERM, ROLE } from '@/constants/permissions';
+import { usePermission } from '@/hooks/usePermission';
+import { showError } from '@/utils/errors';
 import { formatDateTime } from '@/utils/format';
+import { chatSendState } from './chatAccess';
+
+const POST_CATEGORY_LABELS: Record<string, string> = {
+  TAP_LUYEN: 'Tập luyện',
+  DINH_DUONG: 'Dinh dưỡng',
+  SU_KIEN: 'Sự kiện',
+};
+
+/** Origin của API (vd http://localhost:8000) – link .ics do API phục vụ, không phải origin admin. */
+function apiOrigin(): string {
+  try {
+    return new URL(appConfig.apiUrl).origin;
+  } catch {
+    return window.location.origin;
+  }
+}
 
 export default function CmsMarketingPage() {
   const qc = useQueryClient();
+  const { message } = App.useApp();
+  const { can, roles, user } = usePermission();
+  // Khớp quyền API: bài viết/cảm nhận cần cms.manage; hồ sơ HLV thêm staff.view;
+  // liên hệ thêm lead.view.
+  const canCms = can(PERM.CMS_MANAGE);
+  const canTrainers = can([PERM.CMS_MANAGE, PERM.STAFF_VIEW]);
+  const canContacts = can([PERM.CMS_MANAGE, PERM.LEAD_VIEW]);
+  // API chỉ trả hội thoại cho OWNER/MANAGER (giám sát) và TRAINER (của chính mình).
+  const canMessages = [ROLE.OWNER, ROLE.MANAGER, ROLE.TRAINER].some((r) => roles.includes(r));
   const [postModal, setPostModal] = useState(false);
   const [editingPost, setEditingPost] = useState<PostItem | null>(null);
   const [postForm] = Form.useForm();
@@ -56,24 +85,32 @@ export default function CmsMarketingPage() {
   const postsQuery = useQuery({
     queryKey: ['admin-cms-posts'],
     queryFn: () => cmsSystemApi.listPosts(),
+    enabled: canCms,
   });
   const trainersQuery = useQuery({
     queryKey: ['admin-cms-trainers'],
     queryFn: () => cmsSystemApi.listTrainerProfiles(),
+    enabled: canTrainers,
   });
   const testimonialsQuery = useQuery({
     queryKey: ['admin-cms-testimonials'],
     queryFn: () => cmsSystemApi.listTestimonials(),
+    enabled: canCms,
   });
   const contactsQuery = useQuery({
     queryKey: ['admin-cms-contacts'],
     queryFn: () => cmsSystemApi.listContactMessages(),
+    enabled: canContacts,
   });
   const convsQuery = useQuery({
     queryKey: ['admin-pt-conversations'],
     queryFn: () => cmsSystemApi.listConversations(),
+    enabled: canMessages,
   });
   const activeConvId = selectedConvId ?? convsQuery.data?.[0]?.id ?? null;
+  const activeConv = convsQuery.data?.find((c) => c.id === activeConvId) ?? null;
+  // OWNER/MANAGER chỉ xem giám sát – API chỉ cho HLV phụ trách (hợp đồng ACTIVE) gửi tin.
+  const sendState = chatSendState(activeConv, user?.id);
 
   const messagesQuery = useQuery({
     queryKey: ['admin-pt-messages', activeConvId],
@@ -81,9 +118,18 @@ export default function CmsMarketingPage() {
     enabled: !!activeConvId,
   });
 
+  // Tự cuộn xuống tin nhắn mới nhất khi mở hội thoại / có tin mới.
+  const chatBoxRef = useRef<HTMLDivElement>(null);
+  const messageCount = messagesQuery.data?.length ?? 0;
+  useEffect(() => {
+    const el = chatBoxRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [activeConvId, messageCount]);
+
   const calTokenQuery = useQuery({
     queryKey: ['admin-calendar-token'],
     queryFn: () => cmsSystemApi.getCalendarToken(),
+    enabled: canMessages,
   });
 
   const savePostMut = useMutation({
@@ -151,17 +197,18 @@ export default function CmsMarketingPage() {
       qc.invalidateQueries({ queryKey: ['admin-pt-messages', activeConvId] });
       qc.invalidateQueries({ queryKey: ['admin-pt-conversations'] });
     },
+    onError: (e) => showError(e, 'Không thể gửi tin nhắn'),
   });
 
   return (
     <Card
-      title="Quản trị Nội dung Landing, Cảm nhận Hội viên & Tin nhắn PT (Sprint 29)"
+      title="Quản trị Nội dung Landing, Cảm nhận Hội viên & Tin nhắn PT"
       extra={
         calTokenQuery.data && (
           <Button
             icon={<CalendarOutlined />}
             onClick={() => {
-              navigator.clipboard?.writeText(window.location.origin + calTokenQuery.data!.ics_url);
+              navigator.clipboard?.writeText(apiOrigin() + calTokenQuery.data!.ics_url);
               message.success('Đã sao chép đường dẫn đồng bộ lịch dạy .ics');
             }}
           >
@@ -172,9 +219,9 @@ export default function CmsMarketingPage() {
     >
       <Tabs
         items={[
-          {
+          canCms && {
             key: 'posts',
-            label: '1. Bài viết Tin tức & Blog',
+            label: 'Bài viết Tin tức & Blog',
             children: (
               <>
                 <div style={{ marginBottom: 16, textAlign: 'right' }}>
@@ -200,7 +247,7 @@ export default function CmsMarketingPage() {
                     {
                       title: 'Chuyên mục',
                       dataIndex: 'category',
-                      render: (v: string) => <Tag color="blue">{v}</Tag>,
+                      render: (v: string) => <Tag color="blue">{POST_CATEGORY_LABELS[v] ?? v}</Tag>,
                     },
                     {
                       title: 'Trạng thái',
@@ -231,6 +278,9 @@ export default function CmsMarketingPage() {
                           />
                           <Popconfirm
                             title="Xóa bài viết này?"
+                            okText="Xóa"
+                            cancelText="Hủy"
+                            okButtonProps={{ danger: true }}
                             onConfirm={() => deletePostMut.mutate(r.id)}
                           >
                             <Button size="small" danger icon={<DeleteOutlined />} />
@@ -243,25 +293,28 @@ export default function CmsMarketingPage() {
               </>
             ),
           },
-          {
+          canTrainers && {
             key: 'trainers',
-            label: '2. Hồ sơ HLV Công khai',
+            label: 'Hồ sơ HLV Công khai',
             children: (
               <>
-                <div style={{ marginBottom: 16, textAlign: 'right' }}>
-                  <Button
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={() => {
-                      trainerForm.resetFields();
-                      setTrainerModal(true);
-                    }}
-                  >
-                    Cập nhật Hồ sơ HLV
-                  </Button>
-                </div>
+                {canCms && (
+                  <div style={{ marginBottom: 16, textAlign: 'right' }}>
+                    <Button
+                      type="primary"
+                      icon={<PlusOutlined />}
+                      onClick={() => {
+                        trainerForm.resetFields();
+                        setTrainerModal(true);
+                      }}
+                    >
+                      Cập nhật Hồ sơ HLV
+                    </Button>
+                  </div>
+                )}
                 <Table<PublicTrainerItem>
                   rowKey="id"
+                  scroll={{ x: 900 }}
                   loading={trainersQuery.isLoading}
                   dataSource={trainersQuery.data ?? []}
                   columns={[
@@ -278,7 +331,9 @@ export default function CmsMarketingPage() {
                       title: 'Đánh giá',
                       render: (_, r) => (
                         <span>
-                          ⭐ {r.rating_avg?.toFixed(1) || '5.0'} ({r.rating_count} lượt)
+                          {r.rating_count > 0
+                            ? `⭐ ${(r.rating_avg ?? 0).toFixed(1)} (${r.rating_count} lượt)`
+                            : 'Chưa có đánh giá'}
                         </span>
                       ),
                     },
@@ -294,9 +349,9 @@ export default function CmsMarketingPage() {
               </>
             ),
           },
-          {
+          canCms && {
             key: 'testimonials',
-            label: '3. Cảm nhận Hội viên',
+            label: 'Cảm nhận Hội viên',
             children: (
               <Table<TestimonialItem>
                 rowKey="id"
@@ -316,16 +371,8 @@ export default function CmsMarketingPage() {
                     title: 'Trạng thái',
                     dataIndex: 'status',
                     render: (s: string) => (
-                      <Tag
-                        color={
-                          s === 'APPROVED' ? 'green' : s === 'REJECTED' ? 'red' : 'gold'
-                        }
-                      >
-                        {s === 'APPROVED'
-                          ? 'Đã duyệt'
-                          : s === 'REJECTED'
-                            ? 'Từ chối'
-                            : 'Chờ duyệt'}
+                      <Tag color={s === 'APPROVED' ? 'green' : s === 'REJECTED' ? 'red' : 'gold'}>
+                        {s === 'APPROVED' ? 'Đã duyệt' : s === 'REJECTED' ? 'Từ chối' : 'Chờ duyệt'}
                       </Tag>
                     ),
                   },
@@ -360,9 +407,9 @@ export default function CmsMarketingPage() {
               />
             ),
           },
-          {
+          canContacts && {
             key: 'contacts',
-            label: '4. Liên hệ từ Website',
+            label: 'Liên hệ từ Website',
             children: (
               <Table<ContactMessageItem>
                 rowKey="id"
@@ -395,9 +442,9 @@ export default function CmsMarketingPage() {
               />
             ),
           },
-          {
+          canMessages && {
             key: 'messages',
-            label: '5. Tin nhắn HLV ↔ Hội viên',
+            label: 'Tin nhắn HLV ↔ Hội viên',
             children: (
               <Row gutter={16}>
                 <Col xs={24} md={8}>
@@ -408,7 +455,7 @@ export default function CmsMarketingPage() {
                         <List.Item
                           style={{
                             cursor: 'pointer',
-                            background: item.id === activeConvId ? '#fff7ed' : undefined,
+                            background: item.id === activeConvId ? 'var(--gm-unread)' : undefined,
                             padding: '8px 12px',
                           }}
                           onClick={() => setSelectedConvId(item.id)}
@@ -430,11 +477,12 @@ export default function CmsMarketingPage() {
                 <Col xs={24} md={16}>
                   <Card size="small" title="Nội dung trao đổi trực tuyến (SSE Realtime)">
                     <div
+                      ref={chatBoxRef}
                       style={{
                         height: 320,
                         overflowY: 'auto',
                         padding: 12,
-                        background: '#fafafa',
+                        background: 'var(--gm-hover)',
                         borderRadius: 8,
                         marginBottom: 12,
                       }}
@@ -448,10 +496,10 @@ export default function CmsMarketingPage() {
                           </Typography.Text>
                           <div
                             style={{
-                              background: '#fff',
+                              background: 'var(--gm-surface)',
                               padding: '8px 12px',
                               borderRadius: 6,
-                              border: '1px solid #f0f0f0',
+                              border: '1px solid var(--gm-border)',
                               marginTop: 4,
                             }}
                           >
@@ -465,25 +513,38 @@ export default function CmsMarketingPage() {
                         placeholder="Nhập lời nhắn hướng dẫn tập luyện / dinh dưỡng cho học viên..."
                         value={chatText}
                         onChange={(e) => setChatText(e.target.value)}
-                        onPressEnter={() => chatText.trim() && sendMsgMut.mutate()}
-                        disabled={!activeConvId}
+                        onPressEnter={() =>
+                          sendState.canSend &&
+                          chatText.trim() &&
+                          !sendMsgMut.isPending &&
+                          sendMsgMut.mutate()
+                        }
+                        disabled={!sendState.canSend}
                       />
                       <Button
                         type="primary"
                         icon={<SendOutlined />}
                         loading={sendMsgMut.isPending}
-                        disabled={!activeConvId || !chatText.trim()}
+                        disabled={!sendState.canSend || !chatText.trim()}
                         onClick={() => sendMsgMut.mutate()}
                       >
                         Gửi
                       </Button>
                     </Space.Compact>
+                    {sendState.reason && activeConvId && (
+                      <Typography.Text
+                        type="secondary"
+                        style={{ display: 'block', marginTop: 8, fontSize: 12 }}
+                      >
+                        {sendState.reason}
+                      </Typography.Text>
+                    )}
                   </Card>
                 </Col>
               </Row>
             ),
           },
-        ]}
+        ].filter((t): t is Exclude<typeof t, false> => !!t)}
       />
 
       <Modal
@@ -492,15 +553,29 @@ export default function CmsMarketingPage() {
         onCancel={() => setPostModal(false)}
         onOk={() => postForm.submit()}
         confirmLoading={savePostMut.isPending}
+        okText="Lưu bài viết"
+        cancelText="Hủy"
         width={680}
       >
         <Form form={postForm} layout="vertical" onFinish={(v) => savePostMut.mutate(v)}>
-          <Form.Item name="title" label="Tiêu đề bài viết" rules={[{ required: true }]}>
+          <Form.Item
+            name="title"
+            label="Tiêu đề bài viết"
+            rules={[
+              { required: true, whitespace: true, message: 'Vui lòng nhập tiêu đề bài viết' },
+            ]}
+          >
             <Input />
           </Form.Item>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="slug" label="Đường dẫn tĩnh (Slug)" rules={[{ required: true }]}>
+              <Form.Item
+                name="slug"
+                label="Đường dẫn tĩnh (Slug)"
+                rules={[
+                  { required: true, whitespace: true, message: 'Vui lòng nhập đường dẫn tĩnh' },
+                ]}
+              >
                 <Input placeholder="vd: lo-trinh-tang-co-cho-nguoi-moi" />
               </Form.Item>
             </Col>
@@ -529,7 +604,13 @@ export default function CmsMarketingPage() {
           <Form.Item name="excerpt" label="Tóm tắt ngắn">
             <Input.TextArea rows={2} />
           </Form.Item>
-          <Form.Item name="content" label="Nội dung chi tiết" rules={[{ required: true }]}>
+          <Form.Item
+            name="content"
+            label="Nội dung chi tiết"
+            rules={[
+              { required: true, whitespace: true, message: 'Vui lòng nhập nội dung bài viết' },
+            ]}
+          >
             <Input.TextArea rows={6} />
           </Form.Item>
         </Form>
@@ -541,16 +622,26 @@ export default function CmsMarketingPage() {
         onCancel={() => setTrainerModal(false)}
         onOk={() => trainerForm.submit()}
         confirmLoading={saveTrainerMut.isPending}
+        okText="Lưu hồ sơ"
+        cancelText="Hủy"
       >
         <Form form={trainerForm} layout="vertical" onFinish={(v) => saveTrainerMut.mutate(v)}>
           <Row gutter={12}>
             <Col span={12}>
-              <Form.Item name="user_id" label="ID Tài khoản HLV" rules={[{ required: true }]}>
+              <Form.Item
+                name="user_id"
+                label="ID Tài khoản HLV"
+                rules={[{ required: true, message: 'Vui lòng nhập ID tài khoản HLV' }]}
+              >
                 <InputNumber min={1} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="slug" label="Slug hồ sơ" rules={[{ required: true }]}>
+              <Form.Item
+                name="slug"
+                label="Slug hồ sơ"
+                rules={[{ required: true, whitespace: true, message: 'Vui lòng nhập slug hồ sơ' }]}
+              >
                 <Input placeholder="hlv-nguyen-minh-quan" />
               </Form.Item>
             </Col>
@@ -571,12 +662,22 @@ export default function CmsMarketingPage() {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="featured" label="Nổi bật trang chủ" valuePropName="checked" initialValue={true}>
+              <Form.Item
+                name="featured"
+                label="Nổi bật trang chủ"
+                valuePropName="checked"
+                initialValue={true}
+              >
                 <Switch />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="is_published" label="Hiển thị công khai" valuePropName="checked" initialValue={true}>
+              <Form.Item
+                name="is_published"
+                label="Hiển thị công khai"
+                valuePropName="checked"
+                initialValue={true}
+              >
                 <Switch />
               </Form.Item>
             </Col>
