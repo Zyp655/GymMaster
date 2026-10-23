@@ -101,6 +101,7 @@ func NewSubscriptionService(repo repository.SubscriptionRepository, invoices Inv
 		invoices.RegisterPaidHandler(t, s.onInvoicePaid)
 		invoices.RegisterVoidHandler(t, s.onInvoiceVoid)
 		invoices.RegisterPayGuard(t, s.guardInvoicePayment)
+		invoices.RegisterRefundHandler(t, s.onInvoiceRefunded)
 	}
 	return s
 }
@@ -883,7 +884,7 @@ func (s *subscriptionService) Cancel(ctx context.Context, id uint, in v1.CancelI
 	if _, err := s.loadSub(ctx, id, false); err != nil {
 		return nil, err
 	}
-	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
+	err := s.tx.WithTx(context.WithValue(ctx, subCancellingKey{}, id), func(ctx context.Context) error {
 		sub, err := s.loadSub(ctx, id, true)
 		if err != nil {
 			return err
@@ -994,6 +995,34 @@ func (s *subscriptionService) onInvoicePaid(ctx context.Context, inv *entity.Inv
 		return err
 	}
 	return s.event(ctx, sub.ID, entity.SubEventActivated, map[string]any{"invoice_id": inv.ID, "invoice_no": inv.InvoiceNo})
+}
+
+// subCancellingKey: đánh dấu ctx đang hủy gói (Cancel tự cập nhật trạng thái + sự kiện) để RefundHandler bỏ qua gói đó.
+type subCancellingKey struct{}
+
+// onInvoiceRefunded: hóa đơn được hoàn hết số đã thu (REFUNDED) khi gói còn PENDING (chưa từng kích hoạt, vd hóa đơn
+// PARTIAL) → gói chuyển CANCELLED (không kẹt PENDING); gói là kết quả nâng cấp / chuyển nhượng thì khôi phục gói trước.
+// Gói đã ACTIVE giữ nguyên (hoàn tiền không tự hủy gói đang dùng).
+func (s *subscriptionService) onInvoiceRefunded(ctx context.Context, inv *entity.Invoice, item *entity.InvoiceItem) error {
+	sub, err := s.subForInvoice(ctx, inv, item)
+	if err != nil || sub == nil || sub.Status != entity.SubStatusPending {
+		return err
+	}
+	if id, ok := ctx.Value(subCancellingKey{}).(uint); ok && id == sub.ID {
+		return nil
+	}
+	if err := s.repo.UpdateFields(ctx, sub.ID, map[string]any{"status": entity.SubStatusCancelled}); err != nil {
+		return err
+	}
+	if err := s.repo.CancelOpenFreezes(ctx, sub.ID, entity.FreezeStatusCancelled); err != nil {
+		return err
+	}
+	if err := s.event(ctx, sub.ID, entity.SubEventCancelled, map[string]any{
+		"reason": "Hóa đơn đã hoàn toàn bộ số đã thu", "invoice_id": inv.ID, "refunded_amount": inv.RefundedAmount,
+	}); err != nil {
+		return err
+	}
+	return s.restorePrevious(ctx, sub)
 }
 
 // onInvoiceVoid: hóa đơn bị hủy → gói PENDING chuyển CANCELLED; nếu gói là kết quả nâng cấp / chuyển nhượng

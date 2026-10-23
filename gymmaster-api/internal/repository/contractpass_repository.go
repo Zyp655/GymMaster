@@ -52,6 +52,8 @@ type (
 		ListDayPasses(ctx context.Context, q dto.Query, branchIDs []uint, passType string) ([]DayPassRow, int64, error)
 		ListSponsorGuestPasses(ctx context.Context, sponsorMemberID uint) ([]DayPassRow, error)
 		CountSponsorGuestPassesInMonth(ctx context.Context, sponsorMemberID uint, monthStart, monthEnd time.Time) (int, error)
+		// ExistsGuestPassOnDate: đã có vé mời (GUEST) cho SĐT này vào ngày validDate chưa.
+		ExistsGuestPassOnDate(ctx context.Context, phone string, validDate time.Time) (bool, error)
 		FindDayPassByID(ctx context.Context, id uint) (*DayPassRow, error)
 		CreateDayPass(ctx context.Context, dp *entity.DayPass) error
 
@@ -245,6 +247,14 @@ func (r *contractPassRepository) CountSponsorGuestPassesInMonth(ctx context.Cont
 		Where("sponsor_member_id = ? AND created_at >= ? AND created_at < ?", sponsorMemberID, monthStart, monthEnd).
 		Count(&count).Error
 	return int(count), err
+}
+
+func (r *contractPassRepository) ExistsGuestPassOnDate(ctx context.Context, phone string, validDate time.Time) (bool, error) {
+	var count int64
+	err := postgres.Conn(ctx, r.db).Model(&entity.DayPass{}).
+		Where("type = ? AND phone = ? AND valid_date = ?", entity.DayPassTypeGuest, phone, validDate.Format("2006-01-02")).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func (r *contractPassRepository) FindDayPassByID(ctx context.Context, id uint) (*DayPassRow, error) {

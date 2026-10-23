@@ -1,6 +1,10 @@
 package v1
 
-import "github.com/gogf/gf/v2/frame/g"
+import (
+	"github.com/gogf/gf/v2/frame/g"
+
+	planv1 "gymmaster-api/api/plan/v1"
+)
 
 // PublicPlan là gói tập hiển thị trên trang công khai.
 type PublicPlan struct {
@@ -15,6 +19,10 @@ type PublicPlan struct {
 	AccessScope     string  `json:"access_scope"`
 	MaxFreezeDays   int     `json:"max_freeze_days"`
 	IncludesClasses bool    `json:"includes_classes"`
+	// AccessHours: khung giờ được vào tập (gói giờ thấp điểm); rỗng = không giới hạn.
+	AccessHours []planv1.AccessHoursSlot `json:"access_hours"`
+	// GuestPassesPerMonth: số vé mời khách mỗi tháng kèm gói.
+	GuestPassesPerMonth int `json:"guest_passes_per_month"`
 }
 
 // PublicPTPackage là gói PT hiển thị trên trang công khai.

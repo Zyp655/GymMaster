@@ -41,7 +41,7 @@ Nếu bạn chỉ muốn khởi chạy toàn bộ hệ thống (Database + Mailp
 docker compose up -d --build
 ```
 
-- Container `migrate` sẽ tự động đợi PostgreSQL sẵn sàng, chạy toàn bộ migration (`000001` → `000028`) và nạp dữ liệu mẫu (`seed`).
+- Container `migrate` sẽ tự động đợi PostgreSQL sẵn sàng, chạy toàn bộ migration trong `gymmaster-api/migrations/` và nạp dữ liệu mẫu (`seed`).
 - Xem tiến trình khởi tạo:
   ```bash
   docker compose logs -f migrate api
@@ -104,7 +104,8 @@ go install github.com/air-verse/air@latest
 
 #### 2.3. Chạy Migration và Seed dữ liệu mẫu
 ```bash
-# Áp dụng toàn bộ 28 file SQL migration (000001 -> 000028) vào PostgreSQL
+# Áp dụng toàn bộ migration trong migrations/ vào PostgreSQL.
+# Lưu ý: số thứ tự có khoảng trống nên `migrate down N` có thể báo "limit N short" khi N lớn hơn số file – vô hại.
 make migrate-up
 # (Hoặc nếu không dùng make: go run . migrate up)
 

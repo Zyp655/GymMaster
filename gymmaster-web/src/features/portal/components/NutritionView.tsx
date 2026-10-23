@@ -59,6 +59,7 @@ import { useToastApiError } from '@/hooks/use-api-error';
 import { formatDate, formatNumber } from '@/lib/format';
 import { looseT } from '@/lib/utils';
 import { DEFAULT_VIETNAMESE_FOODS } from '../api';
+import { normalizeCalorieGoals } from '../calorie-goals';
 import { defaultInput, fromServings, maxInput, qtyMode, toServings } from '../food-units';
 import {
   useCreateMemberFoodLogMutation,
@@ -186,6 +187,9 @@ export function NutritionView() {
   const recommendedCalories =
     overviewQuery.data?.recommended_calories || mealPlans[0]?.target_calories || 2000;
 
+  // Gợi ý calo theo mục tiêu (giảm mỡ/duy trì/tăng cơ) – API chưa trả thì ẩn khối, không lỗi.
+  const calorieGoals = normalizeCalorieGoals(overviewQuery.data);
+
   const rawLogs = logsQuery.data;
   const items: FoodLogItem[] = Array.isArray(rawLogs)
     ? rawLogs
@@ -302,6 +306,62 @@ export function NutritionView() {
           </p>
         </Card>
       </div>
+
+      {calorieGoals ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('goalSuggest.title')}</CardTitle>
+            <p className="text-caption text-secondary">
+              {calorieGoals.bmr || calorieGoals.tdee
+                ? t('goalSuggest.basis', {
+                    bmr: calorieGoals.bmr ? formatNumber(calorieGoals.bmr) : '—',
+                    tdee: calorieGoals.tdee ? formatNumber(calorieGoals.tdee) : '—',
+                  })
+                : t('goalSuggest.desc')}
+            </p>
+          </CardHeader>
+          {calorieGoals.goals.length ? (
+            <div className="grid gap-3 sm:grid-cols-3">
+              {calorieGoals.goals.map(g => (
+                <div
+                  key={g.goal}
+                  className={`grid min-w-0 gap-1 rounded-xl border p-4 ${
+                    calorieGoals.currentGoal === g.goal
+                      ? 'border-brand-400 bg-brand-50'
+                      : 'border-line'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-caption font-medium text-secondary">
+                      {t(`goalSuggest.goals.${g.goal}`)}
+                    </span>
+                    {calorieGoals.currentGoal === g.goal ? (
+                      <Badge variant="brand">{t('goalSuggest.currentGoal')}</Badge>
+                    ) : null}
+                  </div>
+                  <p className="text-h3 font-bold text-primary">
+                    {t('kcalUnit', { value: formatNumber(g.calories) })}
+                  </p>
+                  {g.proteinG || g.carbsG || g.fatG ? (
+                    <p className="text-caption text-secondary">
+                      {t('goalSuggest.macros', {
+                        protein: formatNumber(g.proteinG ?? 0),
+                        carbs: formatNumber(g.carbsG ?? 0),
+                        fat: formatNumber(g.fatG ?? 0),
+                      })}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <p className="mt-3 text-caption text-tertiary">
+            {calorieGoals.hasBodyMetric === false
+              ? t('goalSuggest.noBodyMetric')
+              : t('goalSuggest.note')}
+          </p>
+        </Card>
+      ) : null}
 
       {/* Form ghi nhận bữa ăn */}
       <Card>

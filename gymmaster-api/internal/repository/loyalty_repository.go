@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -71,10 +72,19 @@ type (
 
 		FindMemberByID(ctx context.Context, id uint) (*entity.Member, error)
 		FindMemberByUserID(ctx context.Context, userID uint) (*entity.Member, error)
+		// LockMember khóa dòng hội viên (SELECT ... FOR UPDATE) – gọi trong transaction trước mọi thay đổi điểm để
+		// các yêu cầu đổi quà/cộng điểm đồng thời của cùng hội viên chạy tuần tự; trả số dư mới nhất.
+		LockMember(ctx context.Context, id uint) (*entity.Member, error)
+		// AddMemberPoints cộng/trừ điểm nguyên tử, có điều kiện số dư sau cùng >= 0;
+		// trừ quá số dư → ErrInsufficientPoints (không thay đổi gì).
 		AddMemberPoints(ctx context.Context, memberID uint, delta int) (int, error)
 		UpdateMemberReferralCode(ctx context.Context, memberID uint, code string) error
 
 		CreateLedger(ctx context.Context, l *entity.LoyaltyLedger) error
+		// CreateLedgerOnce ghi bút toán, bỏ qua (false) nếu đã có bút toán cùng (member, reason, ref_type, ref_id)
+		// – INSERT ... ON CONFLICT DO NOTHING trên uq_loyalty_ledgers_earn_once + kiểm tra trước (an toàn khi gọi
+		// trong transaction lớn hơn: không làm hỏng transaction như lỗi unique).
+		CreateLedgerOnce(ctx context.Context, l *entity.LoyaltyLedger) (bool, error)
 		ListMemberLedgers(ctx context.Context, memberID uint, limit int) ([]entity.LoyaltyLedger, error)
 		// ListLedgers: lịch sử biến động điểm (admin) – lọc theo hội viên, chi nhánh chính của hội viên (branchIDs nil = mọi chi nhánh), lý do.
 		ListLedgers(ctx context.Context, q dto.Query, branchIDs []uint, memberID uint, reason string) ([]LoyaltyLedgerRow, int64, error)
@@ -362,21 +372,38 @@ func (r *loyaltyRepository) FindMemberByUserID(ctx context.Context, userID uint)
 	return &m, nil
 }
 
+// ErrInsufficientPoints: trừ điểm vượt số dư hiện tại.
+var ErrInsufficientPoints = errors.New("loyalty: insufficient points")
+
+func (r *loyaltyRepository) LockMember(ctx context.Context, id uint) (*entity.Member, error) {
+	var m entity.Member
+	if err := postgres.Conn(ctx, r.db).Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, id).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 func (r *loyaltyRepository) AddMemberPoints(ctx context.Context, memberID uint, delta int) (int, error) {
 	conn := postgres.Conn(ctx, r.db)
-	if err := conn.Model(&entity.Member{}).
-		Where("id = ?", memberID).
-		UpdateColumns(map[string]any{
-			"loyalty_points": gorm.Expr("loyalty_points + ?", delta),
-			"updated_at":     time.Now(),
-		}).Error; err != nil {
+	// Một câu UPDATE ... WHERE loyalty_points + delta >= 0 RETURNING: kiểm tra và trừ nguyên tử (không đọc trước rồi
+	// mới trừ) → đổi quà song song không làm điểm âm. CHECK chk_members_loyalty_points_nonneg là chốt chặn cuối.
+	var rows []int
+	if err := conn.Raw(`UPDATE members SET loyalty_points = loyalty_points + ?, updated_at = ?
+		WHERE id = ? AND loyalty_points + ? >= 0 RETURNING loyalty_points`,
+		delta, time.Now(), memberID, delta).Scan(&rows).Error; err != nil {
 		return 0, err
 	}
-	var m entity.Member
-	if err := conn.Select("id, loyalty_points").First(&m, memberID).Error; err != nil {
-		return 0, err
+	if len(rows) == 0 {
+		var n int64
+		if err := conn.Model(&entity.Member{}).Where("id = ?", memberID).Count(&n).Error; err != nil {
+			return 0, err
+		}
+		if n == 0 {
+			return 0, gorm.ErrRecordNotFound
+		}
+		return 0, ErrInsufficientPoints
 	}
-	return m.LoyaltyPoints, nil
+	return rows[0], nil
 }
 
 func (r *loyaltyRepository) UpdateMemberReferralCode(ctx context.Context, memberID uint, code string) error {
@@ -387,6 +414,26 @@ func (r *loyaltyRepository) UpdateMemberReferralCode(ctx context.Context, member
 
 func (r *loyaltyRepository) CreateLedger(ctx context.Context, l *entity.LoyaltyLedger) error {
 	return postgres.Conn(ctx, r.db).Create(l).Error
+}
+
+func (r *loyaltyRepository) CreateLedgerOnce(ctx context.Context, l *entity.LoyaltyLedger) (bool, error) {
+	conn := postgres.Conn(ctx, r.db)
+	if l.RefID != nil {
+		var n int64
+		if err := conn.Model(&entity.LoyaltyLedger{}).
+			Where("member_id = ? AND reason = ? AND ref_type = ? AND ref_id = ?", l.MemberID, l.Reason, l.RefType, *l.RefID).
+			Count(&n).Error; err != nil {
+			return false, err
+		}
+		if n > 0 {
+			return false, nil
+		}
+	}
+	res := conn.Clauses(clause.OnConflict{DoNothing: true}).Create(l)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
 }
 
 func (r *loyaltyRepository) ListLedgers(ctx context.Context, q dto.Query, branchIDs []uint, memberID uint, reason string) ([]LoyaltyLedgerRow, int64, error) {

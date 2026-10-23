@@ -95,17 +95,19 @@ type RefundOnlineTxnRes struct {
 // ==================== CHUYỂN ĐỔI DỮ LIỆU CŨ & WIZARD THIẾT LẬP (SPRINT 30 / MỤC 15.2) ====================
 
 type LegacyImportRow struct {
-	FullName            string  `json:"full_name"`
-	Phone               string  `json:"phone"`
-	Email               string  `json:"email"`
-	Gender              string  `json:"gender"`
-	PlanCode            string  `json:"plan_code"`
-	SubStartDate        string  `json:"sub_start_date"`
-	SubEndDate          string  `json:"sub_end_date"`
-	RemainingSessions   *int    `json:"remaining_sessions"`
-	PTPackageCode       string  `json:"pt_package_code"`
-	PTRemainingSessions *int    `json:"pt_remaining_sessions"`
-	DebtAmount          float64 `json:"debt_amount"`
+	FullName            string `json:"full_name"`
+	Phone               string `json:"phone"`
+	Email               string `json:"email"`
+	Gender              string `json:"gender"`
+	PlanCode            string `json:"plan_code"`
+	SubStartDate        string `json:"sub_start_date"`
+	SubEndDate          string `json:"sub_end_date"`
+	RemainingSessions   *int   `json:"remaining_sessions"`
+	PTPackageCode       string `json:"pt_package_code"`
+	PTRemainingSessions *int   `json:"pt_remaining_sessions"`
+	// PTTrainerEmail: email HLV phụ trách hợp đồng PT chuyển sang (bắt buộc khi có pt_package_code).
+	PTTrainerEmail string  `json:"pt_trainer_email"`
+	DebtAmount     float64 `json:"debt_amount"`
 }
 
 type LegacyImportErrorItem struct {

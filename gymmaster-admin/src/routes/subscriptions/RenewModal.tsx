@@ -4,7 +4,7 @@ import { Alert, App, Button, Col, Form, Input, Modal, Row, Select, Space, Spin }
 import membershipPlanApi from '@/api/plan';
 import subscriptionApi from '@/api/subscription';
 import type { Subscription, SubscriptionDetail } from '@/api/subscription';
-import { getErrorMessage, showError } from '@/utils/errors';
+import { getErrorMessage, showError, validateForm } from '@/utils/errors';
 import { formatMoney } from '@/utils/format';
 import PaymentFields from './PaymentFields';
 import { DEFAULT_PAYMENT, toPaymentInput } from './payment';
@@ -66,7 +66,8 @@ export default function RenewModal({ open, sub, onClose }: RenewModalProps) {
 
   const submit = async () => {
     if (!sub || !quote) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     renew.mutate(
       {
         id: sub.id,

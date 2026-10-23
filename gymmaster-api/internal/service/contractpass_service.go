@@ -6,12 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"html"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	v1 "gymmaster-api/api/contractpass/v1"
@@ -174,15 +175,9 @@ func validateSignature(sig string) error {
 		}
 		return nil
 	}
-	if strings.HasPrefix(sig, "/uploads/") && len(sig) <= 500 {
-		u, err := url.Parse(sig)
-		decoded, decErr := url.PathUnescape(sig)
-		if err == nil && decErr == nil && u.Scheme == "" && u.Host == "" && u.RawQuery == "" && u.Fragment == "" &&
-			strings.HasPrefix(decoded, "/uploads/") &&
-			!strings.Contains(sig, "..") && !strings.Contains(decoded, "..") &&
-			!strings.ContainsAny(sig, "\"'<> \t\r\n\\") && !strings.ContainsAny(decoded, "\"'<> \t\r\n\\") {
-			return nil
-		}
+	// Đường dẫn ảnh đã tải lên: giải mã %XX lặp tới khi ổn định + chuẩn hóa trước khi kiểm /uploads/ (B9).
+	if _, ok := safeUploadPath(sig); ok {
+		return nil
 	}
 	return rescode.New(rescode.BadRequest, "Chữ ký phải là ảnh PNG (data:image/png;base64) hoặc ảnh đã tải lên")
 }
@@ -459,10 +454,11 @@ func (s *contractPassService) CreateDayPass(ctx context.Context, req *v1.CreateD
 		CreatedBy: invoiceActorID(ctx),
 	}
 	err = s.withinTx(ctx, func(ctx context.Context) error {
-		// Vé có giá → lập hóa đơn bán lẻ (POS) + ghi nhận thu tiền để vào doanh thu.
+		// Vé có giá → lập hóa đơn tại quầy cho khách lẻ (COUNTER, không gắn hội viên) + ghi nhận thu tiền để vào
+		// doanh thu. Không ghi source POS: tổng kết bán hàng POS chỉ tính đơn sản phẩm.
 		if price > 0 && s.invoices != nil {
 			inv, err := s.invoices.CreateInvoice(ctx, InvoiceDraft{
-				BranchID: req.BranchID, Source: entity.InvoiceSourcePOS,
+				BranchID: req.BranchID, Source: entity.InvoiceSourceCounter, WalkIn: true,
 				Note: "Bán vé tập theo ngày cho " + buyer + " (" + phone + ")",
 				Items: []InvoiceItemDraft{{
 					ItemType: entity.InvoiceItemOther, Quantity: 1, UnitPrice: price,
@@ -606,6 +602,32 @@ func guestBranchAllowed(subs []repository.ActiveSubPlan, branchID uint) bool {
 	return false
 }
 
+// guestMaxAdvanceDays: vé mời chỉ được đặt trước tối đa 30 ngày.
+const guestMaxAdvanceDays = 30
+
+// guestValidDateAllowed (hàm thuần): ngày dùng vé mời không quá guestMaxAdvanceDays ngày tới và phải nằm trong thời hạn
+// của một gói có vé mời áp dụng cho chi nhánh (vé không thể dùng khi gói của người mời đã hết hạn).
+func guestValidDateAllowed(subs []repository.ActiveSubPlan, branchID uint, validDate, today time.Time) error {
+	if validDate.After(today.AddDate(0, 0, guestMaxAdvanceDays)) {
+		return rescode.New(rescode.BadRequest, fmt.Sprintf("Vé mời chỉ được tạo trước tối đa %d ngày", guestMaxAdvanceDays))
+	}
+	var lastEnd time.Time
+	for _, sp := range subs {
+		if sp.Plan.GuestPassesPerMonth <= 0 || (sp.Plan.AccessScope != entity.AccessAllBranches && sp.Sub.BranchID != branchID) {
+			continue
+		}
+		e := sp.Sub.EndDate
+		end := time.Date(e.Year(), e.Month(), e.Day(), 0, 0, 0, 0, validDate.Location())
+		if end.After(lastEnd) {
+			lastEnd = end
+		}
+	}
+	if validDate.After(lastEnd) {
+		return rescode.New(rescode.BadRequest, "Ngày dùng vé mời phải nằm trong thời hạn gói tập của bạn (hết hạn "+lastEnd.Format("02/01/2006")+")")
+	}
+	return nil
+}
+
 func (s *contractPassService) MemberGuestPasses(ctx context.Context) (*v1.MemberGuestPassesRes, error) {
 	m, err := s.currentMember(ctx)
 	if err != nil {
@@ -691,6 +713,9 @@ func (s *contractPassService) CreateGuestPass(ctx context.Context, req *v1.Creat
 	if !guestBranchAllowed(subs, branchID) {
 		return nil, rescode.New(rescode.BadRequest, "Chi nhánh không thuộc phạm vi gói tập của bạn")
 	}
+	if err := guestValidDateAllowed(subs, branchID, validDate, s.passToday()); err != nil {
+		return nil, err
+	}
 	if err := checkPassDayOpen(ctx, branchID, validDate, "tạo vé mời"); err != nil {
 		return nil, err
 	}
@@ -712,6 +737,14 @@ func (s *contractPassService) CreateGuestPass(ctx context.Context, req *v1.Creat
 		if err := s.repo.LockMember(ctx, m.ID); err != nil {
 			return err
 		}
+		// Một SĐT chỉ nhận một vé mời cho cùng một ngày (tránh dồn nhiều vé cho một người).
+		dup, err := s.repo.ExistsGuestPassOnDate(ctx, phone, validDate)
+		if err != nil {
+			return err
+		}
+		if dup {
+			return guestPassDupErr(validDate)
+		}
 		used, err := s.repo.CountSponsorGuestPassesInMonth(ctx, m.ID, monthStart, monthEnd)
 		if err != nil {
 			return err
@@ -722,6 +755,11 @@ func (s *contractPassService) CreateGuestPass(ctx context.Context, req *v1.Creat
 		return s.repo.CreateDayPass(ctx, dp)
 	})
 	if err != nil {
+		// Hai người mời khác nhau (khóa dòng hội viên khác nhau) tạo đồng thời cho cùng SĐT + ngày: bước kiểm tra
+		// ở trên cùng lọt qua, unique index uq_day_passes_guest_phone_date chặn bản thứ hai → 409.
+		if isGuestPassDupViolation(err) {
+			return nil, guestPassDupErr(validDate)
+		}
 		return nil, err
 	}
 	row, err := s.repo.FindDayPassByID(ctx, dp.ID)
@@ -729,6 +767,19 @@ func (s *contractPassService) CreateGuestPass(ctx context.Context, req *v1.Creat
 		row = &repository.DayPassRow{DayPass: *dp, SponsorName: m.FullName}
 	}
 	return toDayPassItem(*row), nil
+}
+
+// guestPassDupConstraint: unique index (phone, valid_date) của vé mời chưa dùng (migration 000048).
+const guestPassDupConstraint = "uq_day_passes_guest_phone_date"
+
+func guestPassDupErr(validDate time.Time) error {
+	return rescode.New(rescode.Conflict, "Số điện thoại này đã có vé mời cho ngày "+validDate.Format("02/01/2006"))
+}
+
+// isGuestPassDupViolation: lỗi 23505 trên uq_day_passes_guest_phone_date.
+func isGuestPassDupViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == guestPassDupConstraint
 }
 
 // ---- Mappers --------------------------------------------------------------------

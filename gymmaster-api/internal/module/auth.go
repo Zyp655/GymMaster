@@ -22,6 +22,13 @@ func RegisterAuth(d *Deps, public, authed *ghttp.RouterGroup) {
 		err := d.DB.WithContext(ctx).Select("status").Where("id = ?", userID).Take(&u).Error
 		return u.Status, err
 	})
+	// Access token của phiên đã bị đăng xuất/thu hồi chủ động (chỉ có revoked_at, không có last_used_at do xoay vòng)
+	// bị từ chối ngay thay vì còn hiệu lực tới khi hết hạn.
+	middleware.SetSessionRevokedLookup(func(ctx context.Context, sessionID uint) (bool, error) {
+		var t entity.RefreshToken
+		err := d.DB.WithContext(ctx).Select("revoked_at", "last_used_at").Where("id = ?", sessionID).Take(&t).Error
+		return t.RevokedAt != nil && t.LastUsedAt == nil, err
+	})
 
 	// 2FA khi đăng nhập dùng chung khóa mã hóa với module privacy (JWT secret).
 	encKey := ""

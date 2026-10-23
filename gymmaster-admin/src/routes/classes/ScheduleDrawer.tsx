@@ -18,7 +18,7 @@ import { PERM } from '@/constants/permissions';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { usePermission } from '@/hooks/usePermission';
 import BookingsPanel from './BookingsPanel';
-import { SCHEDULE_STATUS_MAP, isUpcoming, weekdayName } from './constants';
+import { SCHEDULE_STATUS_MAP, isUpcoming, scheduleTrainer, weekdayName } from './constants';
 import { useSchedule } from './queries';
 
 export interface ScheduleDrawerProps {
@@ -44,6 +44,7 @@ export default function ScheduleDrawer({
   const canManage = can(PERM.CLASS_MANAGE);
   const editable = !!s && isUpcoming(s);
   const start = s ? dayjs(s.start_at) : null;
+  const trainer = s ? scheduleTrainer(s) : null;
   const end = s ? dayjs(s.end_at) : null;
   const full = !!s && s.status !== 'CANCELLED' && s.booked_count >= s.capacity;
 
@@ -133,7 +134,23 @@ export default function ScheduleDrawer({
               },
               { key: 'branch', label: 'Chi nhánh', children: s.branch_name },
               { key: 'room', label: 'Phòng', children: s.room_name },
-              { key: 'trainer', label: 'HLV', children: s.trainer_name },
+              {
+                key: 'trainer',
+                label: 'HLV',
+                children: trainer?.substituted ? (
+                  <span>
+                    {trainer.name}{' '}
+                    <Tag color="orange" bordered={false}>
+                      Dạy thay
+                    </Tag>
+                    <Typography.Text type="secondary">
+                      (HLV gốc: {trainer.original})
+                    </Typography.Text>
+                  </span>
+                ) : (
+                  s.trainer_name
+                ),
+              },
               {
                 key: 'series',
                 label: 'Lịch lặp',

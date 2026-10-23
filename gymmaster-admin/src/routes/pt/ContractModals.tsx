@@ -16,13 +16,13 @@ import {
 } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
-import { PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
+import { COUNTER_PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
 import type { PaymentMethod } from '@/api/invoice';
 import ptApi from '@/api/pt';
 import type { PtContractDetail, SessionConflict } from '@/api/pt';
 import MoneyInput from '@/components/Money/MoneyInput';
 import MoneyText from '@/components/Money/MoneyText';
-import { getErrorMessage, setFormError, showError } from '@/utils/errors';
+import { getErrorMessage, setFormError, showError, validateForm } from '@/utils/errors';
 import { formatMoney, normalizeText } from '@/utils/format';
 import { useCancelContract, useChangeTrainer, usePtTrainerOptions } from './queries';
 
@@ -60,7 +60,8 @@ export function ChangeTrainerModal({ contract, onClose }: ContractModalProps) {
 
   const submit = async () => {
     if (!contract) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     if (!v.trainer_id) return;
     mutation.mutate(
       { id: contract.id, data: { trainer_id: v.trainer_id, note: v.note?.trim() ?? '' } },
@@ -200,7 +201,8 @@ export function CancelContractModal({ contract, onClose }: ContractModalProps) {
 
   const submit = async () => {
     if (!contract) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     mutation.mutate(
       {
         id: contract.id,
@@ -303,7 +305,7 @@ export function CancelContractModal({ contract, onClose }: ContractModalProps) {
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="method" label="Phương thức hoàn">
-                <Segmented block options={PAYMENT_METHOD_OPTIONS} />
+                <Segmented block options={COUNTER_PAYMENT_METHOD_OPTIONS} />
               </Form.Item>
             </Col>
           </Row>

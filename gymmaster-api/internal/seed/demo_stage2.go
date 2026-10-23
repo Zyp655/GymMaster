@@ -269,6 +269,9 @@ func seedStage2Demo(ctx context.Context, tx *gorm.DB) error {
 					},
 				}
 				for i := range logs {
+					if logs[i].PerformedAt.After(now) {
+						continue // buổi tập chưa diễn ra (seed chạy trước giờ tập trong ngày)
+					}
 					if err := tx.WithContext(ctx).Create(&logs[i]).Error; err != nil {
 						return err
 					}
@@ -651,4 +654,3 @@ func seedStage2Demo(ctx context.Context, tx *gorm.DB) error {
 	g.Log().Infof(ctx, "seed: đã khởi tạo dữ liệu mẫu Giai đoạn 2, 3 & 4")
 	return nil
 }
-

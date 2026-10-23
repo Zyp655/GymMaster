@@ -78,9 +78,20 @@ export function MembershipPlansDesktop() {
         dataIndex: 'name',
         sorter: true,
         render: (name: string, r) => (
-          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openForm(r)}>
-            {name}
-          </Button>
+          <Space direction="vertical" size={0}>
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto' }}
+              onClick={() => openForm(r)}
+            >
+              {name}
+            </Button>
+            {/* Phạm vi hiển thị dưới tên để bảng vừa khung 1440 (D8). */}
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {ACCESS_SCOPE_LABELS[r.access_scope] ?? r.access_scope}
+            </Typography.Text>
+          </Space>
         ),
       },
       {
@@ -93,7 +104,14 @@ export function MembershipPlansDesktop() {
         title: 'Thời hạn',
         dataIndex: 'duration_days',
         sorter: true,
-        render: (_, r) => durationText(r),
+        render: (_, r) => (
+          <Space direction="vertical" size={0}>
+            <span className="text-nowrap">{durationText(r)}</span>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }} className="text-nowrap">
+              Bảo lưu: {freezeText(r)}
+            </Typography.Text>
+          </Space>
+        ),
       },
       {
         title: 'Giá',
@@ -103,46 +121,55 @@ export function MembershipPlansDesktop() {
         render: (v: number) => <MoneyText value={v} strong />,
       },
       {
-        title: 'Phạm vi',
-        dataIndex: 'access_scope',
-        render: (s: string) => ACCESS_SCOPE_LABELS[s] ?? s,
-      },
-      { title: 'Bảo lưu', key: 'freeze', render: (_, r) => freezeText(r) },
-      {
-        title: 'Lớp nhóm',
-        dataIndex: 'includes_classes',
-        align: 'center',
-        render: (v: boolean) =>
-          v ? (
-            <Tag color="green" bordered={false}>
-              Có
-            </Tag>
+        // Gộp Lớp nhóm + Vé mời để bảng vừa khung 1440 (D8).
+        title: 'Quyền lợi',
+        key: 'benefits',
+        render: (_, r) =>
+          r.includes_classes || r.guest_passes_per_month ? (
+            <Space direction="vertical" size={2}>
+              {r.includes_classes && (
+                <Tag color="green" bordered={false}>
+                  Lớp nhóm
+                </Tag>
+              )}
+              {!!r.guest_passes_per_month && (
+                <Tag color="blue" bordered={false}>
+                  {r.guest_passes_per_month} vé mời/tháng
+                </Tag>
+              )}
+            </Space>
           ) : (
             <Typography.Text type="secondary">—</Typography.Text>
           ),
       },
       {
-        title: 'Vé mời/tháng',
-        dataIndex: 'guest_passes_per_month',
-        align: 'right',
-        render: (v?: number) => (v ? v : <Typography.Text type="secondary">—</Typography.Text>),
-      },
-      {
         title: 'Khung giờ vào tập',
         key: 'access_hours',
-        width: 200,
         render: (_, r) =>
           r.access_hours?.length ? (
-            accessHoursText(r.access_hours)
+            <Typography.Text
+              ellipsis={{ tooltip: accessHoursText(r.access_hours) }}
+              style={{ maxWidth: 140 }}
+            >
+              {accessHoursText(r.access_hours)}
+            </Typography.Text>
           ) : (
             <Typography.Text type="secondary">Mọi giờ</Typography.Text>
           ),
       },
-      { title: 'Thứ tự', dataIndex: 'sort_order', sorter: true, align: 'right' },
+      {
+        title: 'Thứ tự',
+        dataIndex: 'sort_order',
+        sorter: true,
+        align: 'right',
+        responsive: ['xxl'],
+      },
       {
         title: 'Đang bán',
         dataIndex: 'status',
         sorter: true,
+        fixed: 'right',
+        width: 90,
         render: (s: ActiveStatus, r) =>
           canManage ? (
             <Switch

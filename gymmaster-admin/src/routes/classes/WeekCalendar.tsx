@@ -4,7 +4,13 @@ import { Tooltip } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import type { ClassSchedule } from '@/api/class';
-import { readableTextColor, weekdayName, withAlpha } from './constants';
+import {
+  readableTextColor,
+  scheduleTrainer,
+  scheduleTrainerText,
+  weekdayName,
+  withAlpha,
+} from './constants';
 
 const HOUR_PX = 64;
 const MIN_PX = HOUR_PX / 60;
@@ -91,7 +97,7 @@ export function ScheduleSummary({ s }: { s: ClassSchedule }) {
       <div>
         {start.format('HH:mm')}–{end.format('HH:mm')} · {weekdayName(start)} {start.format('DD/MM')}
       </div>
-      <div>HLV: {s.trainer_name}</div>
+      <div>HLV: {scheduleTrainerText(s)}</div>
       <div>Phòng: {s.room_name}</div>
       <div>
         Đã đặt: {s.booked_count}/{s.capacity}
@@ -221,6 +227,7 @@ export default function WeekCalendar({
                   cancelled && 'is-cancelled',
                   full && 'is-full',
                   past && 'is-past',
+                  scheduleTrainer(s).substituted && 'is-substituted',
                 ]
                   .filter(Boolean)
                   .join(' ');
@@ -257,10 +264,16 @@ export default function WeekCalendar({
                       {!compact && (
                         <div className="wc-line">
                           {dayjs(s.start_at).format('HH:mm')}–{dayjs(s.end_at).format('HH:mm')}
-                          {blockHeight < 78 && ` · ${s.trainer_name}`}
+                          {blockHeight < 78 && ` · ${scheduleTrainer(s).name}`}
                         </div>
                       )}
-                      {blockHeight >= 78 && <div className="wc-line">{s.trainer_name}</div>}
+                      {blockHeight >= 78 && (
+                        <div className="wc-line">
+                          {scheduleTrainer(s).substituted
+                            ? `${scheduleTrainer(s).name} (dạy thay)`
+                            : s.trainer_name}
+                        </div>
+                      )}
                       {blockHeight >= 94 && <div className="wc-line">{s.room_name}</div>}
                       {blockHeight >= 40 && (
                         <div className="wc-line">

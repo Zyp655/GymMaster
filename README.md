@@ -4,7 +4,7 @@
 
 | Thành phần | Công nghệ | Cổng mặc định | Thư mục |
 |---|---|---|---|
-| **Backend API** | Go 1.25 · GoFrame v2 · GORM · golang-migrate (`000001`–`000028`) · JWT · SSE · Cron | `8000` | [`gymmaster-api/`](gymmaster-api/README.md) |
+| **Backend API** | Go 1.25 · GoFrame v2 · GORM · golang-migrate (`gymmaster-api/migrations/`) · JWT · SSE · Cron | `8000` | [`gymmaster-api/`](gymmaster-api/README.md) |
 | **Trang quản trị (Admin)** | React 18 · Vite 6 · TypeScript · Ant Design v5 · Redux Toolkit · TanStack Query | `3001` | [`gymmaster-admin/`](gymmaster-admin/README.md) |
 | **Trang công khai & Cổng hội viên (Web)** | Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 · shadcn/ui · TanStack Query · NextAuth | `3000` | [`gymmaster-web/`](gymmaster-web/README.md) |
 | **Database & Mail Dev** | PostgreSQL 16 (`5432`) · Mailpit (`1025` SMTP / `8025` Web UI) | `5432` / `8025` | [`docker-compose.yml`](docker-compose.yml) |
@@ -14,7 +14,7 @@
 
 ## 1. Hướng dẫn Chạy Nhanh bằng Docker Compose (Tất cả trong 1 lệnh)
 
-Chạy toàn bộ hệ thống (PostgreSQL + Mailpit + tự động chạy 28 migrations + nạp dữ liệu mẫu + API + Admin + Web):
+Chạy toàn bộ hệ thống (PostgreSQL + Mailpit + tự động chạy toàn bộ migrations + nạp dữ liệu mẫu + API + Admin + Web):
 
 ```bash
 # Khởi chạy toàn bộ hệ thống
@@ -55,7 +55,7 @@ cd gymmaster-api
 # 1. Tạo file .env (nếu chưa có)
 cp -n .env.example .env
 
-# 2. Chạy toàn bộ 28 bản migration (000001 -> 000028)
+# 2. Chạy toàn bộ migration trong migrations/ (số thứ tự có khoảng trống, vd không có 000039/000040 – golang-migrate chấp nhận)
 make migrate-up
 # (Hoặc chạy trực tiếp bằng Go: go run . migrate up)
 

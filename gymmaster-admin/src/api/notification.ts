@@ -80,7 +80,16 @@ export const NOTIFICATION_TYPE_LABEL: Record<string, string> = {
   LEAD_NEW: 'Khách tiềm năng mới',
   CHECKIN: 'Check-in mới',
   SYSTEM: 'Hệ thống',
+  DEVICE_OFFLINE: 'Thiết bị mất kết nối',
+  PT_MESSAGE: 'Tin nhắn PT',
+  CLASS_REMINDER: 'Nhắc lịch lớp',
+  PT_REMINDER: 'Nhắc buổi PT',
 };
+
+/** Nhãn loại thông báo – loại chưa biết không hiện mã thô. */
+export function notificationTypeLabel(type: string | null | undefined): string {
+  return (type && NOTIFICATION_TYPE_LABEL[type]) || 'Thông báo';
+}
 
 /**
  * Backend sinh link dạng `/admin/...` (hoặc `/inventory/...`) → đổi sang route của SPA `/app/...`.

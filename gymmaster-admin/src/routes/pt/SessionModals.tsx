@@ -19,7 +19,7 @@ import type { PtContract, PtSession } from '@/api/pt';
 import MemberSelect from '@/components/MemberSelect';
 import StatusTag from '@/components/StatusTag';
 import { toApiDateTime, weekdayName } from '@/routes/classes/constants';
-import { setFormError, showError } from '@/utils/errors';
+import { setFormError, showError, validateForm } from '@/utils/errors';
 import { DATETIME_FORMAT, formatDate } from '@/utils/format';
 import { PT_CONTRACT_STATUS_MAP, isBookable } from './constants';
 import {
@@ -120,7 +120,8 @@ export function BookSessionModal({
   const startAt = Form.useWatch('start_at', form);
 
   const submit = async () => {
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     if (!v.contract_id || !v.start_at) return;
     book.mutate(
       { contractId: v.contract_id, startAt: toApiDateTime(v.start_at) },
@@ -244,7 +245,8 @@ export function RescheduleModal({ session, onClose }: SessionModalProps) {
 
   const submit = async () => {
     if (!session) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     if (!v.start_at) return;
     mutation.mutate(
       { id: session.id, startAt: toApiDateTime(v.start_at) },
@@ -302,7 +304,8 @@ export function CancelSessionModal({ session, onClose }: SessionModalProps) {
 
   const submit = async () => {
     if (!session) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     mutation.mutate(
       {
         id: session.id,
@@ -385,7 +388,8 @@ export function CompleteSessionModal({ session, onClose }: SessionModalProps) {
 
   const submit = async () => {
     if (!session) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     mutation.mutate(
       {
         id: session.id,
@@ -458,7 +462,8 @@ export function NoShowModal({ session, onClose }: SessionModalProps) {
 
   const submit = async () => {
     if (!session) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     mutation.mutate(
       { id: session.id, note: v.note?.trim() || undefined },
       {

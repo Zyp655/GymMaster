@@ -109,7 +109,7 @@ func (r classFakeScheduleRepo) List(_ context.Context, f repository.ClassSchedul
 		if f.BranchIDs != nil && !classContainsUint(f.BranchIDs, sc.BranchID) {
 			continue
 		}
-		if f.TrainerID > 0 && sc.TrainerID != f.TrainerID {
+		if f.TrainerID > 0 && classFakeTeacher(sc) != f.TrainerID {
 			continue
 		}
 		if f.Status != "" && sc.Status != f.Status {
@@ -119,6 +119,14 @@ func (r classFakeScheduleRepo) List(_ context.Context, f repository.ClassSchedul
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].StartAt.Before(out[j].StartAt) })
 	return out, nil
+}
+
+// classFakeTeacher: HLV thực dạy = HLV dạy thay (nếu có), ngược lại HLV chính (giống COALESCE ở repo thật).
+func classFakeTeacher(sc *entity.ClassSchedule) uint {
+	if sc.SubstituteTrainerID != nil {
+		return *sc.SubstituteTrainerID
+	}
+	return sc.TrainerID
 }
 
 func classContainsUint(xs []uint, v uint) bool {
@@ -156,7 +164,7 @@ func (r classFakeScheduleRepo) overlapLocked(sc *entity.ClassSchedule) bool {
 		if x.ID == sc.ID || x.Status == entity.ClassScheduleCancelled {
 			continue
 		}
-		if (x.RoomID == sc.RoomID || x.TrainerID == sc.TrainerID) && x.StartAt.Before(sc.EndAt) && sc.StartAt.Before(x.EndAt) {
+		if (x.RoomID == sc.RoomID || classFakeTeacher(x) == classFakeTeacher(sc)) && x.StartAt.Before(sc.EndAt) && sc.StartAt.Before(x.EndAt) {
 			return true
 		}
 	}
@@ -187,6 +195,7 @@ func (r classFakeScheduleRepo) Update(_ context.Context, sc *entity.ClassSchedul
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	cur := r.schedules[sc.ID]
+	cur.SubstituteTrainerID = sc.SubstituteTrainerID
 	cur.RoomID, cur.TrainerID, cur.StartAt, cur.EndAt, cur.Capacity, cur.Note = sc.RoomID, sc.TrainerID, sc.StartAt, sc.EndAt, sc.Capacity, sc.Note
 	return nil
 }
@@ -248,7 +257,7 @@ func (r classFakeScheduleRepo) RoomOverlap(_ context.Context, roomID uint, start
 }
 
 func (r classFakeScheduleRepo) TrainerOverlap(_ context.Context, trainerID uint, start, end time.Time, excludeID uint) (bool, error) {
-	return r.overlap(func(x *entity.ClassSchedule) bool { return x.TrainerID == trainerID }, start, end, excludeID), nil
+	return r.overlap(func(x *entity.ClassSchedule) bool { return classFakeTeacher(x) == trainerID }, start, end, excludeID), nil
 }
 
 func (r classFakeScheduleRepo) TrainerPTOverlap(_ context.Context, trainerID uint, start, end time.Time) (bool, error) {
@@ -439,6 +448,13 @@ func (r bookingFakeRepo) SetMemberBlockedUntil(_ context.Context, memberID uint,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.members[memberID].BookingBlockedUntil = &until
+	return nil
+}
+
+func (r bookingFakeRepo) ClearMemberBlock(_ context.Context, memberID uint) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.members[memberID].BookingBlockedUntil = nil
 	return nil
 }
 

@@ -16,7 +16,7 @@ import membershipPlanApi from '@/api/plan';
 import subscriptionApi from '@/api/subscription';
 import type { Subscription, SubscriptionDetail } from '@/api/subscription';
 import MoneyText from '@/components/Money/MoneyText';
-import { getErrorMessage, showError } from '@/utils/errors';
+import { getErrorMessage, showError, validateForm } from '@/utils/errors';
 import { formatDate } from '@/utils/format';
 import PaymentFields from './PaymentFields';
 import { DEFAULT_PAYMENT, toPaymentInput } from './payment';
@@ -88,7 +88,8 @@ export default function UpgradeModal({ open, sub, onClose }: UpgradeModalProps) 
 
   const submit = async () => {
     if (!sub || !quote || !planId) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     upgrade.mutate(
       {
         id: sub.id,

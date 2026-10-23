@@ -67,6 +67,14 @@ type (
 		Count  int64
 	}
 
+	// InvoiceConsumedSub: gói tập của hóa đơn mà giá trị đã trả đã được khấu trừ sang gói khác.
+	InvoiceConsumedSub struct {
+		SubscriptionID   uint
+		Status           string
+		EventType        string // UPGRADED | TRANSFERRED
+		ToSubscriptionID uint
+	}
+
 	InvoiceRepository interface {
 		// Create ghi hóa đơn và các dòng (inv.Items), gán InvoiceID cho từng dòng.
 		Create(ctx context.Context, inv *entity.Invoice) error
@@ -94,6 +102,10 @@ type (
 		SaveInstallmentSchedule(ctx context.Context, sc *entity.InstallmentSchedule) error
 		// PendingOnlineTxn: giao dịch VNPay PENDING mới nhất của hóa đơn tạo từ thời điểm since (chưa hết hạn); nil nếu không có.
 		PendingOnlineTxn(ctx context.Context, invoiceID uint, since time.Time) (*entity.OnlinePaymentTxn, error)
+		// ConsumedSubscriptions: các gói tập của hóa đơn đã bị nâng cấp (CANCELLED) / chuyển nhượng (TRANSFERRED) và
+		// chưa được khôi phục – giá trị đã trả đã được khấu trừ sang gói khác. Bỏ qua gói nhận chuyển nhượng
+		// (carried_paid_base) vì hóa đơn của nó chỉ là phí chuyển nhượng, không phải gốc khấu trừ.
+		ConsumedSubscriptions(ctx context.Context, invoiceID uint) ([]InvoiceConsumedSub, error)
 	}
 
 	invoiceRepository struct {
@@ -337,4 +349,25 @@ func (r *invoiceRepository) PendingOnlineTxn(ctx context.Context, invoiceID uint
 		return nil, err
 	}
 	return &rows[0], nil
+}
+
+func (r *invoiceRepository) ConsumedSubscriptions(ctx context.Context, invoiceID uint) ([]InvoiceConsumedSub, error) {
+	var rows []InvoiceConsumedSub
+	// Sự kiện quyết định cuối cùng của gói: UPGRADED/TRANSFERRED (đã khấu trừ sang gói khác) hay ACTIVATED/EXPIRED/
+	// CANCELLED (gói được khôi phục khi gói mới bị hủy, hoặc hủy thông thường).
+	err := postgres.Conn(ctx, r.db).Raw(`SELECT s.id AS subscription_id, s.status, e.event_type,
+	COALESCE(NULLIF(e.data->>'to_subscription_id', '')::bigint, 0) AS to_subscription_id
+FROM subscriptions s
+JOIN LATERAL (
+	SELECT ev.event_type, ev.data FROM subscription_events ev
+	WHERE ev.subscription_id = s.id AND ev.event_type IN (?)
+	ORDER BY ev.id DESC LIMIT 1
+) e ON TRUE
+WHERE s.invoice_id = ? AND s.carried_paid_base IS NULL AND s.status IN (?) AND e.event_type IN (?)
+ORDER BY s.id`,
+		[]string{entity.SubEventUpgraded, entity.SubEventTransferred, entity.SubEventActivated, entity.SubEventExpired, entity.SubEventCancelled},
+		invoiceID,
+		[]string{entity.SubStatusCancelled, entity.SubStatusTransferred},
+		[]string{entity.SubEventUpgraded, entity.SubEventTransferred}).Scan(&rows).Error
+	return rows, err
 }

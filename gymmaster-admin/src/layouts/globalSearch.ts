@@ -19,3 +19,23 @@ export function searchTerm(text: string): string | null {
 export function globalSearch(q: string, signal?: AbortSignal) {
   return http.get<{ items: SearchHit[] }>('/admin/search', { params: { q }, signal, silent: true });
 }
+
+/**
+ * Chỉ số kết quả đang chọn sau khi bấm phím điều hướng (↑/↓/Home/End) – vòng tròn ở hai đầu.
+ * Trả `-1` khi danh sách rỗng; phím khác giữ nguyên.
+ */
+export function nextActiveIndex(current: number, key: string, length: number): number {
+  if (length <= 0) return -1;
+  switch (key) {
+    case 'ArrowDown':
+      return current < 0 || current >= length - 1 ? 0 : current + 1;
+    case 'ArrowUp':
+      return current <= 0 ? length - 1 : current - 1;
+    case 'Home':
+      return 0;
+    case 'End':
+      return length - 1;
+    default:
+      return Math.min(current, length - 1);
+  }
+}

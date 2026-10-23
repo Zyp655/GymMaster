@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Line } from '@ant-design/charts';
+import { Line } from '@/components/Charts';
 import { useQuery } from '@tanstack/react-query';
 import {
   App,

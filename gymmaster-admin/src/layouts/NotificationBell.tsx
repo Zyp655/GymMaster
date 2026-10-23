@@ -10,7 +10,9 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { NotificationIcon } from '@/routes/notifications/meta';
 import { useAppSelector } from '@/store';
 import { formatDateTime } from '@/utils/format';
+import { refreshAccessToken } from '@/utils/api';
 import { tokenStore } from '@/utils/token';
+import { connectSse } from './sseReconnect';
 
 /** Chuông thông báo (dữ liệu từ `useNotifications` + kết nối SSE `/v1/notifications/stream`): 10 thông báo mới nhất + badge chưa đọc. */
 export function NotificationBell() {
@@ -25,21 +27,11 @@ export function NotificationBell() {
 
   useEffect(() => {
     if (!loggedIn || typeof EventSource === 'undefined') return;
-    const accessToken = tokenStore.getAccessToken();
-    if (!accessToken) return;
 
     const base = appConfig.apiUrl.replace(/\/+$/, '');
     const streamPath = base.endsWith('/v1')
       ? `${base}/notifications/stream`
       : `${base}/v1/notifications/stream`;
-    const url = `${streamPath}?token=${encodeURIComponent(accessToken)}`;
-
-    let es: EventSource | null = null;
-    try {
-      es = new EventSource(url);
-    } catch {
-      return;
-    }
 
     const handleIncoming = (event: MessageEvent) => {
       void qc.invalidateQueries({ queryKey: [notificationApi.key] });
@@ -67,16 +59,16 @@ export function NotificationBell() {
       }
     };
 
-    es.addEventListener('notification', handleIncoming as EventListener);
-    es.onmessage = handleIncoming;
-    es.onerror = () => {
-      // Lỗi kết nối SSE -> đóng để tự động fallback về polling của useNotifications
-      es?.close();
-    };
-
-    return () => {
-      es?.close();
-    };
+    // Token đọc lại mỗi lần nối (interceptor có thể đã refresh); auth_expired/auth_revoked/onerror
+    // → refresh rồi mở lại theo backoff thay vì đóng hẳn (A3). Polling của useNotifications vẫn chạy song song.
+    return connectSse({
+      buildUrl: () => {
+        const token = tokenStore.getAccessToken();
+        return token ? `${streamPath}?token=${encodeURIComponent(token)}` : null;
+      },
+      refresh: () => refreshAccessToken(),
+      onEvent: handleIncoming,
+    });
   }, [loggedIn, qc, notification, navigate]);
 
   const go = (path: string) => {

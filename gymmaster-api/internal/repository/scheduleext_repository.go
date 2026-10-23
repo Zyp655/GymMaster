@@ -79,7 +79,15 @@ type (
 		CreateBranchHoliday(ctx context.Context, h *entity.BranchHoliday) error
 		UpdateBranchHoliday(ctx context.Context, h *entity.BranchHoliday) error
 		DeleteBranchHoliday(ctx context.Context, id uint) error
-		ExtendActiveTimeSubscriptions(ctx context.Context, branchID *uint, holidayDate time.Time) (int64, error)
+		// BranchHolidayExists: đã có lịch ngày lễ cùng phạm vi (chi nhánh branchID, nil = toàn hệ thống) và cùng ngày
+		// (trừ excludeID) – khớp UNIQUE uq_branch_holidays_branch_date (000047).
+		BranchHolidayExists(ctx context.Context, branchID *uint, date time.Time, excludeID uint) (bool, error)
+		// ExtendActiveTimeSubscriptions cộng bù 1 ngày cho gói TIME đang chạy qua ngày lễ và ghi lại vào
+		// branch_holiday_extensions (gói đã được cộng bù cho cùng ngày bởi lịch lễ khác thì bỏ qua). Trả số gói được cộng.
+		ExtendActiveTimeSubscriptions(ctx context.Context, holidayID uint, branchID *uint, holidayDate time.Time) (int64, error)
+		// RevertHolidayExtensions hoàn tác phần cộng bù của ngày lễ (trừ 1 ngày các gói đã ghi nhận) và xóa bản ghi
+		// cộng bù. Trả số gói được hoàn tác.
+		RevertHolidayExtensions(ctx context.Context, holidayID uint) (int64, error)
 	}
 
 	scheduleExtRepository struct {
@@ -206,7 +214,7 @@ func (r *scheduleExtRepository) baseImpactedClass(ctx context.Context) *gorm.DB 
 func (r *scheduleExtRepository) ListImpactedClassSchedules(ctx context.Context, trainerID uint, fromAt, toAt time.Time) ([]ImpactedClassRow, error) {
 	var rows []ImpactedClassRow
 	err := r.baseImpactedClass(ctx).
-		Where("cs.trainer_id = ? AND cs.status = 'SCHEDULED' AND cs.start_at < ? AND cs.end_at > ?", trainerID, toAt, fromAt).
+		Where("COALESCE(cs.substitute_trainer_id, cs.trainer_id) = ? AND cs.status = 'SCHEDULED' AND cs.start_at < ? AND cs.end_at > ?", trainerID, toAt, fromAt).
 		Order("cs.start_at ASC").
 		Scan(&rows).Error
 	return rows, err
@@ -407,18 +415,46 @@ func (r *scheduleExtRepository) DeleteBranchHoliday(ctx context.Context, id uint
 	return postgres.Conn(ctx, r.db).Delete(&entity.BranchHoliday{}, id).Error
 }
 
-func (r *scheduleExtRepository) ExtendActiveTimeSubscriptions(ctx context.Context, branchID *uint, holidayDate time.Time) (int64, error) {
-	conn := postgres.Conn(ctx, r.db)
-	dStr := holidayDate.Format("2006-01-02")
-	tx := conn.Model(&entity.Subscription{}).
-		Where("status = 'ACTIVE' AND start_date <= ? AND end_date >= ?", dStr, dStr).
-		Where("plan_id IN (SELECT id FROM membership_plans WHERE type = 'TIME')")
-	if branchID != nil && *branchID > 0 {
-		tx = tx.Where("branch_id = ?", *branchID)
+func (r *scheduleExtRepository) BranchHolidayExists(ctx context.Context, branchID *uint, date time.Time, excludeID uint) (bool, error) {
+	var bid uint
+	if branchID != nil {
+		bid = *branchID
 	}
-	res := tx.UpdateColumns(map[string]any{
-		"end_date":   gorm.Expr("end_date + INTERVAL '1 day'"),
-		"updated_at": time.Now(),
-	})
+	var n int64
+	err := postgres.Conn(ctx, r.db).Model(&entity.BranchHoliday{}).
+		Where("COALESCE(branch_id, 0) = ? AND date = ? AND id <> ?", bid, date.Format("2006-01-02"), excludeID).
+		Count(&n).Error
+	return n > 0, err
+}
+
+func (r *scheduleExtRepository) ExtendActiveTimeSubscriptions(ctx context.Context, holidayID uint, branchID *uint, holidayDate time.Time) (int64, error) {
+	dStr := holidayDate.Format("2006-01-02")
+	branchCond, args := "", []any{holidayID, dStr, dStr, dStr}
+	if branchID != nil && *branchID > 0 {
+		branchCond = " AND s.branch_id = ?"
+		args = append(args, *branchID)
+	}
+	// Ghi nhận trước (ON CONFLICT bỏ qua gói đã được cộng bù cho ngày này) rồi chỉ cộng các gói vừa ghi nhận.
+	res := postgres.Conn(ctx, r.db).Exec(`
+		WITH ext AS (
+			INSERT INTO branch_holiday_extensions (holiday_id, subscription_id, holiday_date)
+			SELECT ?, s.id, ?::date FROM subscriptions s
+			 WHERE s.status = 'ACTIVE' AND s.start_date <= ? AND s.end_date >= ?
+			   AND s.plan_id IN (SELECT id FROM membership_plans WHERE type = 'TIME')`+branchCond+`
+			ON CONFLICT DO NOTHING
+			RETURNING subscription_id
+		)
+		UPDATE subscriptions SET end_date = end_date + INTERVAL '1 day', updated_at = NOW()
+		 WHERE id IN (SELECT subscription_id FROM ext)`, args...)
+	return res.RowsAffected, res.Error
+}
+
+func (r *scheduleExtRepository) RevertHolidayExtensions(ctx context.Context, holidayID uint) (int64, error) {
+	res := postgres.Conn(ctx, r.db).Exec(`
+		WITH ext AS (
+			DELETE FROM branch_holiday_extensions WHERE holiday_id = ? RETURNING subscription_id
+		)
+		UPDATE subscriptions SET end_date = end_date - INTERVAL '1 day', updated_at = NOW()
+		 WHERE id IN (SELECT subscription_id FROM ext) AND end_date > start_date`, holidayID)
 	return res.RowsAffected, res.Error
 }

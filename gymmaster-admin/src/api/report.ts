@@ -66,6 +66,7 @@ export interface ReportOverview {
     new_change_pct: number | null;
     expiring_7d: number;
   };
+  /** present: đang tập = check-in hợp lệ trong 3 giờ gần nhất chưa check-out (như trang Mật độ). */
   checkins: { today: number; present: number };
   classes: { today: number; capacity: number; booked: number; fill_rate: number };
   pt: { today: number; completed: number };
@@ -357,39 +358,75 @@ class ReportApi {
     return http.get<SubscriptionsReport>('/admin/reports/subscriptions', { params });
   }
 
-  /**
-   * Xuất Excel. Response là file (không bọc envelope); lỗi vẫn là JSON envelope.
-   * Dùng `arraybuffer` để đọc được JSON lỗi đồng bộ trong `transformResponse` → interceptor
-   * xử lý lỗi như mọi request khác (kể cả refresh token khi 40101).
-   */
-  async export(params: ExportParams): Promise<DownloadedFile> {
-    const data = (await api.get('/admin/reports/export', {
+  /** Xuất Excel. Response là file (không bọc envelope); lỗi vẫn là JSON envelope. */
+  export(params: ExportParams): Promise<DownloadedFile> {
+    return downloadFile('/admin/reports/export', {
       params,
-      responseType: 'arraybuffer',
-      transformResponse: (raw: ArrayBuffer, headers): DownloadedFile | Envelope => {
-        const type = String(headers?.['content-type'] ?? '');
-        if (type.includes('application/json')) {
-          try {
-            return JSON.parse(new TextDecoder().decode(raw)) as Envelope;
-          } catch {
-            return { code: ErrorCode.BAD_REQUEST, message: 'Không thể xuất báo cáo', data: null };
-          }
-        }
-        return {
-          blob: new Blob([raw], { type: type || 'application/octet-stream' }),
-          filename: parseFilename(
-            String(headers?.['content-disposition'] ?? ''),
-            `bao-cao-${params.type}.xlsx`,
-          ),
-        };
-      },
-    })) as unknown as DownloadedFile | Envelope;
-
-    if ('code' in data) {
-      throw new ApiError(data.message || 'Không thể xuất báo cáo', data.code, 400, data.data);
-    }
-    return data;
+      fallbackName: `bao-cao-${params.type}.xlsx`,
+      errorMessage: 'Không thể xuất báo cáo',
+    });
   }
+}
+
+export interface DownloadFileOptions {
+  params?: object;
+  /** Tên file khi server không gửi Content-Disposition. */
+  fallbackName: string;
+  errorMessage?: string;
+  /**
+   * Server trả JSON envelope thành công (không phải file) → chuyển `data` thành file
+   * (vd bảng lương trả `{ csv }`). Không truyền → coi JSON là lỗi.
+   */
+  fromJson?: (data: unknown) => Blob | null;
+}
+
+/**
+ * Tải file từ API. Interceptor trả thẳng `response.data` với `responseType: 'arraybuffer'`
+ * (mất `headers`) nên KHÔNG đọc `res.headers` sau `api.get` – phải xử lý trong
+ * `transformResponse` (còn headers). JSON lỗi được parse đồng bộ ở đó → interceptor vẫn xử lý
+ * lỗi như mọi request khác (kể cả refresh token khi 40101).
+ */
+export async function downloadFile(
+  url: string,
+  opts: DownloadFileOptions,
+): Promise<DownloadedFile> {
+  const errorMessage = opts.errorMessage ?? 'Không thể tải file';
+  const data = (await api.get(url, {
+    params: opts.params,
+    responseType: 'arraybuffer',
+    transformResponse: (raw: ArrayBuffer, headers): DownloadedFile | Envelope => {
+      const type = String(headers?.['content-type'] ?? '');
+      const filename = parseFilename(
+        String(headers?.['content-disposition'] ?? ''),
+        opts.fallbackName,
+      );
+      if (type.includes('application/json')) {
+        let body: Envelope;
+        try {
+          body = JSON.parse(new TextDecoder().decode(raw)) as Envelope;
+        } catch {
+          return { code: ErrorCode.BAD_REQUEST, message: errorMessage, data: null };
+        }
+        if (body.code === ErrorCode.OK) {
+          const blob = opts.fromJson?.(body.data);
+          if (blob) return { blob, filename };
+          return { code: ErrorCode.BAD_REQUEST, message: errorMessage, data: null };
+        }
+        return body;
+      }
+      return { blob: new Blob([raw], { type: type || 'application/octet-stream' }), filename };
+    },
+  })) as unknown as DownloadedFile | Envelope;
+
+  if (!data || !('blob' in data)) {
+    throw new ApiError(
+      data?.message || errorMessage,
+      data?.code ?? ErrorCode.BAD_REQUEST,
+      400,
+      data?.data,
+    );
+  }
+  return data;
 }
 
 /** Lưu blob thành file tải về. */

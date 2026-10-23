@@ -17,6 +17,7 @@ type ClassBooking struct {
 	SubscriptionID   *uint      `json:"subscription_id"`
 	Status           string     `json:"status"`
 	WaitlistPosition *int       `json:"waitlist_position"`
+	WaitlistRank     *int       `json:"waitlist_rank"` // thứ hạng hiện tại trong danh sách chờ (1, 2, …), null nếu không chờ
 	Source           string     `json:"source"`
 	BookedAt         time.Time  `json:"booked_at"`
 	CancelledAt      *time.Time `json:"cancelled_at"`
@@ -27,8 +28,8 @@ type ClassBooking struct {
 	BranchID         uint       `json:"branch_id"`
 	BranchName       string     `json:"branch_name"`
 	RoomName         string     `json:"room_name"`
-	TrainerID        uint       `json:"trainer_id"`
-	TrainerName      string     `json:"trainer_name"`
+	TrainerID        uint       `json:"trainer_id"`   // HLV thực dạy (HLV dạy thay nếu có)
+	TrainerName      string     `json:"trainer_name"` // HLV thực dạy
 	StartAt          time.Time  `json:"start_at"`
 	EndAt            time.Time  `json:"end_at"`
 	ScheduleStatus   string     `json:"schedule_status"`

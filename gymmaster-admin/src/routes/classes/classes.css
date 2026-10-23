@@ -154,6 +154,12 @@
   box-shadow: 0 0 0 1px #ef4444;
 }
 
+/* Buổi có HLV dạy thay: viền nét đứt để nhận ra ở lịch tuần (chi tiết trong tooltip). */
+.wc-event.is-substituted {
+  outline: 2px dashed rgba(255, 255, 255, 0.9);
+  outline-offset: -3px;
+}
+
 .wc-event.is-cancelled {
   opacity: 0.5;
   background: repeating-linear-gradient(

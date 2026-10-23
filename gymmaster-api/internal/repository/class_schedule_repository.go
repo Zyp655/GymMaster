@@ -16,7 +16,7 @@ type ClassScheduleFilter struct {
 	BranchIDs   []uint // nil = không lọc
 	From        time.Time
 	To          time.Time
-	TrainerID   uint
+	TrainerID   uint // HLV thực dạy
 	ClassTypeID uint
 	RoomID      uint
 	Status      string
@@ -42,6 +42,7 @@ type (
 		CompleteEnded(ctx context.Context, endedBefore time.Time) (int64, error)
 
 		RoomOverlap(ctx context.Context, roomID uint, start, end time.Time, excludeID uint) (bool, error)
+		// TrainerOverlap: HLV đang THỰC DẠY (chính, hoặc dạy thay) một lớp chưa hủy khác giao với khoảng thời gian.
 		TrainerOverlap(ctx context.Context, trainerID uint, start, end time.Time, excludeID uint) (bool, error)
 		// TrainerPTOverlap: HLV có buổi PT (SCHEDULED/COMPLETED) giao với khoảng thời gian.
 		TrainerPTOverlap(ctx context.Context, trainerID uint, start, end time.Time) (bool, error)
@@ -67,12 +68,14 @@ func (r *classScheduleRepository) detail(ctx context.Context) *gorm.DB {
 	return postgres.Conn(ctx, r.db).Table("class_schedules cs").
 		Select(`cs.*, ct.code AS class_type_code, ct.name AS class_type_name, ct.color AS class_type_color,
 			COALESCE(b.name, '') AS branch_name, COALESCE(rm.name, '') AS room_name, COALESCE(u.full_name, '') AS trainer_name,
+			COALESCE(su.full_name, '') AS substitute_trainer_name,
 			(SELECT count(*) FROM class_bookings cb WHERE cb.schedule_id = cs.id AND cb.status = 'WAITLIST') AS waitlist_count,
 			(SELECT count(*) FROM class_bookings cb WHERE cb.schedule_id = cs.id AND cb.status = 'ATTENDED') AS attended_count`).
 		Joins("JOIN class_types ct ON ct.id = cs.class_type_id").
 		Joins("LEFT JOIN branches b ON b.id = cs.branch_id").
 		Joins("LEFT JOIN rooms rm ON rm.id = cs.room_id").
-		Joins("LEFT JOIN users u ON u.id = cs.trainer_id")
+		Joins("LEFT JOIN users u ON u.id = cs.trainer_id").
+		Joins("LEFT JOIN users su ON su.id = cs.substitute_trainer_id")
 }
 
 func (r *classScheduleRepository) List(ctx context.Context, f ClassScheduleFilter) ([]entity.ClassScheduleDetail, error) {
@@ -81,7 +84,8 @@ func (r *classScheduleRepository) List(ctx context.Context, f ClassScheduleFilte
 		tx = tx.Where("cs.branch_id IN ?", f.BranchIDs)
 	}
 	if f.TrainerID > 0 {
-		tx = tx.Where("cs.trainer_id = ?", f.TrainerID)
+		// Lọc theo HLV thực dạy (HLV dạy thay nếu đã phân công, ngược lại HLV chính).
+		tx = tx.Where("COALESCE(cs.substitute_trainer_id, cs.trainer_id) = ?", f.TrainerID)
 	}
 	if f.ClassTypeID > 0 {
 		tx = tx.Where("cs.class_type_id = ?", f.ClassTypeID)
@@ -132,7 +136,7 @@ func (r *classScheduleRepository) CreateIfFree(ctx context.Context, s *entity.Cl
 
 func (r *classScheduleRepository) Update(ctx context.Context, s *entity.ClassSchedule) error {
 	return postgres.Conn(ctx, r.db).Model(s).
-		Select("room_id", "trainer_id", "start_at", "end_at", "capacity", "note", "updated_by").Updates(s).Error
+		Select("room_id", "trainer_id", "substitute_trainer_id", "start_at", "end_at", "capacity", "note", "updated_by").Updates(s).Error
 }
 
 func (r *classScheduleRepository) AddBooked(ctx context.Context, id uint, delta int) error {
@@ -174,7 +178,8 @@ func (r *classScheduleRepository) RoomOverlap(ctx context.Context, roomID uint, 
 }
 
 func (r *classScheduleRepository) TrainerOverlap(ctx context.Context, trainerID uint, start, end time.Time, excludeID uint) (bool, error) {
-	return r.overlap(ctx, "trainer_id", trainerID, start, end, excludeID)
+	// HLV thực dạy = HLV dạy thay (nếu có), ngược lại HLV chính – khớp EXCLUDE ex_class_trainer_overlap (000046).
+	return r.overlap(ctx, "COALESCE(substitute_trainer_id, trainer_id)", trainerID, start, end, excludeID)
 }
 
 func (r *classScheduleRepository) TrainerPTOverlap(ctx context.Context, trainerID uint, start, end time.Time) (bool, error) {

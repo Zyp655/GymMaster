@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +29,13 @@ type SystemExtService struct {
 	repo     *repository.SystemExtRepository
 	notifier Notifier
 	audit    AuditService
+	// invoices: dịch vụ hóa đơn DÙNG CHUNG (đã đăng ký Paid/Void/Refund handler của gói tập, PT, POS…).
+	invoices InvoiceService
 }
+
+// SetInvoiceService gắn dịch vụ hóa đơn dùng chung để hoàn VNPay chạy đủ hook nghiệp vụ
+// (vd. hoàn hết HĐ → hủy gói PENDING). Chưa gắn (unit test) → tự tạo bản riêng không có hook.
+func (s *SystemExtService) SetInvoiceService(inv InvoiceService) { s.invoices = inv }
 
 const (
 	auditBranchTransfer   = "BRANCH_TRANSFER"
@@ -54,6 +62,22 @@ var (
 		entity.InvoiceStatusRefunded: "Đã hoàn tiền",
 	}
 )
+
+// bulkMemberActionLabel: mô tả tiếng Việt của thao tác hàng loạt cho thông báo kết quả (REG-A9a).
+var bulkMemberActionLabel = map[string]string{
+	"NOTIFY":          "gửi thông báo",
+	"TRANSFER_BRANCH": "chuyển chi nhánh",
+	"ACTIVATE":        "kích hoạt lại",
+	"DEACTIVATE":      "ngừng hoạt động",
+}
+
+// newVNPayRefundRef sinh mã tham chiếu hoàn VNPay duy nhất: thêm hậu tố ngẫu nhiên để hai lần hoàn
+// trong cùng một giây không trùng mã (FIN-VNP-19).
+func newVNPayRefundRef(txnID uint, now time.Time) string {
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("VNP-REF-%d-%s-%s", txnID, now.Format("060102150405"), strings.ToUpper(hex.EncodeToString(b[:])))
+}
 
 func labelOr(m map[string]string, code string) string {
 	if v, ok := m[code]; ok {
@@ -136,7 +160,7 @@ func (s *SystemExtService) GlobalSearch(ctx context.Context, q string) (*v1.Glob
 				ID:       inv.ID,
 				Category: "INVOICE",
 				Title:    fmt.Sprintf("Hóa đơn %s", inv.InvoiceNo),
-				Subtitle: fmt.Sprintf("Tổng: %.0fđ · Trạng thái: %s", inv.Total, labelOr(searchInvoiceStatusLabel, inv.Status)),
+				Subtitle: fmt.Sprintf("Tổng: %s · Trạng thái: %s", formatMoneyVND(inv.Total), labelOr(searchInvoiceStatusLabel, inv.Status)),
 				Link:     fmt.Sprintf("/app/invoices/%d", inv.ID),
 			})
 		}
@@ -152,7 +176,7 @@ func (s *SystemExtService) GlobalSearch(ctx context.Context, q string) (*v1.Glob
 				ID:       p.ID,
 				Category: "PRODUCT",
 				Title:    fmt.Sprintf("%s (%s)", p.Name, p.SKU),
-				Subtitle: fmt.Sprintf("Giá bán: %.0fđ", p.SellPrice),
+				Subtitle: fmt.Sprintf("Giá bán: %s", formatMoneyVND(p.SellPrice)),
 				Link:     "/app/products",
 			})
 		}
@@ -331,7 +355,7 @@ func (s *SystemExtService) BulkMemberAction(ctx context.Context, req *v1.BulkMem
 		map[string]any{"member_ids": memberIDs},
 		map[string]any{"action": req.Action, "affected": affected, "skipped": skipped, "to_branch_id": req.ToBranchID, "title": req.Title, "failed": failed})
 
-	message := fmt.Sprintf("Đã thực hiện %s cho %d hội viên", req.Action, affected)
+	message := fmt.Sprintf("Đã %s cho %d hội viên", labelOr(bulkMemberActionLabel, req.Action), affected)
 	if len(failed) > 0 {
 		message += fmt.Sprintf("; %d hội viên không chuyển được (%s)", len(failed), strings.Join(failed, ", "))
 	}
@@ -458,7 +482,10 @@ func (s *SystemExtService) RefundOnlineTxn(ctx context.Context, req *v1.RefundOn
 	}
 	db := s.repo.DB()
 	txm := postgres.NewTxManager(db)
-	invSvc := NewInvoiceService(repository.NewInvoiceRepository(db), nil, txm, s.audit).(*invoiceService)
+	invSvc, _ := s.invoices.(*invoiceService)
+	if invSvc == nil {
+		invSvc = NewInvoiceService(repository.NewInvoiceRepository(db), nil, txm, s.audit).(*invoiceService)
+	}
 
 	var res *v1.RefundOnlineTxnRes
 	err := txm.WithTx(ctx, func(ctx context.Context) error {
@@ -505,7 +532,7 @@ func (s *SystemExtService) RefundOnlineTxn(ctx context.Context, req *v1.RefundOn
 		fromInvoice := roundMoneyVND(amount - fromUnrecorded)
 
 		now := time.Now()
-		gatewayRef := fmt.Sprintf("VNP-REF-%d-%s", txn.ID, now.Format("060102150405"))
+		gatewayRef := newVNPayRefundRef(txn.ID, now)
 		out := &v1.RefundOnlineTxnRes{InvoiceID: txn.InvoiceID, Amount: amount, Status: "SUCCESS", GatewayRef: gatewayRef, CreatedAt: now}
 		if fromInvoice > 0 {
 			_, rf, err := invSvc.refund(ctx, txn.InvoiceID, RefundInput{Amount: fromInvoice, Method: entity.PaymentVNPay, Reason: reason}, &txn.ID, gatewayRef)
@@ -592,6 +619,15 @@ func ValidateLegacyImportRows(rows []v1.LegacyImportRow) (int, []v1.LegacyImport
 				continue
 			}
 		}
+		// Có mã gói tập nhưng thiếu ngày → trước đây bị bỏ qua im lặng (A5-01).
+		if strings.TrimSpace(r.PlanCode) != "" && r.SubStartDate == "" {
+			errs = append(errs, v1.LegacyImportErrorItem{Row: rowNum, Phone: rawPhone, Message: "Có mã gói tập nhưng thiếu ngày bắt đầu/kết thúc gói tập"})
+			continue
+		}
+		if msg := validateLegacyPTFields(r); msg != "" {
+			errs = append(errs, v1.LegacyImportErrorItem{Row: rowNum, Phone: rawPhone, Message: msg})
+			continue
+		}
 		if r.RemainingSessions != nil && *r.RemainingSessions < 0 {
 			errs = append(errs, v1.LegacyImportErrorItem{Row: rowNum, Phone: rawPhone, Message: "Số buổi còn lại không được âm"})
 			continue
@@ -603,6 +639,24 @@ func ValidateLegacyImportRows(rows []v1.LegacyImportRow) (int, []v1.LegacyImport
 		okCount++
 	}
 	return okCount, errs
+}
+
+// validateLegacyPTFields: hợp đồng PT chuyển sang cần đủ mã gói PT, số buổi còn lại (> 0) và email HLV.
+func validateLegacyPTFields(r v1.LegacyImportRow) string {
+	code := strings.TrimSpace(r.PTPackageCode)
+	if code == "" && r.PTRemainingSessions == nil {
+		return ""
+	}
+	if code == "" || r.PTRemainingSessions == nil {
+		return "Cần nhập đủ mã gói PT và số buổi PT còn lại"
+	}
+	if *r.PTRemainingSessions <= 0 {
+		return "Số buổi PT còn lại phải lớn hơn 0"
+	}
+	if strings.TrimSpace(r.PTTrainerEmail) == "" {
+		return "Thiếu email HLV phụ trách (pt_trainer_email) cho hợp đồng PT"
+	}
+	return ""
 }
 
 func (s *SystemExtService) ListLegacyImports(ctx context.Context) (v1.ListLegacyImportJobsRes, error) {
@@ -628,6 +682,8 @@ type legacyRowPlan struct {
 	phone    string
 	existing *entity.Member
 	plan     *entity.MembershipPlan
+	ptPkg    *entity.PTPackage
+	trainer  uint
 }
 
 // planLegacyRows đối chiếu các dòng (đã qua ValidateLegacyImportRows) với DB:
@@ -694,6 +750,33 @@ func (s *SystemExtService) planLegacyRows(ctx context.Context, db *gorm.DB, rows
 				p.plan = pl
 			}
 		}
+
+		if code := strings.ToUpper(strings.TrimSpace(r.PTPackageCode)); code != "" {
+			var pkgs []entity.PTPackage
+			if err := db.WithContext(ctx).Where("UPPER(code) = ? AND deleted_at IS NULL", code).Limit(1).Find(&pkgs).Error; err != nil {
+				return nil, nil, err
+			}
+			if len(pkgs) == 0 {
+				fail(fmt.Sprintf("Không tìm thấy gói PT có mã %s", code))
+				continue
+			}
+			p.ptPkg = &pkgs[0]
+			var trainerIDs []uint
+			if err := db.WithContext(ctx).Table("users u").Select("u.id").
+				Where("LOWER(u.email) = ? AND u.deleted_at IS NULL AND u.status = ?", strings.ToLower(strings.TrimSpace(r.PTTrainerEmail)), consts.StatusActive).
+				Where(`(EXISTS (SELECT 1 FROM staff_profiles sp WHERE sp.user_id = u.id AND sp.position = 'TRAINER')
+					OR EXISTS (SELECT 1 FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id WHERE ur.user_id = u.id AND ro.code = 'TRAINER'))`).
+				Where(`EXISTS (SELECT 1 FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id
+					WHERE ur.user_id = u.id AND ro.code <> 'MEMBER' AND (ur.branch_id = ? OR ur.branch_id IS NULL))`, branchID).
+				Limit(1).Pluck("u.id", &trainerIDs).Error; err != nil {
+				return nil, nil, err
+			}
+			if len(trainerIDs) == 0 {
+				fail(fmt.Sprintf("Không tìm thấy HLV đang hoạt động thuộc chi nhánh có email %s", strings.TrimSpace(r.PTTrainerEmail)))
+				continue
+			}
+			p.trainer = trainerIDs[0]
+		}
 		out = append(out, p)
 	}
 	return out, errs, nil
@@ -755,6 +838,16 @@ func importLegacyRow(tx *gorm.DB, p legacyRowPlan, branchID uint, actor *uint, n
 			if err := tx.Create(&sub).Error; err != nil {
 				return err
 			}
+			// Đánh dấu nguồn để báo cáo phân biệt gói nhập từ hệ thống cũ với gói bán tại quầy (mặc định ADMIN).
+			if err := tx.Model(&entity.Subscription{}).Where("id = ?", sub.ID).Update("source", legacyImportNote).Error; err != nil {
+				return err
+			}
+		}
+	}
+
+	if p.ptPkg != nil && r.PTRemainingSessions != nil {
+		if err := importLegacyPTContract(tx, p, m.ID, branchID, actor, now); err != nil {
+			return err
 		}
 	}
 
@@ -783,6 +876,40 @@ func importLegacyRow(tx *gorm.DB, p legacyRowPlan, branchID uint, actor *uint, n
 		}
 	}
 	return nil
+}
+
+// importLegacyPTContract tạo hợp đồng PT ACTIVE với số buổi còn lại (giá 0: đã thu ở hệ thống cũ,
+// không tính lại doanh thu), hiệu lực từ hôm nay theo thời hạn gói PT; chạy lại cùng file không nhân đôi.
+func importLegacyPTContract(tx *gorm.DB, p legacyRowPlan, memberID, branchID uint, actor *uint, now time.Time) error {
+	var dup int64
+	if err := tx.Model(&entity.PTContract{}).
+		Where("member_id = ? AND pt_package_id = ? AND trainer_id = ? AND note = ? AND status = ?",
+			memberID, p.ptPkg.ID, p.trainer, legacyImportNote, entity.PTContractActive).
+		Count(&dup).Error; err != nil {
+		return err
+	}
+	if dup > 0 {
+		return nil
+	}
+	start := subDateOf(now)
+	c := entity.PTContract{
+		MemberID:       memberID,
+		TrainerID:      p.trainer,
+		PTPackageID:    p.ptPkg.ID,
+		BranchID:       branchID,
+		TotalSessions:  *p.in.PTRemainingSessions,
+		SessionMinutes: ptSessionMinutes(p.ptPkg),
+		StartDate:      start,
+		EndDate:        subEndDate(start, max(1, p.ptPkg.ValidityDays)),
+		Price:          0,
+		Status:         entity.PTContractActive,
+		SoldBy:         actor,
+		Note:           legacyImportNote,
+	}
+	if err := tx.Create(&c).Error; err != nil {
+		return err
+	}
+	return tx.Model(&entity.PTContract{}).Where("id = ?", c.ID).Update("source", legacyImportNote).Error
 }
 
 // errLegacyRowsFailed: có dòng ghi lỗi → hủy toàn bộ transaction (không nhập dở dang; sửa file rồi chạy lại).
@@ -980,24 +1107,41 @@ func (s *SystemExtService) GetSetupWizardStatus(ctx context.Context) (*v1.GetSet
 	}, nil
 }
 
+// wizardCancelBeforeMinutes đổi "hủy lớp trước N giờ" của Wizard sang phút cho booking.cancel_before_minutes
+// (giới hạn như trang Cấu hình: tối đa 10080 phút = 168 giờ). 0 = không đổi cấu hình.
+func wizardCancelBeforeMinutes(hours int) (int, error) {
+	if hours < 0 || hours*60 > settingRules[SettingBookingCancelBeforeMinutes].max {
+		return 0, rescode.New(rescode.BadRequest, "Thời hạn hủy lớp phải từ 1 đến 168 giờ")
+	}
+	return hours * 60, nil
+}
+
 func (s *SystemExtService) CompleteSetupWizard(ctx context.Context, req *v1.CompleteSetupWizardReq) (*v1.CompleteSetupWizardRes, error) {
+	cancelMinutes, err := wizardCancelBeforeMinutes(req.CancelClassBefore)
+	if err != nil {
+		return nil, err
+	}
 	db := s.repo.DB().WithContext(ctx)
-	saveKV := func(k, v string) {
-		if strings.TrimSpace(v) == "" {
-			return
-		}
-		raw, _ := json.Marshal(v)
+	saveRaw := func(k string, raw []byte) {
 		st := entity.Setting{Key: k, Value: datatypes.JSON(raw), UpdatedAt: time.Now()}
 		_ = db.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "key"}},
 			DoUpdates: clause.AssignmentColumns([]string{"value", "updated_at"}),
 		}).Create(&st).Error
 	}
+	saveKV := func(k, v string) {
+		if strings.TrimSpace(v) == "" {
+			return
+		}
+		raw, _ := json.Marshal(v)
+		saveRaw(k, raw)
+	}
 	saveKV("center_name", req.CenterName)
 	saveKV("center_hotline", req.Hotline)
 	saveKV("opening_hours", req.OpeningHours)
-	if req.CancelClassBefore > 0 {
-		saveKV("class_cancel_before_hours", fmt.Sprintf("%d", req.CancelClassBefore))
+	if cancelMinutes > 0 {
+		// Lưu đúng khóa mà đặt lớp đọc (số phút, kiểu số JSON) – SW-02.
+		saveRaw(SettingBookingCancelBeforeMinutes, []byte(fmt.Sprintf("%d", cancelMinutes)))
 	}
 	if req.Skip {
 		saveKV("setup_wizard_skipped", "true")

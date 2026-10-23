@@ -99,8 +99,8 @@ func (c *AdminControllerV1) NPSReport(ctx context.Context, req *v1.NPSReportReq)
 
 // ---- Member ---------------------------------------------------------------------
 
-func (c *MemberControllerV1) MemberNutritionOverview(ctx context.Context, _ *v1.MemberNutritionOverviewReq) (res *v1.MemberNutritionOverviewRes, err error) {
-	return c.svc.MemberNutritionOverview(ctx)
+func (c *MemberControllerV1) MemberNutritionOverview(ctx context.Context, req *v1.MemberNutritionOverviewReq) (res *v1.MemberNutritionOverviewRes, err error) {
+	return c.svc.MemberNutritionOverview(ctx, req)
 }
 
 func (c *MemberControllerV1) MemberFoodLogs(ctx context.Context, req *v1.MemberFoodLogsReq) (res *v1.MemberFoodLogsRes, err error) {

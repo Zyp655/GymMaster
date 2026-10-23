@@ -320,7 +320,16 @@
     "cancelConfirmBtn": "Xác nhận hủy",
     "cancelSuccess": "Đã hủy lượt đặt chỗ",
     "filterUpcoming": "Sắp diễn ra",
-    "filterHistory": "Lịch sử / Đã hủy"
+    "filterHistory": "Lịch sử / Đã hủy",
+    "notBookableReasons": {
+      "BLOCKED": "Đang bị khóa đặt lớp",
+      "OUT_OF_RANGE": "Ngoài hạn đặt trước",
+      "TRAINER_LEAVE": "HLV nghỉ phép",
+      "HOLIDAY": "Nghỉ ngày lễ",
+      "FULL": "Lớp đã đầy",
+      "STARTED": "Lớp đã bắt đầu",
+      "UNAVAILABLE": "Không thể đặt"
+    }
   },
   "pt": {
     "title": "Huấn luyện viên cá nhân (PT)",
@@ -530,7 +539,19 @@
     "payWithVnpay": "Thanh toán qua VNPay",
     "processing": "Đang chuyển sang VNPay...",
     "emptyPlansTitle": "Chưa có gói tập đang mở bán",
-    "emptyPlansDesc": "Vui lòng quay lại sau hoặc liên hệ quầy lễ tân."
+    "emptyPlansDesc": "Vui lòng quay lại sau hoặc liên hệ quầy lễ tân.",
+    "accessHours": "Giờ tập: {hours}",
+    "guestPasses": "{count} vé khách mời/tháng",
+    "everyDay": "Hằng ngày",
+    "dow": {
+      "1": "T2",
+      "2": "T3",
+      "3": "T4",
+      "4": "T5",
+      "5": "T6",
+      "6": "T7",
+      "7": "CN"
+    }
   },
   "paymentResult": {
     "title": "Kết quả thanh toán VNPay",
@@ -606,7 +627,8 @@
       "notePlaceholder": "VD: RPE 8, giữ form chuẩn...",
       "submit": "Lưu nhật ký tập",
       "submitting": "Đang lưu...",
-      "success": "Đã lưu nhật ký tập luyện"
+      "success": "Đã lưu nhật ký tập luyện",
+      "dateLabel": "Ngày tập"
     },
     "dayFallback": "Buổi {index}",
     "weightValue": "{weight} kg"
@@ -846,7 +868,21 @@
     "editLogDesc": "Điều chỉnh món, bữa ăn hoặc khối lượng đã ghi nhận.",
     "editLogSuccess": "Đã cập nhật bản ghi bữa ăn",
     "deleteLogConfirm": "Xóa “{name}” khỏi nhật ký ăn uống? Thao tác này không thể hoàn tác.",
-    "deleteLogSuccess": "Đã xóa bản ghi bữa ăn"
+    "deleteLogSuccess": "Đã xóa bản ghi bữa ăn",
+    "goalSuggest": {
+      "title": "Gợi ý calo theo mục tiêu",
+      "desc": "Mức calo mỗi ngày gợi ý theo từng mục tiêu tập luyện.",
+      "basis": "Dựa trên chỉ số cơ thể mới nhất: BMR {bmr} kcal · TDEE {tdee} kcal/ngày.",
+      "macros": "Đạm {protein} g · Tinh bột {carbs} g · Chất béo {fat} g",
+      "currentGoal": "Mục tiêu của bạn",
+      "note": "Con số mang tính tham khảo; hãy trao đổi thêm với HLV hoặc chuyên gia dinh dưỡng.",
+      "goals": {
+        "LOSE_FAT": "Giảm mỡ",
+        "MAINTAIN": "Duy trì",
+        "GAIN_MUSCLE": "Tăng cơ"
+      },
+      "noBodyMetric": "Chưa có chỉ số cơ thể (cân nặng, chiều cao) nên gợi ý đang dùng mức mặc định 2.000 kcal. Cập nhật ở mục Tiến độ để có con số chính xác hơn."
+    }
   },
   "contracts": {
     "title": "Hợp đồng điện tử & Vé khách mời",
@@ -891,9 +927,9 @@
     "deviceConfigBtn": "Cấu hình Thiết bị",
     "deviceKeyTitle": "Cấu hình khóa thiết bị Kiosk (X-Device-Key)",
     "deviceKeyDesc": "Nhập mã Device Key được cấp trong trang Quản trị Thiết bị Ra vào. Khóa được lưu trong trình duyệt của máy tính bảng này.",
-    "deviceKeyPlaceholder": "VD: GMD-demo-kiosk-cg01",
+    "deviceKeyPlaceholder": "VD: GMD-xxxxxxxxxxxx",
     "saveDeviceKeyBtn": "Lưu cấu hình Kiosk",
-    "useDemoKeyBtn": "Dùng khóa Demo (GMD-demo-kiosk-cg01)",
+    "useDemoKeyBtn": "Dùng khóa Demo ({key})",
     "deviceConnected": "Thiết bị sẵn sàng · Heartbeat 60s",
     "deviceUnconfigured": "Chưa cấu hình Device Key",
     "deviceChecking": "Đang kết nối thiết bị...",
@@ -909,6 +945,57 @@
     "memberLabel": "Hội viên / Khách tập",
     "planLabel": "Gói tập / Loại vé",
     "lockerLabel": "Tủ đồ được gán",
-    "autoResetHint": "Màn hình tự động làm mới sau 3 giây..."
+    "autoResetHint": "Màn hình tự động làm mới sau 3 giây...",
+    "deviceInvalidKey": "Khóa thiết bị không hợp lệ hoặc đã bị vô hiệu hóa",
+    "unknownMember": "Không xác định",
+    "allowedDefaultMsg": "Check-in hợp lệ. Chúc bạn buổi tập hiệu quả!",
+    "deniedDefaultMsg": "Không đủ điều kiện vào cửa.",
+    "checkinErrorFallback": "Mã QR không hợp lệ hoặc thiết bị chưa được xác thực.",
+    "trialPassPlan": "Vé tập thử (Trial Pass)",
+    "dayPassPlan": "Vé ngày / Khách mời (Day Pass)",
+    "cameraError": "Không thể truy cập camera trên thiết bị này. Vui lòng dùng máy quét USB hoặc nhập mã.",
+    "deviceKeySaved": "Đã lưu cấu hình Device Key cho Kiosk",
+    "brand": "GYMMASTER KIOSK",
+    "deviceKeyLabel": "Device Key",
+    "deviceKeyMaskedHint": "Khóa thiết bị được che một phần",
+    "devQuickCodes": "Mã thử nhanh (chỉ môi trường dev):",
+    "footerTagline": "GymMaster Smart Access Control · Kiosk Mode",
+    "backHome": "Về trang chủ"
+  },
+  "messages": {
+    "title": "Tin nhắn PT, Đồng bộ Lịch & Tùy chọn Thông báo",
+    "subtitle": "Trao đổi trực tiếp với Huấn luyện viên cá nhân, đồng bộ lịch tập .ics sang Google/Apple Calendar và tùy chỉnh thông báo.",
+    "chatTitle": "Trò chuyện cùng Huấn luyện viên (PT)",
+    "noConversation": "Bạn chưa có hợp đồng PT đang hoạt động để mở hội thoại với Huấn luyện viên.",
+    "trainerName": "HLV {name}",
+    "unread": "{count} mới",
+    "remainingSessions": "Còn {count} buổi · {status}",
+    "empty": "Chưa có tin nhắn nào. Hãy gửi lời chào tới HLV của bạn!",
+    "placeholder": "Nhập câu hỏi về lịch tập, bài tập hoặc dinh dưỡng...",
+    "send": "Gửi",
+    "sendFailed": "Không thể gửi tin nhắn",
+    "emptyContent": "Tin nhắn chưa có nội dung",
+    "icsTitle": "Đồng bộ Lịch tập (.ics) sang Google Calendar / Apple Calendar",
+    "icsDescription": "Sao chép liên kết iCalendar bên dưới để tự động đồng bộ các buổi tập PT và lớp học nhóm sắp tới vào ứng dụng Lịch trên điện thoại của bạn.",
+    "icsLoading": "Đang tạo liên kết .ics...",
+    "icsCopy": "Sao chép link .ics",
+    "icsCopied": "Đã sao chép đường dẫn lịch .ics",
+    "icsRotate": "Đổi mã token mới",
+    "icsRotated": "Đã tạo mới mã token lịch .ics",
+    "prefsTitle": "Tùy chọn Kênh & Loại Thông báo",
+    "prefsDescription": "Bật hoặc tắt các nhóm thông báo không bắt buộc theo nhu cầu của bạn.",
+    "prefsChannel": "Kênh: Thông báo trên ứng dụng & Email",
+    "prefsSaved": "Đã lưu tùy chọn thông báo",
+    "prefOn": "Đang bật",
+    "prefOff": "Đang tắt",
+    "prefTypes": {
+      "PAYMENT_SUCCESS": "Thanh toán & Hóa đơn thành công (Bắt buộc)",
+      "SUBSCRIPTION_EXPIRING": "Nhắc gia hạn gói tập sắp hết hạn",
+      "CLASS_REMINDER": "Nhắc lịch lớp học nhóm đã đặt",
+      "PT_REMINDER": "Nhắc lịch tập PT 1-1",
+      "PROMOTION": "Chương trình khuyến mãi & Ưu đãi",
+      "BIRTHDAY": "Lời chúc & Quà tặng sinh nhật",
+      "SYSTEM": "Thông báo bảo mật & Hệ thống (Bắt buộc)"
+    }
   }
 }

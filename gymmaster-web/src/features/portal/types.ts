@@ -1,12 +1,7 @@
 /** Kiểu dữ liệu cổng hội viên – khớp docs/api/member-portal.md. */
 
 export type SubscriptionStatus =
-  | 'PENDING'
-  | 'ACTIVE'
-  | 'FROZEN'
-  | 'EXPIRED'
-  | 'CANCELLED'
-  | 'TRANSFERRED';
+  'PENDING' | 'ACTIVE' | 'FROZEN' | 'EXPIRED' | 'CANCELLED' | 'TRANSFERRED';
 export type FreezeStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'ENDED' | 'CANCELLED';
 export type BookingStatus = 'BOOKED' | 'WAITLIST' | 'CANCELLED' | 'ATTENDED' | 'NO_SHOW';
 export type PTSessionStatus = 'SCHEDULED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
@@ -143,7 +138,10 @@ export interface ClassBooking {
   id: number;
   schedule_id: number;
   status: BookingStatus;
+  /** Số thứ tự lúc vào danh sách chờ (không dồn lên khi người trước rời đi). */
   waitlist_position: number | null;
+  /** Thứ hạng hiện tại trong danh sách chờ (1, 2, …) – API mới; null/thiếu thì dùng waitlist_position. */
+  waitlist_rank?: number | null;
   source: 'COUNTER' | 'PORTAL';
   booked_at: string;
   cancelled_at: string | null;
@@ -183,6 +181,11 @@ export interface ScheduleItem {
   my_booking: ClassBooking | null;
   cancel_deadline: string;
   bookable: boolean;
+  /**
+   * Lý do không đặt được (khi bookable=false) – API có thể bổ sung sau; thiếu thì UI tự suy
+   * (khóa đặt lớp / ngoài hạn đặt trước) hoặc hiển thị trung tính.
+   */
+  not_bookable_reason?: string | null;
 }
 
 export interface ClassesResponse {
@@ -350,14 +353,7 @@ export interface VNPayReturnRes {
 // ---- Sprint 14: Giáo án & Nhật ký tập luyện -------------------------------------
 
 export type MuscleGroup =
-  | 'CHEST'
-  | 'BACK'
-  | 'SHOULDERS'
-  | 'LEGS'
-  | 'ARMS'
-  | 'CORE'
-  | 'CARDIO'
-  | 'FULL_BODY';
+  'CHEST' | 'BACK' | 'SHOULDERS' | 'LEGS' | 'ARMS' | 'CORE' | 'CARDIO' | 'FULL_BODY';
 
 export interface Exercise {
   id: number;
@@ -552,6 +548,8 @@ export interface BranchOccupancy {
   branch_id: number;
   branch_name?: string;
   branch_code?: string;
+  /** Trường chuẩn của API (/member/occupancy, /public/branches/occupancy). */
+  present_count?: number;
   present?: number;
   current_count?: number;
   active_count?: number;
@@ -596,13 +594,7 @@ export interface InstallmentPlanItem {
 // ---- Sprint 22: Điểm thưởng, Đổi quà, Huy hiệu, Giới thiệu & Thử thách ----------
 
 export type LoyaltyReason =
-  | 'CHECKIN'
-  | 'RENEW'
-  | 'REFERRAL'
-  | 'REVIEW'
-  | 'REDEEM'
-  | 'CHALLENGE'
-  | 'ADJUST';
+  'CHECKIN' | 'RENEW' | 'REFERRAL' | 'REVIEW' | 'REDEEM' | 'CHALLENGE' | 'ADJUST';
 
 export interface LoyaltyLedgerItem {
   id: number;
@@ -775,8 +767,27 @@ export interface FoodLogItem {
   created_at?: string;
 }
 
+export interface NutritionGoalTarget {
+  goal: 'CUT' | 'MAINTAIN' | 'BULK' | string;
+  label?: string;
+  adjustment_pct?: number;
+  calories: number;
+  protein_g?: number;
+  carbs_g?: number;
+  fat_g?: number;
+}
+
 export interface MemberNutritionOverviewRes {
   recommended_calories?: number;
+  /** NU-01: BMR/TDEE + gợi ý calo & macro theo mục tiêu (bản API cũ có thể chưa trả). */
+  bmr?: number;
+  tdee?: number;
+  activity_factor?: number;
+  has_body_metric?: boolean;
+  goal?: string;
+  goal_source?: 'QUERY' | 'MEAL_PLAN' | 'DEFAULT' | string;
+  goal_target?: NutritionGoalTarget | null;
+  goal_targets?: NutritionGoalTarget[];
   plans?: MealPlanItem[];
   meal_plans?: MealPlanItem[];
   foods?: FoodItem[];
@@ -1036,5 +1047,3 @@ export interface CalendarTokenRes {
   token: string;
   ics_url: string;
 }
-
-

@@ -75,6 +75,17 @@ const METHOD_ICON: Record<PaymentMethod, ReactNode> = {
   VNPAY: <GlobalOutlined />,
 };
 
+/** Chữ dài trong bảng: cắt gọn + tooltip, rỗng → "—". */
+function ellipsisText(v: string | null | undefined, maxWidth: number) {
+  return v ? (
+    <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth }}>
+      {v}
+    </Typography.Text>
+  ) : (
+    '—'
+  );
+}
+
 function useStaffOptions() {
   const { can } = usePermission();
   const q = useQuery({
@@ -102,7 +113,8 @@ function SummaryCards({ data, loading }: { data?: PaymentListResult; loading?: b
         />
       </Col>
       {methods.map((m) => {
-        const row = s?.by_method.find((x) => x.method === m);
+        // VNPay nằm trong `summary.by_method` (method "VNPAY") – API gộp từ invoiceLedgerMethods.
+        const row = s?.by_method?.find((x) => String(x.method).toUpperCase() === m);
         return (
           <Col xs={12} md={6} lg={5} key={m}>
             <StatCard
@@ -417,33 +429,42 @@ function PaymentsDesktop() {
         dataIndex: 'paid_at',
         sorter: true,
         className: 'text-nowrap',
-        render: (v: string) => formatDateTime(v),
-      },
-      {
-        title: 'Hóa đơn',
-        dataIndex: 'invoice_no',
-        render: (v: string, r) => (
-          <Link to={`/app/invoices/${r.invoice_id}`} className="code-text">
-            {v}
-          </Link>
+        render: (v: string) => (
+          <Space direction="vertical" size={0}>
+            <span>{dayjs(v).format('DD/MM/YYYY')}</span>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {dayjs(v).format('HH:mm')}
+            </Typography.Text>
+          </Space>
         ),
       },
       {
-        title: 'Hội viên',
-        key: 'member',
-        render: (_, r) =>
-          r.member_id ? (
-            <Space direction="vertical" size={0}>
-              <Link to={`/app/members/${r.member_id}`}>{r.member_name}</Link>
+        // Gộp hóa đơn + hội viên để bảng vừa khung 1440 (D8).
+        title: 'Hóa đơn / Hội viên',
+        dataIndex: 'invoice_no',
+        render: (v: string, r) => (
+          <Space direction="vertical" size={0}>
+            <Link to={`/app/invoices/${r.invoice_id}`} className="code-text">
+              {v}
+            </Link>
+            {r.member_id ? (
+              <span style={{ fontSize: 12 }}>
+                <Link to={`/app/members/${r.member_id}`}>{r.member_name}</Link>
+                <Typography.Text type="secondary"> · {r.member_code}</Typography.Text>
+              </span>
+            ) : (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {r.member_code}
+                Khách lẻ
               </Typography.Text>
-            </Space>
-          ) : (
-            <Typography.Text type="secondary">Khách lẻ</Typography.Text>
-          ),
+            )}
+          </Space>
+        ),
       },
-      { title: 'Chi nhánh', dataIndex: 'branch_name' },
+      {
+        title: 'Chi nhánh',
+        dataIndex: 'branch_name',
+        render: (v: string) => ellipsisText(v, 120),
+      },
       {
         title: 'Số tiền',
         dataIndex: 'amount',
@@ -457,9 +478,14 @@ function PaymentsDesktop() {
         sorter: true,
         render: (v: PaymentMethod) => <StatusTag status={v} map={PAYMENT_METHOD_MAP} />,
       },
-      { title: 'Mã GD', dataIndex: 'reference', render: (v: string) => v || '—' },
-      { title: 'Người thu', dataIndex: 'received_by_name', render: (v: string) => v || '—' },
-      { title: 'Ghi chú', dataIndex: 'note', render: (v: string) => v || '—' },
+      // Cột chữ dài cắt gọn (tooltip) để bảng vừa khung 1440 (D8).
+      { title: 'Mã GD', dataIndex: 'reference', render: (v: string) => ellipsisText(v, 100) },
+      {
+        title: 'Người thu',
+        dataIndex: 'received_by_name',
+        render: (v: string) => ellipsisText(v, 130),
+      },
+      { title: 'Ghi chú', dataIndex: 'note', render: (v: string) => ellipsisText(v, 100) },
     ],
     [],
   );

@@ -150,6 +150,26 @@ func (f *fakeFinanceRepo) DeleteExpense(_ context.Context, id uint) error {
 	return nil
 }
 
+func (f *fakeFinanceRepo) SetExpenseStatus(_ context.Context, id uint, from, to string, approvedBy *uint, at time.Time) (bool, error) {
+	e, ok := f.expenses[id]
+	if !ok || e.Status != from {
+		return false, nil
+	}
+	e.Status, e.ApprovedBy, e.UpdatedAt = to, approvedBy, at
+	return true, nil
+}
+
+// FindBranchStatus: chi nhánh 1, 2 hoạt động; 3 ngừng hoạt động; còn lại không tồn tại.
+func (f *fakeFinanceRepo) FindBranchStatus(_ context.Context, id uint) (string, error) {
+	switch id {
+	case 1, 2:
+		return consts.StatusActive, nil
+	case 3:
+		return consts.StatusInactive, nil
+	}
+	return "", gorm.ErrRecordNotFound
+}
+
 func (f *fakeFinanceRepo) FindOpenCashSession(_ context.Context, branchID uint) (*entity.CashSession, error) {
 	for _, cs := range f.sessions {
 		if cs.BranchID == branchID && cs.Status == entity.CashSessionOpen {
@@ -346,12 +366,11 @@ func TestFinanceService_CashSessionPnLInstallmentsAndEInvoice(t *testing.T) {
 	zero := 0.0
 	_, err = svc.UpdateExpense(ctx, &v1.UpdateExpenseReq{ID: exp.ID, Amount: &zero})
 	require.Error(t, err)
-	// Sửa số tiền khoản đã duyệt → quay về chờ duyệt
+	// Khoản đã duyệt không sửa được số tiền (D1)
 	newAmt := 4600000.0
-	edited, err := svc.UpdateExpense(ctx, &v1.UpdateExpenseReq{ID: exp.ID, Amount: &newAmt})
-	require.NoError(t, err)
-	assert.Equal(t, entity.ExpenseStatusPending, edited.Status)
-	assert.Nil(t, edited.ApprovedBy)
+	_, err = svc.UpdateExpense(ctx, &v1.UpdateExpenseReq{ID: exp.ID, Amount: &newAmt})
+	require.Error(t, err)
+	assert.Equal(t, rescode.Conflict.Code(), codeOf(err))
 
 	// 2. Open & Close Cash Session -> expected_cash = 2,000,000 + 5,500,000 − 300,000 (hoàn tiền mặt) = 7,200,000
 	sess, err := svc.OpenCashSession(ctx, &v1.OpenCashSessionReq{

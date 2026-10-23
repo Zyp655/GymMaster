@@ -6,7 +6,8 @@ import type { Branch, BranchInput } from '@/api/types';
 import { STATUS_PRESETS } from '@/constants/status';
 import { PERM } from '@/constants/permissions';
 import { usePermission } from '@/hooks/usePermission';
-import { setFormError, showError } from '@/utils/errors';
+import { ErrorCode, isApiError } from '@/utils/api';
+import { getErrorMessage, setFormError, showError } from '@/utils/errors';
 import { TIME_FORMAT } from '@/utils/format';
 import { useSaveBranch } from './queries';
 
@@ -27,7 +28,7 @@ const toTime = (v: string | undefined, fallback: string) => dayjs(v || fallback,
 /** Modal thêm/sửa chi nhánh – validate giống backend (api/branch/v1/branch.go). */
 export default function BranchForm({ open, record, onClose }: BranchFormProps) {
   const [form] = Form.useForm<FormValues>();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const { can } = usePermission();
   const save = useSaveBranch();
   const isEdit = !!record;
@@ -62,6 +63,10 @@ export default function BranchForm({ open, record, onClose }: BranchFormProps) {
       close_time: values.close_time.format(TIME_FORMAT),
       status: values.status,
     };
+    submit(data);
+  };
+
+  const submit = (data: BranchInput) => {
     save.mutate(
       { id: record?.id, data },
       {
@@ -70,6 +75,23 @@ export default function BranchForm({ open, record, onClose }: BranchFormProps) {
           onClose();
         },
         onError: (error) => {
+          // Đổi giờ mở cửa khi còn lớp/PT tương lai ngoài khung giờ mới → 409: hỏi xác nhận rồi gửi lại force.
+          if (
+            isEdit &&
+            !data.force &&
+            isApiError(error) &&
+            error.code === ErrorCode.CONFLICT &&
+            /lớp nhóm|buổi PT/i.test(error.message)
+          ) {
+            modal.confirm({
+              title: 'Vẫn đổi giờ mở cửa?',
+              content: getErrorMessage(error),
+              okText: 'Vẫn lưu',
+              cancelText: 'Xem lại',
+              onOk: () => submit({ ...data, force: true }),
+            });
+            return;
+          }
           const mapped = setFormError(form, error, {
             code: /mã/i,
             name: /tên/i,

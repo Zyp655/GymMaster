@@ -239,11 +239,28 @@ export default function CmsMarketingPage() {
                 </div>
                 <Table<PostItem>
                   rowKey="id"
+                  scroll={{ x: 'max-content' }}
                   loading={postsQuery.isLoading}
                   dataSource={postsQuery.data ?? []}
                   columns={[
-                    { title: 'Tiêu đề', dataIndex: 'title' },
-                    { title: 'Slug', dataIndex: 'slug' },
+                    {
+                      // Tiêu đề + slug gộp một cột, cắt gọn để bảng vừa khung (UIA-066).
+                      title: 'Tiêu đề',
+                      dataIndex: 'title',
+                      render: (v: string, r) => (
+                        <div style={{ maxWidth: 360, minWidth: 160, whiteSpace: 'normal' }}>
+                          <Typography.Text strong>{v}</Typography.Text>
+                          <br />
+                          <Typography.Text
+                            type="secondary"
+                            ellipsis={{ tooltip: r.slug }}
+                            style={{ fontSize: 12, maxWidth: 340 }}
+                          >
+                            /{r.slug}
+                          </Typography.Text>
+                        </div>
+                      ),
+                    },
                     {
                       title: 'Chuyên mục',
                       dataIndex: 'category',
@@ -265,6 +282,9 @@ export default function CmsMarketingPage() {
                     },
                     {
                       title: 'Thao tác',
+                      key: 'actions',
+                      fixed: 'right',
+                      width: 96,
                       render: (_, r) => (
                         <Space>
                           <Button
@@ -355,6 +375,7 @@ export default function CmsMarketingPage() {
             children: (
               <Table<TestimonialItem>
                 rowKey="id"
+                scroll={{ x: 'max-content' }}
                 loading={testimonialsQuery.isLoading}
                 dataSource={testimonialsQuery.data ?? []}
                 columns={[
@@ -413,6 +434,7 @@ export default function CmsMarketingPage() {
             children: (
               <Table<ContactMessageItem>
                 rowKey="id"
+                scroll={{ x: 'max-content' }}
                 loading={contactsQuery.isLoading}
                 dataSource={contactsQuery.data ?? []}
                 columns={[

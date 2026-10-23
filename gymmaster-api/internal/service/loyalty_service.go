@@ -77,6 +77,16 @@ type (
 		JoinChallenge(ctx context.Context, req *v1.JoinChallengeReq) (*v1.ChallengeItem, error)
 		MemberLeaderboard(ctx context.Context, req *v1.MemberLeaderboardReq) (*v1.MemberLeaderboardRes, error)
 		MemberReferral(ctx context.Context) (*v1.MemberReferralRes, error)
+
+		LoyaltyEarner
+	}
+
+	// LoyaltyEarner: cộng điểm thưởng tự động từ nghiệp vụ khác (check-in, gia hạn, đánh giá, giới thiệu…).
+	LoyaltyEarner interface {
+		// EarnPoints cộng points (> 0) điểm cho hội viên với lý do reason (CHECKIN/RENEW/REVIEW/REFERRAL/CHALLENGE),
+		// nguồn (refType, refID). An toàn đồng thời & idempotent: cùng (member, reason, refType, refID) chỉ cộng
+		// một lần (gọi lại/gửi song song → awarded = false). Có thể gọi trong transaction của nghiệp vụ gọi.
+		EarnPoints(ctx context.Context, memberID uint, points int, reason, refType string, refID *uint, note string) (awarded bool, balance int, err error)
 	}
 
 	loyaltyService struct {
@@ -96,6 +106,14 @@ func (s *loyaltyService) runTx(ctx context.Context, fn func(context.Context) err
 		return s.tx.WithTx(ctx, fn)
 	}
 	return fn(ctx)
+}
+
+// errLoyaltyInsufficient dịch lỗi trừ quá số dư của repository sang lỗi nghiệp vụ.
+func errLoyaltyInsufficient(err error, msg string) error {
+	if errors.Is(err, repository.ErrInsufficientPoints) {
+		return rescode.New(rescode.InsufficientPoints, msg)
+	}
+	return err
 }
 
 func (s *loyaltyService) currentMember(ctx context.Context) (*entity.Member, error) {
@@ -481,9 +499,12 @@ func (s *loyaltyService) AdjustMemberPoints(ctx context.Context, req *v1.AdjustM
 		ledger    *entity.LoyaltyLedger
 	)
 	err = s.runTx(ctx, func(txCtx context.Context) error {
+		if _, err := s.repo.LockMember(txCtx, m.ID); err != nil {
+			return err
+		}
 		pts, err := s.repo.AddMemberPoints(txCtx, m.ID, req.Points)
 		if err != nil {
-			return err
+			return errLoyaltyInsufficient(err, "Số điểm thưởng của hội viên không đủ để trừ")
 		}
 		newPoints = pts
 		ledger = &entity.LoyaltyLedger{
@@ -598,6 +619,14 @@ func (s *loyaltyService) RedeemReward(ctx context.Context, req *v1.RedeemRewardR
 	uid := reqctx.UserID(ctx)
 
 	err = s.runTx(ctx, func(txCtx context.Context) error {
+		// Khóa dòng hội viên rồi kiểm lại số dư MỚI NHẤT (bản đọc ngoài transaction có thể đã cũ khi đổi song song).
+		locked, err := s.repo.LockMember(txCtx, m.ID)
+		if err != nil {
+			return err
+		}
+		if locked.LoyaltyPoints < reward.CostPoints {
+			return rescode.New(rescode.InsufficientPoints, "Điểm thưởng của bạn không đủ để đổi phần thưởng này")
+		}
 		ok, err := s.repo.DecrementRewardStock(txCtx, reward.ID)
 		if err != nil {
 			return err
@@ -605,9 +634,10 @@ func (s *loyaltyService) RedeemReward(ctx context.Context, req *v1.RedeemRewardR
 		if !ok {
 			return rescode.New(rescode.RewardOutOfStock, "Phần thưởng đã hết hàng")
 		}
+		// Trừ có điều kiện (loyalty_points >= cost) – chốt chặn thứ hai, cùng CHECK ở DB.
 		pts, err := s.repo.AddMemberPoints(txCtx, m.ID, -reward.CostPoints)
 		if err != nil {
-			return err
+			return errLoyaltyInsufficient(err, "Điểm thưởng của bạn không đủ để đổi phần thưởng này")
 		}
 		newPoints = pts
 		reward.Stock--
@@ -778,6 +808,11 @@ func (s *loyaltyService) JoinChallenge(ctx context.Context, req *v1.JoinChalleng
 
 	var cp *entity.ChallengeParticipant
 	err = s.runTx(ctx, func(txCtx context.Context) error {
+		// Khóa dòng hội viên: các yêu cầu tham gia song song chạy tuần tự, yêu cầu sau đọc thấy completed_at
+		// của yêu cầu trước → chỉ thưởng một lần (LY-03).
+		if _, err := s.repo.LockMember(txCtx, m.ID); err != nil {
+			return err
+		}
 		existing, err := s.repo.FindChallengeParticipant(txCtx, chRow.ID, m.ID)
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -804,20 +839,10 @@ func (s *loyaltyService) JoinChallenge(ctx context.Context, req *v1.JoinChalleng
 			completedAt := now
 			existing.CompletedAt = &completedAt
 			if chRow.RewardPoints > 0 {
-				if _, err := s.repo.AddMemberPoints(txCtx, m.ID, chRow.RewardPoints); err != nil {
-					return err
-				}
+				// Bút toán ghi trước, idempotent theo (hội viên, CHALLENGE, thử thách) → không bao giờ thưởng 2 lần.
 				chID := chRow.ID
-				ledger := &entity.LoyaltyLedger{
-					MemberID:  m.ID,
-					Points:    chRow.RewardPoints,
-					Reason:    entity.LoyaltyReasonChallenge,
-					RefType:   "CHALLENGE",
-					RefID:     &chID,
-					Note:      "Hoàn thành thử thách: " + chRow.Name,
-					CreatedBy: reqctx.UserID(ctx),
-				}
-				if err := s.repo.CreateLedger(txCtx, ledger); err != nil {
+				if _, _, err := s.earn(txCtx, m.ID, chRow.RewardPoints, entity.LoyaltyReasonChallenge, "CHALLENGE", &chID,
+					"Hoàn thành thử thách: "+chRow.Name); err != nil {
 					return err
 				}
 			}
@@ -897,6 +922,58 @@ func (s *loyaltyService) MemberReferral(ctx context.Context) (*v1.MemberReferral
 }
 
 // ---- Mappers --------------------------------------------------------------------
+
+// EarnPoints: xem LoyaltyEarner.
+func (s *loyaltyService) EarnPoints(ctx context.Context, memberID uint, points int, reason, refType string, refID *uint, note string) (bool, int, error) {
+	if points <= 0 {
+		return false, 0, rescode.New(rescode.BadRequest, "Số điểm cộng phải lớn hơn 0")
+	}
+	reason = strings.ToUpper(strings.TrimSpace(reason))
+	if !slices.Contains(validLoyaltyReasons, reason) || reason == entity.LoyaltyReasonRedeem || reason == entity.LoyaltyReasonAdjust {
+		return false, 0, rescode.New(rescode.BadRequest, "Lý do cộng điểm không hợp lệ")
+	}
+	var (
+		awarded bool
+		balance int
+	)
+	err := s.runTx(ctx, func(txCtx context.Context) error {
+		if _, err := s.repo.LockMember(txCtx, memberID); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return rescode.New(rescode.NotFound, "Không tìm thấy hội viên")
+			}
+			return err
+		}
+		var err error
+		awarded, balance, err = s.earn(txCtx, memberID, points, reason, refType, refID, note)
+		return err
+	})
+	if err != nil {
+		return false, 0, err
+	}
+	return awarded, balance, nil
+}
+
+// earn: ghi bút toán (idempotent theo nguồn) rồi mới cộng điểm. Gọi trong transaction, SAU LockMember.
+func (s *loyaltyService) earn(ctx context.Context, memberID uint, points int, reason, refType string, refID *uint, note string) (bool, int, error) {
+	ledger := &entity.LoyaltyLedger{
+		MemberID:  memberID,
+		Points:    points,
+		Reason:    reason,
+		RefType:   invoiceTruncate(strings.TrimSpace(refType), 30),
+		RefID:     refID,
+		Note:      invoiceTruncate(strings.TrimSpace(note), 255),
+		CreatedBy: reqctx.UserID(ctx),
+	}
+	created, err := s.repo.CreateLedgerOnce(ctx, ledger)
+	if err != nil || !created {
+		return false, 0, err
+	}
+	balance, err := s.repo.AddMemberPoints(ctx, memberID, points)
+	if err != nil {
+		return false, 0, err
+	}
+	return true, balance, nil
+}
 
 func toLoyaltyLedgerItem(l entity.LoyaltyLedger) *v1.LoyaltyLedgerItem {
 	return &v1.LoyaltyLedgerItem{

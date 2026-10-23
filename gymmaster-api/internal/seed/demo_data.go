@@ -44,15 +44,16 @@ type planDef struct {
 	FreezeDays, FreezeTimes       int
 	Classes                       bool
 	Sort                          int
+	GuestPasses                   int // số vé khách mời mỗi tháng
 }
 
 var demoPlanDefs = []planDef{
 	{Code: "M1", Name: "Gói 1 tháng", Desc: "Tập không giới hạn 30 ngày tại chi nhánh đăng ký, gồm các lớp nhóm.", Type: "TIME", Scope: "SINGLE_BRANCH", Duration: 30, Price: 500000, TransferFee: 100000, FreezeDays: 7, FreezeTimes: 1, Classes: true, Sort: 1},
 	{Code: "M3", Name: "Gói 3 tháng", Desc: "Tập không giới hạn 90 ngày tại mọi chi nhánh, gồm các lớp nhóm.", Type: "TIME", Scope: "ALL_BRANCHES", Duration: 90, Price: 1350000, TransferFee: 100000, FreezeDays: 15, FreezeTimes: 1, Classes: true, Sort: 2},
-	{Code: "M6", Name: "Gói 6 tháng", Desc: "Tập phòng máy không giới hạn 180 ngày tại chi nhánh đăng ký (không gồm lớp nhóm).", Type: "TIME", Scope: "SINGLE_BRANCH", Duration: 180, Price: 2500000, TransferFee: 150000, FreezeDays: 30, FreezeTimes: 2, Classes: false, Sort: 3},
-	{Code: "M12", Name: "Gói 12 tháng", Desc: "Tập không giới hạn 365 ngày tại mọi chi nhánh, gồm các lớp nhóm.", Type: "TIME", Scope: "ALL_BRANCHES", Duration: 365, Price: 4800000, TransferFee: 200000, FreezeDays: 60, FreezeTimes: 3, Classes: true, Sort: 4},
+	{Code: "M6", Name: "Gói 6 tháng", Desc: "Tập phòng máy không giới hạn 180 ngày tại chi nhánh đăng ký (không gồm lớp nhóm).", Type: "TIME", Scope: "SINGLE_BRANCH", Duration: 180, Price: 2500000, TransferFee: 150000, FreezeDays: 30, FreezeTimes: 2, Classes: false, Sort: 3, GuestPasses: 1},
+	{Code: "M12", Name: "Gói 12 tháng", Desc: "Tập không giới hạn 365 ngày tại mọi chi nhánh, gồm các lớp nhóm.", Type: "TIME", Scope: "ALL_BRANCHES", Duration: 365, Price: 4800000, TransferFee: 200000, FreezeDays: 60, FreezeTimes: 3, Classes: true, Sort: 4, GuestPasses: 2},
 	{Code: "S12", Name: "Gói 12 buổi", Desc: "12 lượt tập phòng máy trong 60 ngày tại chi nhánh đăng ký.", Type: "SESSION", Scope: "SINGLE_BRANCH", Duration: 60, Sessions: 12, Price: 600000, FreezeDays: 0, FreezeTimes: 0, Classes: false, Sort: 5},
-	{Code: "VIP12", Name: "VIP Toàn hệ thống 12 tháng", Desc: "Tập không giới hạn mọi chi nhánh 365 ngày, ưu tiên lớp nhóm, khăn & nước miễn phí.", Type: "TIME", Scope: "ALL_BRANCHES", Duration: 365, Price: 7900000, TransferFee: 300000, FreezeDays: 90, FreezeTimes: 3, Classes: true, Sort: 6},
+	{Code: "VIP12", Name: "VIP Toàn hệ thống 12 tháng", Desc: "Tập không giới hạn mọi chi nhánh 365 ngày, ưu tiên lớp nhóm, khăn & nước miễn phí.", Type: "TIME", Scope: "ALL_BRANCHES", Duration: 365, Price: 7900000, TransferFee: 300000, FreezeDays: 90, FreezeTimes: 3, Classes: true, Sort: 6, GuestPasses: 4},
 }
 
 type ptPkgDef struct {

@@ -24,7 +24,7 @@ export function chatSendState(
   if (conv.contract_status !== 'ACTIVE') {
     return {
       canSend: false,
-      reason: 'Hợp đồng PT không còn hiệu lực (ACTIVE) nên không thể gửi tin nhắn.',
+      reason: 'Hợp đồng PT không còn hiệu lực nên không thể gửi tin nhắn.',
     };
   }
   return { canSend: true, reason: null };

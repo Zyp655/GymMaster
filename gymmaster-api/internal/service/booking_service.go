@@ -314,7 +314,7 @@ func (s *bookingService) MarkAttendance(ctx context.Context, scheduleID uint, it
 	now := s.now()
 	updated := 0
 	err := s.tx.WithTx(ctx, func(ctx context.Context) error {
-		var noShowMembers []uint
+		var noShowMembers, excusedMembers []uint
 		sch, err := s.lockSchedule(ctx, scheduleID)
 		if err != nil {
 			return err
@@ -373,7 +373,14 @@ func (s *bookingService) MarkAttendance(ctx context.Context, scheduleID uint, it
 					}
 				}
 			}
+			if it.Status == entity.BookingStatusAttended && prevStatus == entity.BookingStatusNoShow {
+				excusedMembers = append(excusedMembers, b.MemberID)
+			}
 			updated++
+		}
+		// Sửa NO_SHOW → ATTENDED: tính lại số vắng mặt, gỡ khóa nếu không còn đủ hạn mức.
+		if err := s.liftNoShowBlocks(ctx, excusedMembers, now); err != nil {
+			return err
 		}
 		// Vắng mặt điểm danh tay được tính vào hạn mức khóa đặt lớp giống cron MarkNoShows.
 		return s.applyNoShowBlocks(ctx, noShowMembers, now)
@@ -449,6 +456,56 @@ func (s *bookingService) applyNoShowBlocks(ctx context.Context, memberIDs []uint
 		}
 	}
 	return nil
+}
+
+// liftNoShowBlocks gỡ khóa đặt lớp của hội viên khi lượt NO_SHOW được sửa thành ATTENDED và số NO_SHOW còn lại trong
+// cửa sổ đã gây khóa (30 ngày trước thời điểm bị khóa) nhỏ hơn booking.no_show_limit. Chạy trong transaction của người gọi.
+func (s *bookingService) liftNoShowBlocks(ctx context.Context, memberIDs []uint, now time.Time) error {
+	if len(memberIDs) == 0 {
+		return nil
+	}
+	limit := s.settings.Int(ctx, SettingBookingNoShowLimit, bookingDefaultNoShowLimit)
+	blockDays := s.settings.Int(ctx, SettingBookingBlockDays, bookingDefaultBlockDays)
+	seen := map[uint]bool{}
+	for _, id := range memberIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		m, err := s.bookingRepo.FindMember(ctx, id)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return err
+		}
+		if m.BookingBlockedUntil == nil || !m.BookingBlockedUntil.After(now) {
+			continue
+		}
+		if limit > 0 {
+			// Cửa sổ tính từ 30 ngày trước lúc bị khóa (blocked_until - block_days) để không bỏ sót các lần vắng đã gây khóa.
+			blockedAt := m.BookingBlockedUntil.AddDate(0, 0, -blockDays)
+			if blockedAt.After(now) {
+				blockedAt = now
+			}
+			n, err := s.bookingRepo.CountNoShows(ctx, id, blockedAt.AddDate(0, 0, -bookingNoShowWindowDays))
+			if err != nil {
+				return err
+			}
+			if n >= int64(limit) {
+				continue
+			}
+		}
+		if err := s.bookingRepo.ClearMemberBlock(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MemberClassSubscriptions trả các gói ACTIVE của hội viên (dùng cho cổng hội viên tính lý do không đặt được lớp).
+func (s *bookingService) MemberClassSubscriptions(ctx context.Context, memberID uint) ([]repository.ClassBookingSubscription, error) {
+	return s.bookingRepo.ActiveSubscriptions(ctx, memberID)
 }
 
 // ---- helpers ----------------------------------------------------------------

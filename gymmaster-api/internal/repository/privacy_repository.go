@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"gymmaster-api/internal/consts"
 	"gymmaster-api/internal/dto"
@@ -88,8 +89,15 @@ func (r *privacyRepository) FindUserMFA(ctx context.Context, userID uint) (*enti
 	return &mfa, nil
 }
 
+// SaveUserMFA ghi cấu hình MFA (upsert theo user_id). Không dùng Save(): bản ghi đã có mà struct mang CreatedAt rỗng
+// (thiết lập lại MFA) sẽ bị UPDATE created_at = 0001-01-01. Khi trùng chỉ cập nhật các cột cấu hình + updated_at,
+// giữ nguyên created_at.
 func (r *privacyRepository) SaveUserMFA(ctx context.Context, mfa *entity.UserMFA) error {
-	return postgres.Conn(ctx, r.db).Save(mfa).Error
+	mfa.UpdatedAt = time.Now()
+	return postgres.Conn(ctx, r.db).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"totp_secret_enc", "enabled_at", "recovery_codes_hash", "updated_at"}),
+	}).Create(mfa).Error
 }
 
 func (r *privacyRepository) DeleteUserMFA(ctx context.Context, userID uint) error {

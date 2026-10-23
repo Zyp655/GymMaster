@@ -61,7 +61,7 @@ type (
 		DeleteSurvey(ctx context.Context, id uint) error
 		NPSReport(ctx context.Context, req *v1.NPSReportReq) (*v1.NPSReportRes, error)
 
-		MemberNutritionOverview(ctx context.Context) (*v1.MemberNutritionOverviewRes, error)
+		MemberNutritionOverview(ctx context.Context, req *v1.MemberNutritionOverviewReq) (*v1.MemberNutritionOverviewRes, error)
 		MemberFoodLogs(ctx context.Context, req *v1.MemberFoodLogsReq) (*v1.MemberFoodLogsRes, error)
 		CreateFoodLog(ctx context.Context, req *v1.CreateFoodLogReq) (*v1.FoodLogItem, error)
 		DeleteFoodLog(ctx context.Context, id uint) error
@@ -437,13 +437,13 @@ func (s *engagementService) CreateAnnouncement(ctx context.Context, in v1.Announ
 	}
 	publishAt := s.now()
 	if strings.TrimSpace(in.PublishAt) != "" {
-		if t, err := workoutParsePerformedAt(in.PublishAt, publishAt); err == nil {
+		if t, err := parseFlexibleTime(in.PublishAt, publishAt); err == nil {
 			publishAt = t
 		}
 	}
 	var expireAt *time.Time
 	if strings.TrimSpace(in.ExpireAt) != "" {
-		if t, err := workoutParsePerformedAt(in.ExpireAt, publishAt); err == nil {
+		if t, err := parseFlexibleTime(in.ExpireAt, publishAt); err == nil {
 			expireAt = &t
 		}
 	}
@@ -491,12 +491,12 @@ func (s *engagementService) UpdateAnnouncement(ctx context.Context, id uint, in 
 	a.ImageURL = strings.TrimSpace(in.ImageURL)
 	a.Pinned = in.Pinned
 	if strings.TrimSpace(in.PublishAt) != "" {
-		if t, err := workoutParsePerformedAt(in.PublishAt, a.PublishAt); err == nil {
+		if t, err := parseFlexibleTime(in.PublishAt, a.PublishAt); err == nil {
 			a.PublishAt = t
 		}
 	}
 	if strings.TrimSpace(in.ExpireAt) != "" {
-		if t, err := workoutParsePerformedAt(in.ExpireAt, a.PublishAt); err == nil {
+		if t, err := parseFlexibleTime(in.ExpireAt, a.PublishAt); err == nil {
 			a.ExpireAt = &t
 		}
 	} else {
@@ -558,13 +558,13 @@ func (s *engagementService) CreateSurvey(ctx context.Context, in v1.SurveyInput)
 	}
 	startAt := s.now()
 	if strings.TrimSpace(in.StartAt) != "" {
-		if t, err := workoutParsePerformedAt(in.StartAt, startAt); err == nil {
+		if t, err := parseFlexibleTime(in.StartAt, startAt); err == nil {
 			startAt = t
 		}
 	}
 	var endAt *time.Time
 	if strings.TrimSpace(in.EndAt) != "" {
-		if t, err := workoutParsePerformedAt(in.EndAt, startAt); err == nil {
+		if t, err := parseFlexibleTime(in.EndAt, startAt); err == nil {
 			endAt = &t
 		}
 	}
@@ -612,12 +612,12 @@ func (s *engagementService) UpdateSurvey(ctx context.Context, id uint, in v1.Sur
 		sv.Status = strings.ToUpper(strings.TrimSpace(in.Status))
 	}
 	if strings.TrimSpace(in.StartAt) != "" {
-		if t, err := workoutParsePerformedAt(in.StartAt, sv.StartAt); err == nil {
+		if t, err := parseFlexibleTime(in.StartAt, sv.StartAt); err == nil {
 			sv.StartAt = t
 		}
 	}
 	if strings.TrimSpace(in.EndAt) != "" {
-		if t, err := workoutParsePerformedAt(in.EndAt, sv.StartAt); err == nil {
+		if t, err := parseFlexibleTime(in.EndAt, sv.StartAt); err == nil {
 			sv.EndAt = &t
 		}
 	} else {
@@ -704,17 +704,21 @@ func (s *engagementService) NPSReport(ctx context.Context, req *v1.NPSReportReq)
 
 // ---- Member Endpoints -----------------------------------------------------------
 
-// calculateMifflinCalories tính calo khuyến nghị theo công thức Mifflin-St Jeor × 1.55 (vận động vừa).
-// Nam: (10*weight + 6.25*height - 5*age + 5) * 1.55
-// Nữ:  (10*weight + 6.25*height - 5*age - 161) * 1.55
-func calculateMifflinCalories(m *entity.Member, bm *entity.BodyMetric, now time.Time) int {
+// nutritionActivityFactor: hệ số vận động mặc định (vận động vừa, 3–5 buổi/tuần).
+const nutritionActivityFactor = 1.55
+
+// nutritionDefaultTDEE: calo duy trì mặc định khi chưa có chỉ số cơ thể / kết quả bất thường.
+const nutritionDefaultTDEE = 2000
+
+// calculateMifflinBMR: BMR Mifflin-St Jeor (kcal/ngày); ok=false khi chưa có cân nặng/chiều cao.
+// Nam: 10*weight + 6.25*height - 5*age + 5; Nữ: 10*weight + 6.25*height - 5*age - 161.
+func calculateMifflinBMR(m *entity.Member, bm *entity.BodyMetric, now time.Time) (float64, bool) {
 	if bm == nil || bm.WeightKg <= 0 || bm.HeightCm <= 0 {
-		return 2000
+		return 0, false
 	}
 	age := 25
 	if m != nil && m.Dob != nil {
-		years := now.Year() - m.Dob.Year()
-		if years >= 10 && years <= 100 {
+		if years := ageOnDate(*m.Dob, now); years >= 10 && years <= 100 {
 			age = years
 		}
 	}
@@ -724,20 +728,151 @@ func calculateMifflinCalories(m *entity.Member, bm *entity.BodyMetric, now time.
 	} else {
 		bmr += 5
 	}
-	cal := int(math.Round(bmr * 1.55))
+	return bmr, true
+}
+
+// calculateMifflinCalories tính calo duy trì (TDEE) = BMR Mifflin-St Jeor × 1.55 (vận động vừa);
+// chưa có chỉ số hoặc kết quả < 1000 kcal → 2000.
+func calculateMifflinCalories(m *entity.Member, bm *entity.BodyMetric, now time.Time) int {
+	bmr, ok := calculateMifflinBMR(m, bm, now)
+	if !ok {
+		return nutritionDefaultTDEE
+	}
+	cal := int(math.Round(bmr * nutritionActivityFactor))
 	if cal < 1000 {
-		return 2000
+		return nutritionDefaultTDEE
 	}
 	return cal
 }
 
-func (s *engagementService) MemberNutritionOverview(ctx context.Context) (*v1.MemberNutritionOverviewRes, error) {
+// Mục tiêu dinh dưỡng (NU-01 – PLAN.md Sprint 23: điều chỉnh calo theo mục tiêu giảm/tăng cân).
+const (
+	NutritionGoalCut      = "CUT"
+	NutritionGoalMaintain = "MAINTAIN"
+	NutritionGoalBulk     = "BULK"
+)
+
+// nutritionGoalRule: điều chỉnh calo so với TDEE + cách chia macro của từng mục tiêu.
+// Giảm mỡ: -20% (thâm hụt vừa phải), đạm 2.0 g/kg giữ cơ; tăng cơ: +10% (dư nhẹ hạn chế tích mỡ), đạm 1.8 g/kg;
+// duy trì: đạm 1.6 g/kg. Béo theo % năng lượng, carb là phần còn lại. Chưa có cân nặng → đạm theo % năng lượng.
+type nutritionGoalRule struct {
+	goal          string
+	label         string
+	adjustmentPct int
+	proteinPerKg  float64
+	proteinPct    float64 // dùng khi chưa có cân nặng
+	fatPct        float64
+}
+
+var nutritionGoalRules = []nutritionGoalRule{
+	{NutritionGoalCut, "Giảm mỡ", -20, 2.0, 0.30, 0.25},
+	{NutritionGoalMaintain, "Duy trì", 0, 1.6, 0.25, 0.30},
+	{NutritionGoalBulk, "Tăng cơ", 10, 1.8, 0.25, 0.25},
+}
+
+// nutritionMinCalories: sàn calo gợi ý (không khuyến nghị ăn dưới mức này khi không có chuyên gia theo dõi).
+const nutritionMinCalories = 1200
+
+// nutritionGoalTarget tính calo & macro (g/ngày) cho một mục tiêu từ TDEE và cân nặng (0 = chưa có).
+func nutritionGoalTarget(r nutritionGoalRule, tdee int, weightKg float64) *v1.NutritionGoalTarget {
+	cal := int(math.Round(float64(tdee) * float64(100+r.adjustmentPct) / 100))
+	if cal < nutritionMinCalories {
+		cal = nutritionMinCalories
+	}
+	protein := float64(cal) * r.proteinPct / 4
+	if weightKg > 0 {
+		protein = weightKg * r.proteinPerKg
+	}
+	fat := float64(cal) * r.fatPct / 9
+	carbs := math.Max(0, (float64(cal)-protein*4-fat*9)/4)
+	return &v1.NutritionGoalTarget{
+		Goal: r.goal, Label: r.label, AdjustmentPct: r.adjustmentPct, Calories: cal,
+		ProteinG: int(math.Round(protein)), CarbsG: int(math.Round(carbs)), FatG: int(math.Round(fat)),
+	}
+}
+
+// parseNutritionGoal: CUT | MAINTAIN | BULK (không phân biệt hoa thường); rỗng → "".
+func parseNutritionGoal(raw string) (string, error) {
+	g := strings.ToUpper(strings.TrimSpace(raw))
+	switch g {
+	case "", NutritionGoalCut, NutritionGoalMaintain, NutritionGoalBulk:
+		return g, nil
+	}
+	return "", rescode.New(rescode.BadRequest, "Mục tiêu dinh dưỡng phải là CUT (giảm mỡ), MAINTAIN (duy trì) hoặc BULK (tăng cơ)")
+}
+
+// inferNutritionGoal suy mục tiêu từ ô "Mục tiêu" (chữ tự do) của thực đơn HLV giao; không rõ → "".
+// Vừa giảm vừa tăng (giảm mỡ tăng cơ – recomposition) → duy trì calo.
+func inferNutritionGoal(text string) string {
+	t := strings.ToLower(text)
+	cut := strings.Contains(t, "giảm") || strings.Contains(t, "siết") || strings.Contains(t, "cut") || strings.Contains(t, "lose")
+	bulk := strings.Contains(t, "tăng") || strings.Contains(t, "bulk") || strings.Contains(t, "gain")
+	switch {
+	case cut && bulk:
+		return NutritionGoalMaintain
+	case cut:
+		return NutritionGoalCut
+	case bulk:
+		return NutritionGoalBulk
+	case strings.Contains(t, "duy trì") || strings.Contains(t, "maintain"):
+		return NutritionGoalMaintain
+	}
+	return ""
+}
+
+// buildNutritionTargets điền BMR/TDEE và gợi ý theo mục tiêu vào res (goal đã chuẩn hóa, rỗng = MAINTAIN).
+func buildNutritionTargets(res *v1.MemberNutritionOverviewRes, m *entity.Member, bm *entity.BodyMetric, now time.Time, goal, source string) {
+	tdee := calculateMifflinCalories(m, bm, now)
+	bmr, ok := calculateMifflinBMR(m, bm, now)
+	weight := 0.0
+	if ok && bm != nil {
+		weight = bm.WeightKg
+	}
+	if goal == "" {
+		goal, source = NutritionGoalMaintain, "DEFAULT"
+	}
+	res.RecommendedCalories = tdee
+	res.TDEE = tdee
+	res.BMR = int(math.Round(math.Max(bmr, 0)))
+	res.ActivityFactor = nutritionActivityFactor
+	res.HasBodyMetric = ok
+	res.Goal, res.GoalSource = goal, source
+	res.GoalTargets = make([]*v1.NutritionGoalTarget, 0, len(nutritionGoalRules))
+	for _, r := range nutritionGoalRules {
+		t := nutritionGoalTarget(r, tdee, weight)
+		res.GoalTargets = append(res.GoalTargets, t)
+		if r.goal == goal {
+			res.GoalTarget = t
+		}
+	}
+}
+
+// ageOnDate: số tuổi tròn tại ngày now (giờ Việt Nam) – chưa tới sinh nhật trong năm thì chưa cộng tuổi (NU-01).
+// dob là cột DATE nên chỉ lấy năm/tháng/ngày.
+func ageOnDate(dob, now time.Time) int {
+	n := now.In(memberVNLoc)
+	years := n.Year() - dob.Year()
+	if n.Month() < dob.Month() || (n.Month() == dob.Month() && n.Day() < dob.Day()) {
+		years--
+	}
+	return years
+}
+
+func (s *engagementService) MemberNutritionOverview(ctx context.Context, req *v1.MemberNutritionOverviewReq) (*v1.MemberNutritionOverviewRes, error) {
+	goal, err := parseNutritionGoal(func() string {
+		if req == nil {
+			return ""
+		}
+		return req.Goal
+	}())
+	if err != nil {
+		return nil, err
+	}
 	m, err := s.currentMember(ctx)
 	if err != nil {
 		return nil, err
 	}
 	bm, _ := s.repo.FindLatestBodyMetric(ctx, m.ID)
-	recCal := calculateMifflinCalories(m, bm, s.now())
 
 	planRows, err := s.repo.ListMemberMealPlans(ctx, m.ID)
 	if err != nil {
@@ -759,11 +894,24 @@ func (s *engagementService) MemberNutritionOverview(ctx context.Context) (*v1.Me
 	if err != nil {
 		return nil, err
 	}
-	return &v1.MemberNutritionOverviewRes{
-		RecommendedCalories: recCal,
-		Plans:               plans,
-		Foods:               dto.Map(foods, toFoodItem),
-	}, nil
+	source := "QUERY"
+	if goal == "" {
+		// Suy từ thực đơn đang áp dụng (ACTIVE) đầu tiên có ghi mục tiêu.
+		for _, r := range planRows {
+			if r.Status == consts.StatusActive {
+				if g := inferNutritionGoal(r.Goal); g != "" {
+					goal, source = g, "MEAL_PLAN"
+					break
+				}
+			}
+		}
+	}
+	res := &v1.MemberNutritionOverviewRes{
+		Plans: plans,
+		Foods: dto.Map(foods, toFoodItem),
+	}
+	buildNutritionTargets(res, m, bm, s.now(), goal, source)
+	return res, nil
 }
 
 func (s *engagementService) MemberFoodLogs(ctx context.Context, req *v1.MemberFoodLogsReq) (*v1.MemberFoodLogsRes, error) {

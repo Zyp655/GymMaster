@@ -108,4 +108,3 @@ func (n *notifier) NotifyPermission(ctx context.Context, perm string, branchID *
 	}
 	return n.Notify(ctx, ids, typ, title, body, link)
 }
-

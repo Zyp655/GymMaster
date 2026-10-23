@@ -67,4 +67,3 @@ type CheckinSubscriptionView struct {
 	AccessScope       string // SINGLE_BRANCH | ALL_BRANCHES
 	AccessHours       string // JSONB khung giờ off-peak (nếu có)
 }
-

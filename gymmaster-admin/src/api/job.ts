@@ -28,6 +28,22 @@ export interface JobInfo {
   last_run: JobRun | null;
 }
 
+/** Mã trạng thái thô trong mô tả job (do backend sinh) → nhãn tiếng Việt khi hiển thị. */
+const JOB_TEXT_CODES: Record<string, string> = {
+  ACTIVE: 'Đang hiệu lực',
+  EXPIRED: 'Hết hạn',
+  OFFLINE: 'Mất kết nối',
+  ONLINE: 'Đang kết nối',
+  NO_SHOW: 'Vắng mặt',
+  PENDING: 'Chờ xử lý',
+  CANCELLED: 'Đã hủy',
+};
+
+export function humanizeJobText(text: string | null | undefined): string {
+  if (!text) return '';
+  return text.replace(/\b[A-Z][A-Z_]{2,}\b/g, (code) => JOB_TEXT_CODES[code] ?? code);
+}
+
 export interface JobRunListParams extends ListParams {
   status?: JobRunStatus;
 }

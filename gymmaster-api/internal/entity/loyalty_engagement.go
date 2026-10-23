@@ -39,11 +39,11 @@ type LoyaltyLedger struct {
 func (LoyaltyLedger) TableName() string { return "loyalty_ledgers" }
 
 type LoyaltyReward struct {
-	ID          uint    `gorm:"primaryKey;autoIncrement"`
-	Name        string  `gorm:"type:varchar(150);not null"`
-	Description string  `gorm:"type:varchar(500);not null;default:''"`
-	CostPoints  int     `gorm:"not null"`
-	RewardType  string  `gorm:"type:varchar(20);not null"`
+	ID          uint   `gorm:"primaryKey;autoIncrement"`
+	Name        string `gorm:"type:varchar(150);not null"`
+	Description string `gorm:"type:varchar(500);not null;default:''"`
+	CostPoints  int    `gorm:"not null"`
+	RewardType  string `gorm:"type:varchar(20);not null"`
 	RefID       *uint
 	DiscountPct float64 `gorm:"type:numeric(5,2);not null;default:10"`
 	Stock       int     `gorm:"not null;default:100"`
@@ -75,7 +75,7 @@ type MemberBadge struct {
 func (MemberBadge) TableName() string { return "member_badges" }
 
 type Challenge struct {
-	ID           uint      `gorm:"primaryKey;autoIncrement"`
+	ID           uint `gorm:"primaryKey;autoIncrement"`
 	BranchID     *uint
 	Name         string    `gorm:"type:varchar(150);not null"`
 	Description  string    `gorm:"type:varchar(500);not null;default:''"`
@@ -127,8 +127,8 @@ type Food struct {
 func (Food) TableName() string { return "foods" }
 
 type MealPlan struct {
-	ID             uint       `gorm:"primaryKey;autoIncrement"`
-	MemberID       uint       `gorm:"not null"`
+	ID             uint `gorm:"primaryKey;autoIncrement"`
+	MemberID       uint `gorm:"not null"`
 	TrainerID      *uint
 	Name           string     `gorm:"type:varchar(150);not null"`
 	Goal           string     `gorm:"type:varchar(255);not null;default:''"`
@@ -167,7 +167,7 @@ type FoodLog struct {
 func (FoodLog) TableName() string { return "food_logs" }
 
 type Announcement struct {
-	ID        uint      `gorm:"primaryKey;autoIncrement"`
+	ID        uint `gorm:"primaryKey;autoIncrement"`
 	BranchID  *uint
 	Title     string    `gorm:"type:varchar(200);not null"`
 	Body      string    `gorm:"type:text;not null"`

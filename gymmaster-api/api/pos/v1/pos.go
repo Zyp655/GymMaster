@@ -42,7 +42,7 @@ type ByBarcodeRes = PosProduct
 
 type OrderItem struct {
 	ProductID uint `json:"product_id" v:"required|min:1#Vui lòng chọn sản phẩm|Sản phẩm không hợp lệ"`
-	Quantity  int  `json:"quantity"   v:"required|min:1#Vui lòng nhập số lượng|Số lượng phải lớn hơn 0"`
+	Quantity  int  `json:"quantity"   v:"required|integer|min:1#Vui lòng nhập số lượng|Số lượng phải là số nguyên|Số lượng phải lớn hơn 0"`
 }
 
 type OrderPayment struct {
@@ -103,7 +103,7 @@ type GetOrderRes struct {
 
 type ReturnItem struct {
 	ProductID uint `json:"product_id" v:"required|min:1#Vui lòng chọn sản phẩm|Sản phẩm không hợp lệ"`
-	Quantity  int  `json:"quantity"   v:"required|min:1#Vui lòng nhập số lượng trả|Số lượng trả phải lớn hơn 0"`
+	Quantity  int  `json:"quantity"   v:"required|integer|min:1#Vui lòng nhập số lượng trả|Số lượng trả phải là số nguyên|Số lượng trả phải lớn hơn 0"`
 }
 
 type ReturnReq struct {

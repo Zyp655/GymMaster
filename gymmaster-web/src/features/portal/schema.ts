@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Translate } from '@/lib/utils';
+import { isNotFutureDate, MAX_WORKOUT_WEIGHT_KG } from './workout';
 
 export function createProfileSchema(tv: Translate) {
   return z.object({
@@ -74,7 +75,15 @@ export function createWorkoutLogSchema(tv: Translate) {
     exercise_id: z.number().int().positive(tv('required')),
     sets: z.number().int().min(1, tv('required')).max(50),
     reps: z.number().int().min(1, tv('required')).max(500),
-    weight: z.number().min(0, tv('required')).max(1000),
+    weight: z
+      .number({ invalid_type_error: tv('required') })
+      .min(0, tv('required'))
+      .max(MAX_WORKOUT_WEIGHT_KG, tv('maxValue', { max: MAX_WORKOUT_WEIGHT_KG })),
+    /** Ngày tập (YYYY-MM-DD) – không cho ngày tương lai. */
+    performed_date: z
+      .string()
+      .refine(v => isNotFutureDate(v), tv('notFutureDate'))
+      .optional(),
     note: z.string().trim().max(255, tv('maxLength', { max: 255 })),
   });
 }

@@ -41,6 +41,16 @@ func (s *reportService) branches(ctx context.Context, requested uint) ([]uint, e
 	if !ok {
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền xem báo cáo của chi nhánh này")
 	}
+	// Chi nhánh không tồn tại → 404 (thống nhất với KPI/cohort/P&L) thay vì báo cáo toàn số 0.
+	if requested > 0 {
+		exists, err := s.repo.BranchExists(ctx, requested)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, rescode.New(rescode.NotFound, "Không tìm thấy chi nhánh")
+		}
+	}
 	return ids, nil
 }
 
@@ -92,7 +102,10 @@ func (s *reportService) Overview(ctx context.Context, req *v1.OverviewReq) (*v1.
 			NewChangePct: reportChange(float64(row.NewMembersMonth), float64(row.NewMembersPrevMonth)),
 			ExpiringIn7d: row.Expiring7d,
 		},
-		Checkin: v1.OverviewCheckin{Today: row.CheckinsToday, Present: row.PresentNow},
+		Checkin: v1.OverviewCheckin{
+			Today: row.CheckinsToday, Present: row.PresentNow,
+			PresentSince: repository.PresentSince(now), PresentWindowHours: int(repository.PresentWindow / time.Hour),
+		},
 		Classes: v1.OverviewClasses{
 			Today: row.ClassesToday, Capacity: row.ClassCapacityToday, Booked: row.ClassBookedToday,
 			FillRate: reportPct(float64(row.ClassBookedToday), float64(row.ClassCapacityToday)),

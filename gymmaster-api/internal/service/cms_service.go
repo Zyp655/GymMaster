@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"gorm.io/gorm"
@@ -332,6 +333,14 @@ func (s *CMSService) AdminCreatePost(ctx context.Context, req *v1.AdminCreatePos
 	if err := validatePostSlug(slug); err != nil {
 		return nil, err
 	}
+	title := strings.TrimSpace(req.Title)
+	if err := validatePostTitle(title); err != nil {
+		return nil, err
+	}
+	content, err := sanitizePostContent(req.Content)
+	if err != nil {
+		return nil, err
+	}
 	if err := validatePostCategory(category); err != nil {
 		return nil, err
 	}
@@ -351,11 +360,11 @@ func (s *CMSService) AdminCreatePost(ctx context.Context, req *v1.AdminCreatePos
 	}
 	p := &entity.Post{
 		Slug:        slug,
-		Title:       strings.TrimSpace(req.Title),
+		Title:       title,
 		Excerpt:     strings.TrimSpace(req.Excerpt),
 		CoverURL:    strings.TrimSpace(req.CoverURL),
 		Category:    category,
-		Content:     req.Content,
+		Content:     content,
 		Status:      status,
 		AuthorID:    authorID,
 		PublishedAt: pubAt,
@@ -383,9 +392,12 @@ func (s *CMSService) AdminUpdatePost(ctx context.Context, req *v1.AdminUpdatePos
 		}
 		p.Slug = slug
 	}
-	if title := strings.TrimSpace(req.Title); title != "" {
-		p.Title = title
+	// Tiêu đề là trường bắt buộc: không cho cập nhật thành rỗng/chỉ khoảng trắng (SEC-04).
+	title := strings.TrimSpace(req.Title)
+	if err := validatePostTitle(title); err != nil {
+		return nil, err
 	}
+	p.Title = title
 	p.Excerpt = strings.TrimSpace(req.Excerpt)
 	p.CoverURL = strings.TrimSpace(req.CoverURL)
 	if category := strings.TrimSpace(req.Category); category != "" {
@@ -395,7 +407,11 @@ func (s *CMSService) AdminUpdatePost(ctx context.Context, req *v1.AdminUpdatePos
 		p.Category = category
 	}
 	if req.Content != "" {
-		p.Content = req.Content
+		content, err := sanitizePostContent(req.Content)
+		if err != nil {
+			return nil, err
+		}
+		p.Content = content
 	}
 	if status := strings.TrimSpace(req.Status); status != "" {
 		if err := validatePostStatus(status); err != nil {
@@ -538,10 +554,11 @@ func (s *CMSService) loadConversation(ctx context.Context, id uint) (*entity.Con
 		return nil, nil, rescode.New(rescode.NotFound, "Không tìm thấy cuộc trò chuyện")
 	}
 	if conv.TrainerID != contract.TrainerID || conv.MemberID != contract.MemberID {
-		if err := s.repo.SyncConversationParticipants(ctx, conv.ID, contract.MemberID, contract.TrainerID); err != nil {
+		joinedAt, err := s.repo.SyncConversationParticipants(ctx, conv, contract.MemberID, contract.TrainerID)
+		if err != nil {
 			return nil, nil, err
 		}
-		conv.TrainerID, conv.MemberID = contract.TrainerID, contract.MemberID
+		conv.TrainerID, conv.MemberID, conv.TrainerJoinedAt = contract.TrainerID, contract.MemberID, joinedAt
 	}
 	return conv, &contract, nil
 }
@@ -592,9 +609,9 @@ func (s *CMSService) ListConversations(ctx context.Context, req *v1.ListConversa
 		var unread int64
 		switch {
 		case c.TrainerID == auth.UserID:
-			unread = s.repo.CountUnreadMessages(ctx, conv.ID, auth.UserID, "TRAINER")
+			unread = s.repo.CountUnreadMessages(ctx, conv.ID, auth.UserID, "TRAINER", conv.TrainerJoinedAt)
 		case c.MemberUserID != nil && *c.MemberUserID == auth.UserID:
-			unread = s.repo.CountUnreadMessages(ctx, conv.ID, auth.UserID, "MEMBER")
+			unread = s.repo.CountUnreadMessages(ctx, conv.ID, auth.UserID, "MEMBER", nil)
 		}
 		res = append(res, &v1.ConversationItem{
 			ID:                 conv.ID,
@@ -655,14 +672,31 @@ func (s *CMSService) ListMessages(ctx context.Context, conversationID uint) (v1.
 	return res, nil
 }
 
+// hasVisibleText: chuỗi có ít nhất một ký tự hiển thị được – loại khoảng trắng, ký tự định dạng vô hình
+// (zero-width U+200B–U+200F, U+2060…, BOM U+FEFF, soft hyphen – nhóm Unicode Cf) và ký tự "lấp chỗ" trống
+// (Hangul filler, braille trống). Emoji ghép bằng ZWJ vẫn hợp lệ vì có ký tự emoji hiển thị (FD-11).
+func hasVisibleText(s string) bool {
+	for _, r := range s {
+		if unicode.IsSpace(r) || unicode.Is(unicode.Cf, r) || unicode.IsControl(r) {
+			continue
+		}
+		switch r {
+		case '\u115F', '\u1160', '\u3164', '\uFFA0', '\u2800', '\u180E':
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func (s *CMSService) SendMessage(ctx context.Context, req *v1.SendMessageReq) (*v1.SendMessageRes, error) {
 	auth, err := messagingAuth(ctx)
 	if err != nil {
 		return nil, err
 	}
 	content := strings.TrimSpace(req.Content)
-	if content == "" {
-		return nil, rescode.New(rescode.BadRequest, "Vui lòng nhập nội dung tin nhắn")
+	if !hasVisibleText(content) {
+		return nil, rescode.New(rescode.BadRequest, "Vui lòng nhập nội dung tin nhắn (không chỉ gồm khoảng trắng hoặc ký tự vô hình)")
 	}
 	conv, contract, err := s.loadConversation(ctx, req.ID)
 	if err != nil {
@@ -690,6 +724,9 @@ func (s *CMSService) SendMessage(ctx context.Context, req *v1.SendMessageReq) (*
 		}
 	}
 
+	if !validAttachmentURL(strings.TrimSpace(req.AttachmentURL)) {
+		return nil, rescode.New(rescode.BadRequest, "Tệp đính kèm không hợp lệ (chỉ nhận tệp đã tải lên hệ thống hoặc liên kết http/https)")
+	}
 	now := time.Now()
 	preview := truncateRunes(content, 120)
 	msg := &entity.Message{
@@ -781,25 +818,52 @@ func (s *CMSService) GetNotificationPreferences(ctx context.Context) (v1.GetNoti
 	return res, nil
 }
 
+// validateNotificationPrefs: chỉ nhận loại thông báo trong danh mục (NT-07) và kênh IN_APP/EMAIL.
+func validateNotificationPrefs(items []v1.SaveNotificationPreferenceInput) error {
+	for _, in := range items {
+		known := false
+		for _, cat := range notificationCatalog {
+			if cat.Type == in.Type {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return rescode.New(rescode.BadRequest, fmt.Sprintf("Loại thông báo không hợp lệ: %s", in.Type))
+		}
+		if in.Channel != entity.NotifyChannelInApp && in.Channel != entity.NotifyChannelEmail {
+			return rescode.New(rescode.BadRequest, fmt.Sprintf("Kênh thông báo không hợp lệ: %s", in.Channel))
+		}
+	}
+	return nil
+}
+
+// buildNotificationPref: loại bắt buộc (biên lai, bảo mật) luôn bật.
+func buildNotificationPref(userID uint, in v1.SaveNotificationPreferenceInput, now time.Time) *entity.NotificationPreference {
+	enabled := in.Enabled
+	for _, cat := range notificationCatalog {
+		if cat.Type == in.Type && cat.Mandatory {
+			enabled = true
+		}
+	}
+	return &entity.NotificationPreference{
+		UserID: userID, Type: in.Type, Channel: in.Channel, Enabled: enabled, UpdatedAt: now,
+	}
+}
+
 func (s *CMSService) SaveNotificationPreferences(ctx context.Context, req *v1.SaveNotificationPreferencesReq) (v1.SaveNotificationPreferencesRes, error) {
 	auth := reqctx.Auth(ctx)
 	if auth == nil {
 		return nil, rescode.New(rescode.Unauthorized, "Bạn chưa đăng nhập")
 	}
-	mandatorySet := map[string]bool{"PAYMENT_SUCCESS": true, "SYSTEM": true}
+	if err := validateNotificationPrefs(req.Preferences); err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	for _, in := range req.Preferences {
-		enabled := in.Enabled
-		if mandatorySet[in.Type] {
-			enabled = true
+		if err := s.repo.UpsertNotificationPref(ctx, buildNotificationPref(auth.UserID, in, now)); err != nil {
+			return nil, err
 		}
-		_ = s.repo.UpsertNotificationPref(ctx, &entity.NotificationPreference{
-			UserID:    auth.UserID,
-			Type:      in.Type,
-			Channel:   in.Channel,
-			Enabled:   enabled,
-			UpdatedAt: now,
-		})
 	}
 	prefs, err := s.GetNotificationPreferences(ctx)
 	return v1.SaveNotificationPreferencesRes(prefs), err
@@ -868,11 +932,32 @@ func (s *CMSService) BuildCalendarICS(ctx context.Context, tokenStr string) (str
 		for _, pt := range ptSessions {
 			writeICSEvent(&b, fmt.Sprintf("trainer-pt-%d@gymmaster.vn", pt.ID), "Lịch dạy PT 1-1", pt.TrainerNote, pt.StartAt, pt.EndAt)
 		}
+		// Lớp nhóm HLV đang phụ trách – người dạy thực tế là HLV dạy thay nếu có (CAL-05).
+		var classes []struct {
+			entity.ClassSchedule
+			ClassTypeName string
+		}
+		_ = s.repo.DB().WithContext(ctx).Table("class_schedules cs").
+			Select("cs.*, ct.name AS class_type_name").
+			Joins("JOIN class_types ct ON ct.id = cs.class_type_id").
+			Where(trainerTeachingClassCond, u.ID).
+			Where("cs.status = ? AND cs.end_at >= ?", entity.ClassScheduleScheduled, time.Now().AddDate(0, 0, -7)).
+			Order("cs.start_at ASC").Limit(100).Scan(&classes).Error
+		for _, c := range classes {
+			summary := "Dạy lớp nhóm: " + c.ClassTypeName
+			if c.SubstituteTrainerID != nil && *c.SubstituteTrainerID == u.ID && c.TrainerID != u.ID {
+				summary = "Dạy thay lớp nhóm: " + c.ClassTypeName
+			}
+			writeICSEvent(&b, fmt.Sprintf("trainer-class-%d@gymmaster.vn", c.ID), summary, c.Note, c.StartAt, c.EndAt)
+		}
 	}
 
 	b.WriteString("END:VCALENDAR\r\n")
 	return b.String(), nil
 }
+
+// trainerTeachingClassCond: HLV thực dạy buổi lớp (dạy thay được ưu tiên hơn HLV gốc).
+const trainerTeachingClassCond = "COALESCE(cs.substitute_trainer_id, cs.trainer_id) = ?"
 
 func writeICSEvent(b *strings.Builder, uid, summary, desc string, startAt, endAt time.Time) {
 	b.WriteString("BEGIN:VEVENT\r\n")

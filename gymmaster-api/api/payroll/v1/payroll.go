@@ -27,23 +27,26 @@ type AttendanceItem struct {
 }
 
 type PayrollLineItem struct {
-	ID              uint      `json:"id"`
-	PayrollID       uint      `json:"payroll_id"`
-	StaffID         uint      `json:"staff_id"`
-	StaffCode       string    `json:"staff_code,omitempty"`
-	StaffName       string    `json:"staff_name,omitempty"`
-	Position        string    `json:"position,omitempty"`
-	BaseSalary      float64   `json:"base_salary"`
-	WorkDays        float64   `json:"work_days"`
-	OTHours         float64   `json:"ot_hours"`
-	PTCommission    float64   `json:"pt_commission"`
-	SalesCommission float64   `json:"sales_commission"`
-	Bonus           float64   `json:"bonus"`
-	Penalty         float64   `json:"penalty"`
-	Total           float64   `json:"total"`
-	Note            string    `json:"note"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID         uint    `json:"id"`
+	PayrollID  uint    `json:"payroll_id"`
+	StaffID    uint    `json:"staff_id"`
+	StaffCode  string  `json:"staff_code,omitempty"`
+	StaffName  string  `json:"staff_name,omitempty"`
+	Position   string  `json:"position,omitempty"`
+	BaseSalary float64 `json:"base_salary"`
+	WorkDays   float64 `json:"work_days"`
+	// StandardWorkDays / BasePay: lương CB thực nhận = base_salary × min(work_days, standard_work_days) / standard_work_days.
+	StandardWorkDays float64   `json:"standard_work_days"`
+	BasePay          float64   `json:"base_pay"`
+	OTHours          float64   `json:"ot_hours"`
+	PTCommission     float64   `json:"pt_commission"`
+	SalesCommission  float64   `json:"sales_commission"`
+	Bonus            float64   `json:"bonus"`
+	Penalty          float64   `json:"penalty"`
+	Total            float64   `json:"total"`
+	Note             string    `json:"note"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type PayrollSummary struct {

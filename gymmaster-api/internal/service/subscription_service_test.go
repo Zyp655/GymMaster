@@ -534,3 +534,139 @@ func TestSubListExpiring(t *testing.T) {
 	}
 	assert.Equal(t, map[uint]int{a.ID: 7, b.ID: 1}, got)
 }
+
+// FIN-SUB-16 (B1): hoàn hóa đơn gốc sau khi gói đã nâng cấp (credit đã khấu trừ vào gói mới) → 409.
+// Hủy hóa đơn nâng cấp → gói cũ được khôi phục → hoàn lại được.
+func TestSubRefundBlockedAfterUpgrade(t *testing.T) {
+	fx := newSubFixture()
+	ctx := subOwnerCtx()
+	sub, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 1, PlanID: 1, BranchID: 1}, &v1.PaymentInput{Amount: 500000, Method: "CASH"})
+	require.NoError(t, err)
+	up, err := fx.svc.Upgrade(ctx, sub.ID, v1.UpgradeInput{PlanID: 2})
+	require.NoError(t, err)
+	require.Equal(t, 500000.0, up.Invoice.Items[0].Discount, "credit = toàn bộ 500.000 đã trả")
+
+	_, err = fx.inv.Refund(ctx, *sub.InvoiceID, RefundInput{Amount: 500000, Method: "CASH", Reason: "Hoàn HĐ gốc"})
+	assert.Equal(t, rescode.Conflict.Code(), codeOf(err))
+	assert.Contains(t, err.Error(), "nâng cấp")
+	inv := fx.invRep.invoices[*sub.InvoiceID]
+	assert.Equal(t, 0.0, inv.RefundedAmount)
+	assert.Equal(t, entity.InvoiceStatusPaid, inv.Status)
+	assert.Empty(t, fx.invRep.refunds[inv.ID])
+
+	// Hủy hóa đơn nâng cấp (chưa thu) → gói cũ ACTIVE lại → hoàn hóa đơn gốc được.
+	require.NoError(t, fx.inv.Void(ctx, *up.InvoiceID, "Đổi ý"))
+	require.Equal(t, entity.SubStatusActive, fx.repo.subs[sub.ID].Status)
+	_, err = fx.inv.Refund(ctx, *sub.InvoiceID, RefundInput{Amount: 100000, Method: "CASH", Reason: "Hoàn một phần"})
+	require.NoError(t, err)
+}
+
+// FIN-SUB-20/21 (B1): hoàn hóa đơn gốc sau khi gói đã chuyển nhượng → 409, nên gói nhận chuyển nhượng không thể
+// còn carried_paid_base "ảo" (tiền thật đã hoàn). Phí chuyển nhượng của người nhận vẫn hoàn được.
+func TestSubRefundBlockedAfterTransfer(t *testing.T) {
+	fx := newSubFixture()
+	ctx := subOwnerCtx()
+	sub, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 1, PlanID: 1, BranchID: 1}, &v1.PaymentInput{Amount: 500000, Method: "CASH"})
+	require.NoError(t, err)
+	tr, err := fx.svc.Transfer(ctx, sub.ID, v1.TransferInput{ToMemberID: 2, Payment: &v1.PaymentInput{Amount: 100000, Method: "CASH"}})
+	require.NoError(t, err)
+	require.Equal(t, entity.SubStatusActive, tr.Status)
+	require.NotNil(t, fx.repo.subs[tr.ID].CarriedPaidBase)
+	carried := *fx.repo.subs[tr.ID].CarriedPaidBase
+
+	_, err = fx.inv.Refund(ctx, *sub.InvoiceID, RefundInput{Amount: 500000, Method: "CASH", Reason: "Hoàn HĐ gốc"})
+	assert.Equal(t, rescode.Conflict.Code(), codeOf(err))
+	assert.Contains(t, err.Error(), "chuyển nhượng")
+	assert.Equal(t, 0.0, fx.invRep.invoices[*sub.InvoiceID].RefundedAmount)
+
+	// FIN-SUB-21: giá trị khấu trừ của gói nhận chuyển nhượng vẫn khớp tiền thật đã trả (HĐ gốc không bị hoàn).
+	q, err := fx.svc.UpgradeQuote(ctx, tr.ID, 2)
+	require.NoError(t, err)
+	assert.Equal(t, carried, q.RemainingValue)
+	assert.Equal(t, 500000.0, roundMoneyVND(fx.invRep.invoices[*sub.InvoiceID].PaidAmount-fx.invRep.invoices[*sub.InvoiceID].RefundedAmount))
+
+	// Hóa đơn phí chuyển nhượng (không phải gốc khấu trừ) vẫn hoàn được.
+	_, err = fx.inv.Refund(ctx, *tr.InvoiceID, RefundInput{Amount: 100000, Method: "CASH", Reason: "Miễn phí chuyển nhượng"})
+	require.NoError(t, err)
+}
+
+// FIN-SUB-09/10/18/38 (B3): API quầy không nhận phương thức VNPAY (phiếu thu VNPay giả) → 400.
+func TestSubCounterRejectsVNPay(t *testing.T) {
+	fx := newSubFixture()
+	ctx := subOwnerCtx()
+	vnp := &v1.PaymentInput{Amount: 500000, Method: entity.PaymentVNPay}
+	_, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 1, PlanID: 1, BranchID: 1}, vnp)
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "bán gói")
+	assert.Empty(t, fx.repo.subs)
+
+	old := fx.addSub(entity.Subscription{MemberID: 1, PlanID: 1, BranchID: 1, StartDate: subD(10, 1), EndDate: subD(10, 30),
+		Price: 500000, Status: entity.SubStatusActive})
+	_, err = fx.svc.Renew(ctx, old.ID, v1.RenewInput{Payment: vnp})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "gia hạn")
+	_, err = fx.svc.Upgrade(ctx, old.ID, v1.UpgradeInput{PlanID: 2, Payment: vnp})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "nâng cấp")
+	_, err = fx.svc.Transfer(ctx, old.ID, v1.TransferInput{ToMemberID: 2, Payment: &v1.PaymentInput{Amount: 100000, Method: entity.PaymentVNPay}})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "chuyển nhượng")
+	assert.Equal(t, entity.SubStatusActive, fx.repo.subs[old.ID].Status)
+
+	// Hoàn tiền tại quầy bằng VNPAY cũng bị từ chối; IPN (AddPayment nội bộ) vẫn ghi được VNPAY.
+	sub, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 2, PlanID: 1, BranchID: 1}, nil)
+	require.NoError(t, err)
+	_, err = fx.inv.AddPayment(ctx, *sub.InvoiceID, PaymentInput{Amount: 500000, Method: entity.PaymentVNPay})
+	require.NoError(t, err)
+	_, err = fx.inv.Refund(ctx, *sub.InvoiceID, RefundInput{Amount: 1000, Method: entity.PaymentVNPay, Reason: "x"})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+	_, err = fx.svc.Cancel(ctx, sub.ID, v1.CancelInput{Reason: "x", Refund: &v1.RefundInput{Amount: 1000, Method: entity.PaymentVNPay}})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+}
+
+// FIN-INV-01/02 (B5): hoàn hết số đã thu trên HĐ PARTIAL → REFUNDED, phần nợ được xóa (Due = 0) và gói PENDING
+// chuyển CANCELLED (không kẹt). Gói PENDING của nâng cấp → khôi phục gói cũ.
+func TestSubRefundAllOfPartialInvoice(t *testing.T) {
+	fx := newSubFixture()
+	ctx := subOwnerCtx()
+	sub, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 1, PlanID: 2, BranchID: 1}, &v1.PaymentInput{Amount: 300000, Method: "CASH"})
+	require.NoError(t, err)
+	got, err := fx.inv.Refund(ctx, *sub.InvoiceID, RefundInput{Amount: 300000, Method: "CASH", Reason: "Khách đổi ý"})
+	require.NoError(t, err)
+	assert.Equal(t, entity.InvoiceStatusRefunded, got.Status)
+	inv := fx.invRep.invoices[*sub.InvoiceID]
+	assert.Equal(t, 300000.0, inv.Total)
+	assert.Equal(t, 1050000.0, inv.WriteOffAmount)
+	assert.Equal(t, invoiceRefundWriteOffReason, inv.WriteOffReason)
+	detail, err := fx.inv.Get(ctx, inv.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 0.0, detail.Due, "HĐ REFUNDED không còn nợ")
+	assert.Equal(t, entity.SubStatusCancelled, fx.repo.subs[sub.ID].Status, "gói không kẹt PENDING")
+	assert.Equal(t, []string{entity.SubEventCreated, entity.SubEventCancelled}, fx.repo.eventTypes(sub.ID))
+	_, err = fx.inv.AddPayment(ctx, inv.ID, PaymentInput{Amount: 100000, Method: "CASH"})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+
+	// Hủy gói kèm hoàn toàn bộ (luồng Cancel) → chỉ một sự kiện CANCELLED, HĐ REFUNDED không còn nợ.
+	sub2, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 2, PlanID: 2, BranchID: 1}, &v1.PaymentInput{Amount: 300000, Method: "CASH"})
+	require.NoError(t, err)
+	_, err = fx.svc.Cancel(ctx, sub2.ID, v1.CancelInput{Reason: "Chuyển nhà", Refund: &v1.RefundInput{Amount: 300000, Method: "CASH"}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{entity.SubEventCreated, entity.SubEventCancelled}, fx.repo.eventTypes(sub2.ID))
+	inv2 := fx.invRep.invoices[*sub2.InvoiceID]
+	assert.Equal(t, entity.InvoiceStatusRefunded, inv2.Status)
+	assert.Equal(t, 0.0, roundMoneyVND(inv2.Total-inv2.PaidAmount))
+
+	// Nâng cấp thu một phần rồi hoàn hết → gói mới CANCELLED, gói cũ ACTIVE lại.
+	old := fx.addSub(entity.Subscription{MemberID: 2, PlanID: 1, BranchID: 1, StartDate: subD(10, 5), EndDate: subD(11, 3),
+		Price: 600000, Status: entity.SubStatusActive})
+	up, err := fx.svc.Upgrade(ctx, old.ID, v1.UpgradeInput{PlanID: 2, Payment: &v1.PaymentInput{Amount: 200000, Method: "CASH"}})
+	require.NoError(t, err)
+	_, err = fx.inv.Refund(ctx, *up.InvoiceID, RefundInput{Amount: 200000, Method: "CASH", Reason: "Không nâng cấp nữa"})
+	require.NoError(t, err)
+	assert.Equal(t, entity.SubStatusCancelled, fx.repo.subs[up.ID].Status)
+	assert.Equal(t, entity.SubStatusActive, fx.repo.subs[old.ID].Status)
+
+	// Gói đã ACTIVE (HĐ PAID) hoàn toàn bộ → gói giữ nguyên (không tự hủy gói đang dùng).
+	sub3, err := fx.svc.Sell(ctx, v1.SellInput{MemberID: 1, PlanID: 1, BranchID: 2}, &v1.PaymentInput{Amount: 500000, Method: "CASH"})
+	require.NoError(t, err)
+	_, err = fx.inv.Refund(ctx, *sub3.InvoiceID, RefundInput{Amount: 500000, Method: "CASH", Reason: "x"})
+	require.NoError(t, err)
+	assert.Equal(t, entity.SubStatusActive, fx.repo.subs[sub3.ID].Status)
+	assert.Zero(t, fx.invRep.invoices[*sub3.InvoiceID].WriteOffAmount)
+}

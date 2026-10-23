@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -22,6 +23,9 @@ type (
 		CountStaff(ctx context.Context, id uint) (int64, error)
 		// Dependencies đếm dữ liệu nghiệp vụ còn gắn với chi nhánh (chặn xóa chi nhánh).
 		Dependencies(ctx context.Context, id uint) (BranchDependencies, error)
+		// CountOutsideHours đếm lớp nhóm và buổi PT đã xếp (SCHEDULED, chưa diễn ra) của chi nhánh có giờ
+		// (theo giờ Việt Nam) nằm ngoài khung [openTime, closeTime] dạng "HH:mm".
+		CountOutsideHours(ctx context.Context, id uint, openTime, closeTime string, now time.Time) (classes, ptSessions int64, err error)
 	}
 
 	// BranchDependencies: hội viên (chi nhánh gốc), gói tập chưa kết thúc, hóa đơn thuộc chi nhánh.
@@ -109,4 +113,22 @@ func (r *branchRepository) Dependencies(ctx context.Context, id uint) (BranchDep
 		(SELECT COUNT(*) FROM subscriptions WHERE branch_id = ? AND status IN ('PENDING', 'ACTIVE', 'FROZEN')) AS active_subs,
 		(SELECT COUNT(*) FROM invoices WHERE branch_id = ?) AS invoices`, id, id, id).Scan(&d).Error
 	return d, err
+}
+
+// outsideHoursCond: buổi bắt đầu trước giờ mở, kết thúc sau giờ đóng hoặc vắt qua ngày (theo giờ Việt Nam).
+const outsideHoursCond = `(to_char(start_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'HH24:MI') < @open
+	OR to_char(end_at AT TIME ZONE 'Asia/Ho_Chi_Minh', 'HH24:MI') > @close
+	OR (end_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date > (start_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)`
+
+func (r *branchRepository) CountOutsideHours(ctx context.Context, id uint, openTime, closeTime string, now time.Time) (int64, int64, error) {
+	var out struct {
+		Classes    int64
+		PtSessions int64
+	}
+	args := map[string]any{"id": id, "open": openTime, "close": closeTime, "now": now}
+	err := postgres.Conn(ctx, r.db).Raw(`SELECT
+		(SELECT COUNT(*) FROM class_schedules WHERE branch_id = @id AND status = 'SCHEDULED' AND start_at > @now AND `+outsideHoursCond+`) AS classes,
+		(SELECT COUNT(*) FROM pt_sessions WHERE branch_id = @id AND status = 'SCHEDULED' AND start_at > @now AND `+outsideHoursCond+`) AS pt_sessions`,
+		args).Scan(&out).Error
+	return out.Classes, out.PtSessions, err
 }

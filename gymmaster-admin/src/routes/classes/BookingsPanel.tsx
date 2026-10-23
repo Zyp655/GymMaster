@@ -69,7 +69,11 @@ export default function BookingsPanel({ schedule }: { schedule: ClassSchedule })
   const booked = all.filter((b) => ['BOOKED', 'ATTENDED', 'NO_SHOW'].includes(b.status));
   const waitlist = all
     .filter((b) => b.status === 'WAITLIST')
-    .sort((a, b) => (a.waitlist_position ?? 0) - (b.waitlist_position ?? 0));
+    .sort(
+      (a, b) =>
+        (a.waitlist_rank ?? a.waitlist_position ?? 0) -
+        (b.waitlist_rank ?? b.waitlist_position ?? 0),
+    );
   const cancelled = all.filter((b) => b.status === 'CANCELLED');
 
   const upcoming = schedule.status === 'SCHEDULED' && dayjs(schedule.start_at).isAfter(dayjs());
@@ -112,7 +116,7 @@ export default function BookingsPanel({ schedule }: { schedule: ClassSchedule })
         onSuccess: (b) => {
           if (b.status === 'WAITLIST') {
             message.warning(
-              `Lớp đã đủ chỗ – ${b.member_name} đã vào danh sách chờ (#${waitlist.length + 1})`,
+              `Lớp đã đủ chỗ – ${b.member_name} đã vào danh sách chờ (#${b.waitlist_rank ?? waitlist.length + 1})`,
             );
             setTab('waitlist');
           } else {
@@ -210,7 +214,7 @@ export default function BookingsPanel({ schedule }: { schedule: ClassSchedule })
       title: 'Thứ tự',
       key: 'pos',
       width: 64,
-      render: (_, __, i) => <Badge count={i + 1} color="gold" showZero />,
+      render: (_, b, i) => <Badge count={b.waitlist_rank ?? i + 1} color="gold" showZero />,
     },
     { title: 'Hội viên', key: 'member', render: (_, b) => <MemberCell b={b} /> },
     {

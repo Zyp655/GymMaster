@@ -198,7 +198,7 @@ func (r *stockRepository) ListStock(ctx context.Context, q dto.Query, f StockFil
 	var rows []StockRow
 	err := tx.Select(`p.id AS product_id, p.sku, p.barcode, p.name AS product_name, p.category_id,
 		COALESCE(c.name, '') AS category_name, p.unit, p.image_url, b.id AS branch_id, b.name AS branch_name,
-		COALESCE(sl.quantity, 0) AS quantity, p.min_stock, p.cost_price, p.sell_price, `+lowStockSQL+` AS low_stock`).
+		COALESCE(sl.quantity, 0) AS quantity, p.min_stock, p.cost_price, p.sell_price, ` + lowStockSQL + ` AS low_stock`).
 		Scopes(q.Paginate).Order("p.id, b.id").Scan(&rows).Error
 	return rows, total, err
 }
@@ -207,7 +207,7 @@ func (r *stockRepository) SumStock(ctx context.Context, q dto.Query, f StockFilt
 	var out StockSummaryRow
 	err := r.stockQuery(ctx, q, f).Select(`COALESCE(SUM(COALESCE(sl.quantity, 0)), 0) AS total_quantity,
 		COALESCE(SUM(COALESCE(sl.quantity, 0) * p.cost_price), 0) AS total_value,
-		COUNT(*) FILTER (WHERE `+lowStockSQL+`) AS low_stock_count`).
+		COUNT(*) FILTER (WHERE ` + lowStockSQL + `) AS low_stock_count`).
 		Scan(&out).Error
 	return &out, err
 }

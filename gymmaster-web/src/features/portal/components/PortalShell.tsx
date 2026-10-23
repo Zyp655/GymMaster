@@ -58,6 +58,7 @@ import { getClientAccessToken } from '@/lib/session-token';
 import { cn } from '@/lib/utils';
 import type { AuthUser } from '@/types/auth';
 import { portalKeys, useUnreadCountQuery } from '../queries';
+import { SSE_RETRY_BASE_MS, sseRetryDelay } from '../sse';
 
 export function PortalShell({ user, children }: { user: AuthUser; children: ReactNode }) {
   const t = useTranslations('portal');
@@ -86,13 +87,47 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
 
     let es: EventSource | null = null;
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    // Số lần kết nối lỗi liên tiếp → backoff; về 0 khi mở kết nối thành công.
+    let failures = 0;
 
-    const connect = async () => {
-      const token = getClientAccessToken() ?? (await getSession())?.accessToken;
-      if (!token || cancelled) return;
+    const scheduleReconnect = (delay: number) => {
+      if (cancelled) return;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        void connect(true);
+      }, delay);
+    };
 
+    /**
+     * Mở EventSource. `fresh` = lấy session mới từ server (NextAuth tự refresh access token nếu sắp hết hạn)
+     * thay vì token đệm – dùng khi kết nối lại sau lỗi / auth_expired.
+     */
+    const connect = async (fresh = false): Promise<void> => {
+      if (cancelled) return;
+      let token: string | null | undefined = fresh ? undefined : getClientAccessToken();
+      if (!token) {
+        try {
+          const session = await getSession();
+          // Refresh token hỏng/bị thu hồi → không thử lại (polling 60s vẫn chạy, phiên sẽ tự đăng xuất).
+          if (session?.error) return;
+          token = session?.accessToken;
+        } catch {
+          token = undefined;
+        }
+      }
+      if (cancelled) return;
+      if (!token) {
+        // Chưa lấy được token (mạng chập chờn) → thử lại theo backoff.
+        scheduleReconnect(sseRetryDelay(failures++));
+        return;
+      }
+
+      es?.close();
       const streamUrl = `${getApiBaseUrl()}/notifications/stream?token=${encodeURIComponent(token)}`;
-      es = new EventSource(streamUrl);
+      const source = new EventSource(streamUrl);
+      es = source;
 
       const handleEvent = (event: MessageEvent) => {
         void queryClient.invalidateQueries({ queryKey: portalKeys.unreadCount() });
@@ -112,27 +147,44 @@ export function PortalShell({ user, children }: { user: AuthUser; children: Reac
         }
       };
 
-      es.addEventListener('message', handleEvent);
-      es.addEventListener('notification', handleEvent as EventListener);
-      es.addEventListener('auth_expired', () => {
-        es?.close();
-        if (!cancelled) {
-          setTimeout(() => void connect(), 2000);
-        }
+      source.onopen = () => {
+        failures = 0;
+      };
+      source.addEventListener('message', handleEvent);
+      source.addEventListener('notification', handleEvent as EventListener);
+      source.addEventListener('auth_expired', () => {
+        source.close();
+        // Access token hết hạn → lấy session mới rồi nối lại ngay (giữ hành vi A3).
+        scheduleReconnect(SSE_RETRY_BASE_MS);
       });
-      es.addEventListener('auth_revoked', () => {
-        es?.close();
+      source.addEventListener('auth_revoked', () => {
+        source.close();
+        cancelled = true;
       });
-      es.onerror = () => {
-        // Fallback to polling (already handled by useUnreadCountQuery refetchInterval: 60_000)
-        es?.close();
+      source.onerror = () => {
+        // API khởi động lại / mạng chập chờn / token hết hạn: đóng hẳn (tránh trình duyệt tự nối lại
+        // bằng token cũ trong URL) rồi tự kết nối lại với token mới theo backoff. Polling 60s vẫn là dự phòng.
+        if (es !== source) return;
+        source.close();
+        scheduleReconnect(sseRetryDelay(failures++));
       };
     };
+
+    // Có mạng trở lại → nối lại ngay thay vì chờ hết backoff.
+    const handleOnline = () => {
+      if (cancelled) return;
+      if (es && es.readyState !== EventSource.CLOSED) return;
+      failures = 0;
+      scheduleReconnect(0);
+    };
+    window.addEventListener('online', handleOnline);
 
     void connect();
 
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      window.removeEventListener('online', handleOnline);
       es?.close();
     };
   }, [isMember, queryClient]);

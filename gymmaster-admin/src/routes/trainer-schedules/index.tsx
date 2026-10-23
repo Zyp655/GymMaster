@@ -39,6 +39,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
+import classApi from '@/api/class';
 import { DOW_LABELS, DOW_ORDER, trainerSchedulesApi } from '@/api/operations-ext';
 import type {
   BranchHoliday,
@@ -61,7 +62,7 @@ import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useTableQuery } from '@/hooks/useTableQuery';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
-import { showError } from '@/utils/errors';
+import { setFormError, showError } from '@/utils/errors';
 import { DATE_FORMAT, formatDate, formatDateTime, toApiDate } from '@/utils/format';
 import { holidayImpactSummary, normalizeHHMM } from './time';
 
@@ -441,6 +442,8 @@ function LeaveRequestsTab({
     onSuccess: () => {
       message.success('Đã phân công HLV dạy thay lớp học!');
       void impactsQuery.refetch();
+      // Lịch lớp hiển thị HLV dạy thay → làm mới.
+      void qc.invalidateQueries({ queryKey: [classApi.key] });
     },
     onError: (err) => showError(err, 'Không thể gán HLV dạy thay (Kiểm tra trùng lịch)'),
   });
@@ -684,7 +687,16 @@ function LeaveRequestsTab({
                       title: 'Phân công HLV dạy thay',
                       key: 'sub',
                       render: (_, r) => (
-                        <Space>
+                        <Space wrap>
+                          {r.substitute_trainer_id || r.substitute_trainer_name ? (
+                            <Tag color="orange" bordered={false}>
+                              Đang dạy thay:{' '}
+                              {r.substitute_trainer_name ||
+                                trainerOptions.find((o) => o.value === r.substitute_trainer_id)
+                                  ?.label ||
+                                `HLV #${r.substitute_trainer_id}`}
+                            </Tag>
+                          ) : null}
                           <Select
                             size="small"
                             placeholder="Chọn HLV thay"
@@ -908,7 +920,14 @@ function BranchHolidaysTab({ canManage }: { canManage: boolean }) {
       void qc.invalidateQueries({ queryKey: [trainerSchedulesApi.holidayKey] });
       setModal({ open: false, record: null });
     },
-    onError: (err) => showError(err, 'Không thể lưu lịch nghỉ lễ'),
+    // 409 trùng ngày / 400 ngày đã qua, thiếu giờ… → hiện ngay dưới ô tương ứng.
+    onError: (err) =>
+      setFormError(form, err, {
+        name: /nhập tên/i,
+        date: /ngày|trùng|đã qua|định dạng/i,
+        open_time: /giờ mở|mở\/đóng|đủ giờ/i,
+        close_time: /giờ đóng/i,
+      }) || showError(err, 'Không thể lưu lịch nghỉ lễ'),
   });
 
   const deleteMut = useMutation({

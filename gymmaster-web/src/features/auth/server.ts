@@ -17,9 +17,10 @@ export function loginRequest(
   });
 }
 
-export function refreshRequest(refreshToken: string) {
+export function refreshRequest(refreshToken: string, clientHeaders?: Record<string, string>) {
   return sendRequest<LoginResponse>(getApiBaseUrl(), 'POST', '/auth/refresh', {
     body: { refresh_token: refreshToken },
+    headers: clientHeaders,
   });
 }
 

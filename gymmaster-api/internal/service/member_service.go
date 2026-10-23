@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	v1 "gymmaster-api/api/member/v1"
+	"gymmaster-api/internal/config"
 	"gymmaster-api/internal/consts"
 	"gymmaster-api/internal/dto"
 	"gymmaster-api/internal/entity"
@@ -204,10 +205,12 @@ func (s *memberService) prepareInput(ctx context.Context, m *entity.Member, in v
 	m.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	m.IDCard = strings.TrimSpace(in.IDCard)
 	m.Address = strings.TrimSpace(in.Address)
-	if !validImageURLStrict(strings.TrimSpace(in.AvatarURL)) {
-		return rescode.New(rescode.BadRequest, "URL ảnh đại diện không hợp lệ (chỉ chấp nhận http(s) hoặc ảnh đã tải lên)")
+	avatar := strings.TrimSpace(in.AvatarURL)
+	// Giữ nguyên giá trị cũ (dữ liệu trước khi siết) thì cho qua; giá trị mới chỉ nhận ảnh đã tải lên hệ thống (UIA-079).
+	if avatar != m.AvatarURL && !validMemberAvatarURL(avatar) {
+		return rescode.New(rescode.BadRequest, "Ảnh đại diện không hợp lệ (chỉ chấp nhận ảnh đã tải lên hệ thống)")
 	}
-	m.AvatarURL = strings.TrimSpace(in.AvatarURL)
+	m.AvatarURL = avatar
 	m.EmergencyContactName = strings.TrimSpace(in.EmergencyContactName)
 	m.EmergencyContactPhone = emergencyPhone
 	m.HomeBranchID = in.HomeBranchID
@@ -684,4 +687,23 @@ func toBodyMetricRes(r repository.BodyMetricRow) *v1.BodyMetric {
 		MeasuredByName: r.MeasuredByName,
 		CreatedAt:      r.CreatedAt,
 	}
+}
+
+// memberUploadPublicURL: tiền tố URL công khai của ảnh tải lên (API /uploads trả URL tuyệt đối dạng này).
+var memberUploadPublicURL = func() string {
+	return strings.TrimSuffix(config.GetConfig().Upload.PublicURL, "/")
+}
+
+// validMemberAvatarURL: ảnh đại diện hội viên chỉ là rỗng hoặc ảnh do hệ thống cấp – đường dẫn /uploads/...
+// hoặc URL công khai UPLOAD_PUBLIC_URL/... (không nhận URL ngoài để tránh tải ảnh từ domain lạ).
+func validMemberAvatarURL(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	path := raw
+	if pub := memberUploadPublicURL(); pub != "" && strings.HasPrefix(raw, pub+"/") {
+		path = "/uploads/" + strings.TrimPrefix(raw, pub+"/")
+	}
+	_, ok := safeUploadPath(path)
+	return ok
 }

@@ -43,6 +43,7 @@ func (s *landingService) Plans(ctx context.Context) (*v1.PlansRes, error) {
 				ID: p.ID, Code: p.Code, Name: p.Name, Description: p.Description, Type: p.Type,
 				DurationDays: p.DurationDays, SessionCount: p.SessionCount, Price: p.Price,
 				AccessScope: p.AccessScope, MaxFreezeDays: p.MaxFreezeDays, IncludesClasses: p.IncludesClasses,
+				AccessHours: planAccessHours(p.AccessHours), GuestPassesPerMonth: p.GuestPassesPerMonth,
 			}
 		}),
 		PTPackages: dto.Map(pkgs, func(p entity.PTPackage) *v1.PublicPTPackage {

@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"time"
+
 	"github.com/gogf/gf/v2/frame/g"
 )
 
@@ -77,8 +79,12 @@ type OverviewMembers struct {
 }
 
 type OverviewCheckin struct {
-	Today   int64 `json:"today"`
-	Present int64 `json:"present"`
+	Today int64 `json:"today" dc:"Lượt check-in hợp lệ trong ngày"`
+	// Present dùng CHUNG định nghĩa với Mật độ (/occupancy): người check-in ALLOWED chưa checkout trong
+	// present_window_hours giờ gần nhất (từ present_since), đếm theo người.
+	Present            int64     `json:"present" dc:"Đang trong phòng tập (cùng định nghĩa Mật độ)"`
+	PresentSince       time.Time `json:"present_since" dc:"Mốc bắt đầu cửa sổ đang trong phòng tập"`
+	PresentWindowHours int       `json:"present_window_hours" dc:"Độ dài cửa sổ (giờ)"`
 }
 
 type OverviewClasses struct {

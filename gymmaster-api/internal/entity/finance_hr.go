@@ -1,6 +1,9 @@
 package entity
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Sprint 20: Chấm công & bảng lương.
 const (
@@ -13,9 +16,9 @@ const (
 )
 
 type StaffAttendance struct {
-	ID           uint      `gorm:"primaryKey;autoIncrement"`
-	StaffID      uint      `gorm:"not null"`
-	BranchID     uint      `gorm:"not null"`
+	ID           uint `gorm:"primaryKey;autoIncrement"`
+	StaffID      uint `gorm:"not null"`
+	BranchID     uint `gorm:"not null"`
 	ShiftID      *uint
 	CheckInAt    time.Time `gorm:"not null"`
 	CheckOutAt   *time.Time
@@ -62,6 +65,24 @@ type PayrollItem struct {
 }
 
 func (PayrollItem) TableName() string { return "payroll_items" }
+
+// PayrollStandardWorkDays: số ngày công chuẩn một tháng. Lương cơ bản được trả theo ngày công thực tế:
+// lương CB thực nhận = BaseSalary × min(WorkDays, 26) / 26 (làm tròn đồng) – PLAN.md Sprint 20.
+const PayrollStandardWorkDays = 26.0
+
+// BasePay: lương cơ bản thực nhận theo ngày công (không vượt quá lương cơ bản hợp đồng).
+func (it *PayrollItem) BasePay() float64 {
+	if it.BaseSalary <= 0 || it.WorkDays <= 0 {
+		return 0
+	}
+	days := math.Min(it.WorkDays, PayrollStandardWorkDays)
+	return math.Round(it.BaseSalary * days / PayrollStandardWorkDays)
+}
+
+// RecalcTotal: thực lĩnh = lương CB theo ngày công + hoa hồng PT + hoa hồng bán gói + thưởng − phạt.
+func (it *PayrollItem) RecalcTotal() {
+	it.Total = it.BasePay() + it.PTCommission + it.SalesCommission + it.Bonus - it.Penalty
+}
 
 // Sprint 21: Chi phí, P&L, đối soát ca & trả góp.
 const (
@@ -163,8 +184,8 @@ const (
 )
 
 type SalesTarget struct {
-	ID          uint    `gorm:"primaryKey;autoIncrement"`
-	BranchID    uint    `gorm:"not null"`
+	ID          uint `gorm:"primaryKey;autoIncrement"`
+	BranchID    uint `gorm:"not null"`
 	StaffID     *uint
 	Period      string  `gorm:"type:char(7);not null"`
 	Metric      string  `gorm:"type:varchar(30);not null"`

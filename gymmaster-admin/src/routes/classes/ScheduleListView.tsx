@@ -6,7 +6,12 @@ import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import type { ClassSchedule } from '@/api/class';
 import StatusTag from '@/components/StatusTag';
-import { SCHEDULE_STATUS_MAP, weekdayName } from './constants';
+import {
+  SCHEDULE_STATUS_MAP,
+  scheduleTrainer,
+  scheduleTrainerText,
+  weekdayName,
+} from './constants';
 
 interface ListProps {
   schedules: ClassSchedule[];
@@ -84,7 +89,28 @@ export function ScheduleTable({ schedules, loading, onSelect }: ListProps) {
           </Space>
         ),
       },
-      { title: 'HLV', dataIndex: 'trainer_name' },
+      {
+        title: 'HLV',
+        key: 'trainer',
+        render: (_, s) => {
+          const t = scheduleTrainer(s);
+          return t.substituted ? (
+            <Space direction="vertical" size={0}>
+              <span>
+                {t.name}{' '}
+                <Tag color="orange" bordered={false} style={{ marginInlineEnd: 0 }}>
+                  Dạy thay
+                </Tag>
+              </span>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Thay cho {t.original}
+              </Typography.Text>
+            </Space>
+          ) : (
+            t.name
+          );
+        },
+      },
       { title: 'Phòng', dataIndex: 'room_name' },
       { title: 'Chi nhánh', dataIndex: 'branch_name', responsive: ['xl'] },
       {
@@ -181,7 +207,7 @@ export function ScheduleAgenda({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="agenda-name">{s.class_type_name}</div>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    {s.trainer_name} · {s.room_name}
+                    {scheduleTrainerText(s)} · {s.room_name}
                   </Typography.Text>
                   {cancelled && (
                     <div style={{ fontSize: 12, color: '#ef4444' }}>

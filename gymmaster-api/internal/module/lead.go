@@ -47,7 +47,7 @@ func LeadServiceOf(d *Deps) service.LeadService {
 		cron.Register(cron.Job{
 			Name:        service.JobChurnRiskScan,
 			Spec:        "0 6 * * *",
-			Description: "Quét hội viên có gói ACTIVE nhưng hơn 14 ngày không check-in để nhắc lễ tân chăm sóc",
+			Description: "Quét hội viên có gói đang hiệu lực nhưng hơn 14 ngày không check-in để nhắc lễ tân chăm sóc",
 			Run: func(ctx context.Context) (int, error) {
 				return s.ScanChurnRisk(ctx, time.Now())
 			},

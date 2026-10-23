@@ -53,6 +53,10 @@ const SAMPLE_LEGACY_ROWS: LegacyImportRow[] = [
     plan_code: 'SILVER-6M',
     sub_start_date: '2026-06-01',
     sub_end_date: '2026-12-01',
+    // Hợp đồng PT chuyển sang: pt_trainer_email bắt buộc khi có pt_package_code.
+    pt_package_code: 'PT10',
+    pt_remaining_sessions: 6,
+    pt_trainer_email: 'hlv.cg@gymmaster.vn',
     debt_amount: 1500000,
   },
 ];

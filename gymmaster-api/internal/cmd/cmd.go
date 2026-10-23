@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -145,7 +144,7 @@ func serve(ctx context.Context, parser *gcmd.Parser) error {
 	mw := middleware.New(tokenMaker, corsOrigins)
 
 	// Môi trường production không công khai tài liệu API (/swagger, /api.json).
-	production := cfg.IsProduction() || strings.EqualFold(strings.TrimSpace(cfg.Env), "prod")
+	production := cfg.IsProduction()
 	s := g.Server()
 	s.SetPort(cfg.Server.Port)
 	s.SetDumpRouterMap(!production)

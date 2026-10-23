@@ -128,7 +128,7 @@ type CheckoutReq struct {
 type CheckoutRes = CheckinItem
 
 type PresentReq struct {
-	g.Meta   `path:"/checkins/present" method:"get" tags:"Check-in" summary:"Hội viên đang trong phòng tập (hôm nay, chưa checkout)" perm:"checkin.view,checkin.scan"`
+	g.Meta   `path:"/checkins/present" method:"get" tags:"Check-in" summary:"Hội viên đang trong phòng tập (chưa checkout, vào trong 3 giờ gần nhất – cùng định nghĩa Mật độ)" perm:"checkin.view,checkin.scan"`
 	BranchID uint `json:"branch_id" in:"query" dc:"Bỏ trống = mọi chi nhánh trong phạm vi"`
 }
 type PresentRes []*PresentItem
@@ -169,7 +169,7 @@ type StatsRes struct {
 	Allowed       int64         `json:"allowed"`
 	Denied        int64         `json:"denied"`
 	UniqueMembers int64         `json:"unique_members" dc:"Số hội viên khác nhau được vào"`
-	Present       int64         `json:"present"        dc:"Đang trong phòng tập (vào trong ngày, chưa checkout)"`
+	Present       int64         `json:"present"        dc:"Đang trong phòng tập – cùng định nghĩa Mật độ (chưa checkout, vào trong 3 giờ gần nhất, đếm theo người); chỉ tính khi date là hôm nay, ngày khác = 0"`
 	ByHour        []*HourStat   `json:"by_hour"        dc:"Đủ 24 phần tử, giờ 0..23"`
 	DenyReasons   []*ReasonStat `json:"deny_reasons"`
 }

@@ -145,7 +145,7 @@ func (f *checkinFakeRepo) Present(_ context.Context, _ []uint, since time.Time) 
 	}
 	return out, nil
 }
-func (f *checkinFakeRepo) Stats(context.Context, []uint, time.Time, time.Time) (*repository.CheckinStatsRows, error) {
+func (f *checkinFakeRepo) Stats(context.Context, []uint, time.Time, time.Time, *time.Time) (*repository.CheckinStatsRows, error) {
 	return &repository.CheckinStatsRows{
 		ByHour:   []repository.CheckinHourCount{{Hour: 8, Result: "ALLOWED", Count: 3}, {Hour: 8, Result: "DENIED", Count: 1}, {Hour: 18, Result: "ALLOWED", Count: 2}},
 		ByReason: []repository.CheckinReasonCount{{DenyReason: "DUPLICATE", Count: 1}},

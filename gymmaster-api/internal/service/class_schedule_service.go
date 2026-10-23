@@ -247,7 +247,7 @@ func (s *classScheduleService) CreateRecurring(ctx context.Context, req *v1.Crea
 				}
 				return err
 			}
-			reason, err := s.slotConflict(ctx, slot, start, end, 0)
+			reason, err := s.slotConflict(ctx, slot, start, end, 0, slot.trainerID)
 			if err != nil {
 				return err
 			}
@@ -335,6 +335,10 @@ func (s *classScheduleService) Update(ctx context.Context, req *v1.UpdateSchedul
 		}
 		before := *sch
 		sch.RoomID = slot.room.ID
+		if slot.trainerID != sch.TrainerID {
+			// Đổi HLV chính → bỏ phân công dạy thay cũ (HLV thực dạy là HLV chính mới đã kiểm tra ở trên).
+			sch.SubstituteTrainerID = nil
+		}
 		sch.TrainerID = slot.trainerID
 		sch.StartAt = start
 		sch.EndAt = end
@@ -564,7 +568,7 @@ func (s *classScheduleService) checkSlot(ctx context.Context, slot *classSlot, s
 	if err := guard.CheckTrainerLeave(ctx, teacherID, start, end); err != nil {
 		return err
 	}
-	reason, err := s.slotConflict(ctx, slot, start, end, excludeID)
+	reason, err := s.slotConflict(ctx, slot, start, end, excludeID, teacherID)
 	if err != nil {
 		return err
 	}
@@ -574,17 +578,18 @@ func (s *classScheduleService) checkSlot(ctx context.Context, slot *classSlot, s
 	return nil
 }
 
-// slotConflict trả lý do trùng lịch ("" nếu trống).
-func (s *classScheduleService) slotConflict(ctx context.Context, slot *classSlot, start, end time.Time, excludeID uint) (string, error) {
+// slotConflict trả lý do trùng lịch ("" nếu trống). teacherID là HLV thực dạy của buổi; so với các lớp khác theo HLV thực
+// dạy của chúng (kể cả lớp HLV đang dạy thay) và buổi PT của HLV.
+func (s *classScheduleService) slotConflict(ctx context.Context, slot *classSlot, start, end time.Time, excludeID, teacherID uint) (string, error) {
 	busy, err := s.scheduleRepo.RoomOverlap(ctx, slot.room.ID, start, end, excludeID)
 	if err != nil || busy {
 		return classRoomOverlapMsg, err
 	}
-	busy, err = s.scheduleRepo.TrainerOverlap(ctx, slot.trainerID, start, end, excludeID)
+	busy, err = s.scheduleRepo.TrainerOverlap(ctx, teacherID, start, end, excludeID)
 	if err != nil || busy {
 		return classTrainerOverlapMsg, err
 	}
-	busy, err = s.scheduleRepo.TrainerPTOverlap(ctx, slot.trainerID, start, end)
+	busy, err = s.scheduleRepo.TrainerPTOverlap(ctx, teacherID, start, end)
 	if err != nil || busy {
 		return classTrainerPTMsg, err
 	}
@@ -685,31 +690,33 @@ func classScheduleToRes(d *entity.ClassScheduleDetail) *v1.ClassSchedule {
 		series = *d.SeriesID
 	}
 	return &v1.ClassSchedule{
-		ID:             d.ID,
-		ClassTypeID:    d.ClassTypeID,
-		ClassTypeCode:  d.ClassTypeCode,
-		ClassTypeName:  d.ClassTypeName,
-		ClassTypeColor: d.ClassTypeColor,
-		BranchID:       d.BranchID,
-		BranchName:     d.BranchName,
-		RoomID:         d.RoomID,
-		RoomName:       d.RoomName,
-		TrainerID:      d.TrainerID,
-		TrainerName:    d.TrainerName,
-		StartAt:        d.StartAt,
-		EndAt:          d.EndAt,
-		DurationMin:    int(d.EndAt.Sub(d.StartAt).Minutes()),
-		Capacity:       d.Capacity,
-		BookedCount:    d.BookedCount,
-		WaitlistCount:  d.WaitlistCount,
-		AttendedCount:  d.AttendedCount,
-		AvailableSlots: max(d.Capacity-d.BookedCount, 0),
-		Status:         d.Status,
-		SeriesID:       series,
-		CancelReason:   d.CancelReason,
-		Note:           d.Note,
-		CreatedAt:      d.CreatedAt,
-		UpdatedAt:      d.UpdatedAt,
+		ID:                    d.ID,
+		ClassTypeID:           d.ClassTypeID,
+		ClassTypeCode:         d.ClassTypeCode,
+		ClassTypeName:         d.ClassTypeName,
+		ClassTypeColor:        d.ClassTypeColor,
+		BranchID:              d.BranchID,
+		BranchName:            d.BranchName,
+		RoomID:                d.RoomID,
+		RoomName:              d.RoomName,
+		TrainerID:             d.TrainerID,
+		TrainerName:           d.TrainerName,
+		StartAt:               d.StartAt,
+		SubstituteTrainerID:   d.SubstituteTrainerID,
+		SubstituteTrainerName: d.SubstituteTrainerName,
+		EndAt:                 d.EndAt,
+		DurationMin:           int(d.EndAt.Sub(d.StartAt).Minutes()),
+		Capacity:              d.Capacity,
+		BookedCount:           d.BookedCount,
+		WaitlistCount:         d.WaitlistCount,
+		AttendedCount:         d.AttendedCount,
+		AvailableSlots:        max(d.Capacity-d.BookedCount, 0),
+		Status:                d.Status,
+		SeriesID:              series,
+		CancelReason:          d.CancelReason,
+		Note:                  d.Note,
+		CreatedAt:             d.CreatedAt,
+		UpdatedAt:             d.UpdatedAt,
 	}
 }
 
@@ -725,6 +732,7 @@ func ClassBookingToRes(d *entity.ClassBookingDetail) *v1.ClassBooking {
 		SubscriptionID:   d.SubscriptionID,
 		Status:           d.Status,
 		WaitlistPosition: d.WaitlistPosition,
+		WaitlistRank:     d.WaitlistRank,
 		Source:           d.Source,
 		BookedAt:         d.BookedAt,
 		CancelledAt:      d.CancelledAt,

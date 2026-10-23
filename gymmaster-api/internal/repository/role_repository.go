@@ -21,6 +21,9 @@ type (
 		ReplacePermissions(ctx context.Context, role *entity.Role, perms []entity.Permission) error
 		Delete(ctx context.Context, id uint) error
 		CountUsers(ctx context.Context, id uint) (int64, error)
+		// CountUsersOutsideBranches đếm lượt gán role cho người dùng ngoài các chi nhánh branchIDs
+		// (kể cả gán toàn hệ thống, branch_id NULL).
+		CountUsersOutsideBranches(ctx context.Context, id uint, branchIDs []uint) (int64, error)
 
 		ListPermissions(ctx context.Context) ([]entity.Permission, error)
 		FindPermissionsByCodes(ctx context.Context, codes []string) ([]entity.Permission, error)
@@ -90,6 +93,16 @@ func (r *roleRepository) Delete(ctx context.Context, id uint) error {
 func (r *roleRepository) CountUsers(ctx context.Context, id uint) (int64, error) {
 	var n int64
 	err := postgres.Conn(ctx, r.db).Model(&entity.UserRole{}).Where("role_id = ?", id).Count(&n).Error
+	return n, err
+}
+
+func (r *roleRepository) CountUsersOutsideBranches(ctx context.Context, id uint, branchIDs []uint) (int64, error) {
+	var n int64
+	q := postgres.Conn(ctx, r.db).Model(&entity.UserRole{}).Where("role_id = ?", id)
+	if len(branchIDs) > 0 {
+		q = q.Where("(branch_id IS NULL OR branch_id NOT IN ?)", branchIDs)
+	}
+	err := q.Count(&n).Error
 	return n, err
 }
 

@@ -198,6 +198,8 @@ export function createApiClient<U = unknown>(options: ApiClientOptions<U>): ApiC
   const endSession = (error: ApiError) => {
     tokens.clear();
     options.onSessionExpired?.(error);
+    // onSessionExpired đã báo "hết phiên" → nơi gọi (showError) không toast lần nữa.
+    error.handled = true;
   };
 
   // ---------------------------------------------------------------- request

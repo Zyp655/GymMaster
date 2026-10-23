@@ -31,7 +31,8 @@ export function getTheme(darkMode = false): ThemeConfig {
       // Nền tối: navy thương hiệu quá tối → dùng sắc xanh sáng hơn để đủ tương phản.
       colorPrimary: darkMode ? BRAND.primaryDark : BRAND.primary,
       colorLink: darkMode ? '#6AA8E0' : BRAND.primary,
-      colorInfo: darkMode ? BRAND.primaryDark : BRAND.primary,
+      // Không dùng navy cho info: palette sinh từ navy quá tối → Alert info nền xám đậm (C11).
+      colorInfo: darkMode ? BRAND.primaryDark : '#1D6FB8',
       // Seed màu preset "orange" = cam thương hiệu → Button color="orange" đúng màu accent.
       orange: BRAND.accent,
       borderRadius: 8,

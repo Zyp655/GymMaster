@@ -2,8 +2,9 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -97,6 +98,19 @@ func (s *branchService) Update(ctx context.Context, id uint, in v1.BranchInput) 
 	}
 	if err := s.validate(ctx, in, id); err != nil {
 		return nil, err
+	}
+	// Đổi giờ mở cửa: còn lớp/PT tương lai ngoài khung giờ mới → 409 kèm số lượng, trừ khi force (OR-05).
+	if (in.OpenTime != b.OpenTime || in.CloseTime != b.CloseTime) && !in.Force {
+		classes, pts, err := s.branchRepo.CountOutsideHours(ctx, id, in.OpenTime, in.CloseTime, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		if classes > 0 || pts > 0 {
+			return nil, rescode.New(rescode.Conflict, fmt.Sprintf(
+				"Còn %d lớp nhóm và %d buổi PT đã xếp nằm ngoài giờ mở cửa mới (%s–%s). "+
+					"Hãy dời/hủy các buổi này trước, hoặc xác nhận lưu (force) nếu vẫn muốn đổi giờ",
+				classes, pts, in.OpenTime, in.CloseTime))
+		}
 	}
 	before := toBranchRes(*b)
 	applyBranchInput(b, in)

@@ -56,7 +56,10 @@ export interface Branch {
   updated_at: string;
 }
 
-export type BranchInput = Omit<Branch, 'id' | 'created_at' | 'updated_at'>;
+export type BranchInput = Omit<Branch, 'id' | 'created_at' | 'updated_at'> & {
+  /** Vẫn lưu giờ mở cửa mới dù còn lớp/PT tương lai ngoài khung giờ (sau khi người dùng xác nhận 409). */
+  force?: boolean;
+};
 
 export interface BranchListParams extends ListParams {
   status?: ActiveStatus;

@@ -793,7 +793,7 @@ function DataPrivacyRequestsTab() {
         showIcon
         icon={<FileProtectOutlined />}
         message="Tuân thủ Nghị định 13/2023/NĐ-CP về Bảo vệ dữ liệu cá nhân"
-        description="Khi duyệt yêu cầu XÓA DỮ LIỆU (DELETE), hệ thống sẽ ẩn danh hóa thông tin định danh cá nhân (Họ tên, SĐT, Email, CCCD, Sinh trắc học) của hội viên nhưng vẫn giữ lại chứng từ hóa đơn kế toán theo luật thuế."
+        description="Khi duyệt yêu cầu XÓA DỮ LIỆU, hệ thống sẽ ẩn danh hóa thông tin định danh cá nhân (Họ tên, SĐT, Email, CCCD, Sinh trắc học) của hội viên nhưng vẫn giữ lại chứng từ hóa đơn kế toán theo luật thuế."
         style={{ marginBottom: 16 }}
       />
 

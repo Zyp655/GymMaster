@@ -43,7 +43,7 @@ import PaymentFields from '@/routes/subscriptions/PaymentFields';
 import { DEFAULT_PAYMENT, toPaymentInput } from '@/routes/subscriptions/payment';
 import type { PaymentFormValues } from '@/routes/subscriptions/payment';
 import { openInvoicePrint } from '@/routes/subscriptions/utils';
-import { getErrorMessage, showError } from '@/utils/errors';
+import { getErrorMessage, showError, validateForm } from '@/utils/errors';
 import { DATE_FORMAT, formatDate, formatMoney, normalizeText, toApiDate } from '@/utils/format';
 import { PT_CONTRACT_STATUS_MAP, contractRemainText, isLiveContract } from './constants';
 import {
@@ -249,7 +249,8 @@ export default function SellPtModal({ open, onClose, member, onOpenContract }: S
 
   const submit = async () => {
     if (!quoteBody || !quote) return;
-    const values = await form.validateFields();
+    const values = await validateForm(form);
+    if (!values) return;
     sell.mutate(
       { ...quoteBody, note: values.note?.trim() || '', payment: toPaymentInput(values.payment) },
       {

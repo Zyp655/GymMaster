@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 
@@ -34,12 +35,16 @@ const financeMaxAmount = 999_999_999_999
 var (
 	validExpenseCategoryTypes = []string{entity.ExpenseTypeFixed, entity.ExpenseTypeVariable}
 
-	errCashSessionAlreadyOpen = rescode.New(rescode.Conflict, "Chi nhánh đang có ca thu ngân chưa đóng")
+	errCashSessionAlreadyOpen   = rescode.New(rescode.Conflict, "Chi nhánh đang có ca thu ngân chưa đóng")
 	errCashSessionAlreadyClosed = rescode.New(rescode.Conflict, "Ca thu ngân đã được đóng trước đó")
-	errInstallmentPlanExists  = rescode.New(rescode.Conflict, "Hóa đơn này đã có kế hoạch trả góp")
-	errInstallmentAlreadyPaid = rescode.New(rescode.Conflict, "Kỳ trả góp này đã được thanh toán")
-	errInstallmentClosed      = rescode.New(rescode.BadRequest, "Kỳ trả góp đã tất toán hoặc đã hủy (hóa đơn đã thu đủ/đã hủy), không thể thu tiền")
+	errInstallmentPlanExists    = rescode.New(rescode.Conflict, "Hóa đơn này đã có kế hoạch trả góp")
+	errInstallmentAlreadyPaid   = rescode.New(rescode.Conflict, "Kỳ trả góp này đã được thanh toán")
+	errInstallmentClosed        = rescode.New(rescode.BadRequest, "Kỳ trả góp đã tất toán hoặc đã hủy (hóa đơn đã thu đủ/đã hủy), không thể thu tiền")
+	errFinanceNoteTooLong       = rescode.New(rescode.BadRequest, "Ghi chú tối đa 500 ký tự")
 )
+
+// financeNoteMaxLen: độ dài tối đa ghi chú ca thu ngân (cột VARCHAR(500)).
+const financeNoteMaxLen = 500
 
 // withTx chạy fn trong transaction (tx nil – trong unit test – thì chạy trực tiếp).
 func (s *financeService) withTx(ctx context.Context, fn func(ctx context.Context) error) error {
@@ -59,17 +64,48 @@ func financeValidateExpenseAmount(amount float64) error {
 	return nil
 }
 
+// financeExpenseMaxAgeMonths: ngày chi không được cũ hơn 12 tháng so với hôm nay (chặn nhập nhầm năm, vd 1999).
+const financeExpenseMaxAgeMonths = 12
+
 // financeParseSpentAt đọc ngày chi (YYYY-MM-DD). Quy tắc: phiếu chi ghi nhận khoản ĐÃ chi nên ngày chi không được
 // sau hôm nay (giờ VN) – chặn lỗi nhập nhầm năm (vd 2030) làm lệch báo cáo lãi/lỗ; khoản trả trước ghi theo ngày chi thực tế.
+// Đồng thời không được cũ hơn financeExpenseMaxAgeMonths tháng (vd 1999) – kỳ báo cáo cũ đã chốt.
 func financeParseSpentAt(raw string, now time.Time) (*time.Time, error) {
 	parsed, err := equipmentParseDateOpt(raw)
 	if err != nil || parsed == nil {
 		return parsed, err
 	}
-	if parsed.After(equipmentStartOfDay(now)) {
+	today := equipmentStartOfDay(now)
+	if parsed.After(today) {
 		return nil, rescode.New(rescode.BadRequest, "Ngày chi không được sau ngày hôm nay")
 	}
+	if minDate := today.AddDate(0, -financeExpenseMaxAgeMonths, 0); parsed.Before(minDate) {
+		return nil, rescode.New(rescode.BadRequest,
+			"Ngày chi không được trước "+minDate.Format("02/01/2006")+" (tối đa 12 tháng trước hôm nay)")
+	}
 	return parsed, nil
+}
+
+// checkBranch: chi nhánh phải tồn tại (404); requireActive = chặn thao tác ghi tại chi nhánh ngừng hoạt động (400).
+func (s *financeService) checkBranch(ctx context.Context, branchID uint, requireActive bool) error {
+	status, err := s.repo.FindBranchStatus(ctx, branchID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return rescode.New(rescode.NotFound, "Không tìm thấy chi nhánh")
+		}
+		return err
+	}
+	if requireActive && status != consts.StatusActive {
+		return rescode.New(rescode.BadRequest, "Chi nhánh đang ngừng hoạt động")
+	}
+	return nil
+}
+
+// auditLog ghi nhật ký thao tác tài chính (audit nil trong unit test).
+func (s *financeService) auditLog(ctx context.Context, action, entityName string, id uint, before, after any) {
+	if s.audit != nil {
+		s.audit.Log(ctx, action, entityName, id, before, after)
+	}
 }
 
 // installmentSplitAmounts chia total thành n kỳ (làm tròn đồng), kỳ cuối nhận phần dư để tổng khớp total.
@@ -248,6 +284,9 @@ func (s *financeService) CreateExpense(ctx context.Context, req *v1.CreateExpens
 	if err := financeValidateExpenseAmount(req.Amount); err != nil {
 		return nil, err
 	}
+	if err := s.checkBranch(ctx, req.BranchID, true); err != nil {
+		return nil, err
+	}
 	cat, err := s.repo.FindExpenseCategoryByID(ctx, req.CategoryID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -266,6 +305,9 @@ func (s *financeService) CreateExpense(ctx context.Context, req *v1.CreateExpens
 		spentAt = *parsed
 	}
 
+	if !validAttachmentURL(strings.TrimSpace(req.AttachmentURL)) {
+		return nil, rescode.New(rescode.BadRequest, "Đường dẫn chứng từ không hợp lệ (chỉ nhận tệp đã tải lên hệ thống hoặc liên kết http/https)")
+	}
 	exp := &entity.Expense{
 		BranchID:         req.BranchID,
 		CategoryID:       req.CategoryID,
@@ -339,9 +381,19 @@ func (s *financeService) UpdateExpense(ctx context.Context, req *v1.UpdateExpens
 	}
 	if req.AttachmentURL != nil {
 		exp.AttachmentURL = strings.TrimSpace(*req.AttachmentURL)
+		if !validAttachmentURL(exp.AttachmentURL) {
+			return nil, rescode.New(rescode.BadRequest, "Đường dẫn chứng từ không hợp lệ (chỉ nhận tệp đã tải lên hệ thống hoặc liên kết http/https)")
+		}
 	}
-	// Khoản đã duyệt/từ chối mà bị sửa số tiền hoặc danh mục → quay về chờ duyệt để duyệt lại.
-	if exp.Status != entity.ExpenseStatusPending && (exp.Amount != row.Amount || exp.CategoryID != row.CategoryID) {
+	// Khoản đã duyệt đã vào báo cáo lãi/lỗ: không được sửa số tiền/danh mục/ngày chi (chỉ sửa mô tả, chứng từ).
+	// Cần điều chỉnh → ghi khoản chi bù trừ mới. (Trước đây sửa được rồi tự quay về chờ duyệt → xóa hẳn.)
+	if row.Status == entity.ExpenseStatusApproved &&
+		(exp.Amount != row.Amount || exp.CategoryID != row.CategoryID || !exp.SpentAt.Equal(row.SpentAt)) {
+		return nil, rescode.New(rescode.Conflict,
+			"Khoản chi đã duyệt không thể sửa số tiền, danh mục hoặc ngày chi; vui lòng ghi khoản chi điều chỉnh mới")
+	}
+	// Khoản bị từ chối mà sửa số tiền/danh mục → quay về chờ duyệt để duyệt lại.
+	if row.Status == entity.ExpenseStatusRejected && (exp.Amount != row.Amount || exp.CategoryID != row.CategoryID) {
 		exp.Status = entity.ExpenseStatusPending
 		exp.ApprovedBy = nil
 		updatedRow.ApproverName = ""
@@ -351,7 +403,9 @@ func (s *financeService) UpdateExpense(ctx context.Context, req *v1.UpdateExpens
 		return nil, err
 	}
 	updatedRow.Expense = exp
-	return toExpenseItem(updatedRow), nil
+	res := toExpenseItem(updatedRow)
+	s.auditLog(ctx, AuditUpdate, auditEntityExpense, exp.ID, toExpenseItem(*row), res)
+	return res, nil
 }
 
 func (s *financeService) DeleteExpense(ctx context.Context, id uint) error {
@@ -365,7 +419,15 @@ func (s *financeService) DeleteExpense(ctx context.Context, id uint) error {
 	if !reqctx.CanAccessBranch(ctx, row.BranchID) {
 		return rescode.New(rescode.PermissionDenied, "Bạn không được xóa chi phí tại chi nhánh này")
 	}
-	return s.repo.DeleteExpense(ctx, id)
+	// Khoản đã duyệt là chứng từ kế toán đã vào P&L → không xóa (chỉ xóa khoản chờ duyệt/bị từ chối).
+	if row.Status == entity.ExpenseStatusApproved {
+		return rescode.New(rescode.Conflict, "Khoản chi đã duyệt không thể xóa")
+	}
+	if err := s.repo.DeleteExpense(ctx, id); err != nil {
+		return err
+	}
+	s.auditLog(ctx, AuditDelete, auditEntityExpense, id, toExpenseItem(*row), nil)
+	return nil
 }
 
 func (s *financeService) ApproveExpense(ctx context.Context, req *v1.ApproveExpenseReq) (*v1.ExpenseItem, error) {
@@ -386,16 +448,37 @@ func (s *financeService) ApproveExpense(ctx context.Context, req *v1.ApproveExpe
 	if status != entity.ExpenseStatusApproved && status != entity.ExpenseStatusRejected {
 		return nil, rescode.New(rescode.BadRequest, "Trạng thái duyệt không hợp lệ")
 	}
+	// Chỉ duyệt/từ chối khoản đang chờ duyệt – không đổi thẳng APPROVED ↔ REJECTED.
+	if row.Status != entity.ExpenseStatusPending {
+		return nil, errExpenseNotPending(row.Status)
+	}
 	exp := row.Expense
 	exp.Status = status
 	exp.ApprovedBy = reqctx.UserID(ctx)
 	exp.UpdatedAt = s.now()
-	if err := s.repo.UpdateExpense(ctx, &exp); err != nil {
+	// UPDATE có điều kiện status = 'PENDING': duyệt và từ chối đồng thời chỉ một yêu cầu thắng.
+	ok, err := s.repo.SetExpenseStatus(ctx, exp.ID, entity.ExpenseStatusPending, status, exp.ApprovedBy, exp.UpdatedAt)
+	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, errExpenseNotPending("")
 	}
 	updatedRow := *row
 	updatedRow.Expense = exp
-	return toExpenseItem(updatedRow), nil
+	res := toExpenseItem(updatedRow)
+	s.auditLog(ctx, AuditUpdate, auditEntityExpense, exp.ID, toExpenseItem(*row), res)
+	return res, nil
+}
+
+func errExpenseNotPending(status string) error {
+	switch status {
+	case entity.ExpenseStatusApproved:
+		return rescode.New(rescode.Conflict, "Khoản chi đã được duyệt trước đó, không thể duyệt/từ chối lại")
+	case entity.ExpenseStatusRejected:
+		return rescode.New(rescode.Conflict, "Khoản chi đã bị từ chối; vui lòng sửa khoản chi để gửi duyệt lại")
+	}
+	return rescode.New(rescode.Conflict, "Khoản chi không còn ở trạng thái chờ duyệt")
 }
 
 func (s *financeService) OpenCashSession(ctx context.Context, req *v1.OpenCashSessionReq) (*v1.CashSessionItem, error) {
@@ -407,6 +490,12 @@ func (s *financeService) OpenCashSession(ctx context.Context, req *v1.OpenCashSe
 	}
 	if req.OpeningCash < 0 {
 		return nil, rescode.New(rescode.BadRequest, "Tiền mặt đầu ca không được âm")
+	}
+	if utf8.RuneCountInString(strings.TrimSpace(req.Note)) > financeNoteMaxLen {
+		return nil, errFinanceNoteTooLong
+	}
+	if err := s.checkBranch(ctx, req.BranchID, true); err != nil {
+		return nil, err
 	}
 	if open, err := s.repo.FindOpenCashSession(ctx, req.BranchID); err == nil && open != nil {
 		return nil, errCashSessionAlreadyOpen
@@ -456,6 +545,9 @@ func (s *financeService) CloseCashSession(ctx context.Context, req *v1.CloseCash
 	}
 	if row.Status == entity.CashSessionClosed {
 		return nil, errCashSessionAlreadyClosed
+	}
+	if utf8.RuneCountInString(strings.TrimSpace(req.Note)) > financeNoteMaxLen {
+		return nil, errFinanceNoteTooLong
 	}
 	now := s.now()
 	cashCollected, err := s.repo.SumCashPaymentsBetween(ctx, row.BranchID, row.OpenedAt, now)
@@ -514,6 +606,12 @@ func (s *financeService) ProfitLossReport(ctx context.Context, req *v1.ProfitLos
 	branchIDs, ok := reqctx.ResolveBranchFilter(ctx, req.BranchID)
 	if !ok {
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không được xem báo cáo P&L của chi nhánh này")
+	}
+	// Chi nhánh không tồn tại → 404 (thống nhất với KPI/cohort), không trả báo cáo toàn số 0.
+	if req.BranchID > 0 {
+		if err := s.checkBranch(ctx, req.BranchID, false); err != nil {
+			return nil, err
+		}
 	}
 	now := s.now()
 	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, memberVNLoc)

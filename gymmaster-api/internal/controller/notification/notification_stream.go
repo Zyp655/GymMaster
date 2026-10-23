@@ -94,7 +94,7 @@ func (s *StreamController) resolveUserID(r *ghttp.Request) (uint, *token.Payload
 		return 0, nil, false
 	}
 	// Route SSE không đi qua middleware Authentication nên tự chặn tài khoản đã khóa/xóa.
-	if middleware.CheckUserActive(r.Context(), payload.UserID) != nil {
+	if middleware.CheckUserActive(r.Context(), payload.UserID) != nil || middleware.CheckSessionActive(r.Context(), payload.SessionID) != nil {
 		return 0, nil, false
 	}
 	return payload.UserID, payload, true
@@ -158,8 +158,12 @@ func (s *StreamController) Stream(r *ghttp.Request) {
 			return
 		case <-statusTicker.C:
 			// Chỉ đóng khi tài khoản thật sự bị khóa/xóa (401); lỗi DB tạm thời thì giữ kết nối.
-			if err := middleware.CheckUserActive(r.Context(), userID); err != nil && gerror.Code(err).Code() == rescode.Unauthorized.Code() {
-				closeWith("auth_revoked", `{"code":40100,"message":"Tài khoản đã bị khóa hoặc không còn tồn tại"}`)
+			err := middleware.CheckUserActive(r.Context(), userID)
+			if err == nil && payload != nil {
+				err = middleware.CheckSessionActive(r.Context(), payload.SessionID)
+			}
+			if err != nil && gerror.Code(err).Code() == rescode.Unauthorized.Code() {
+				closeWith("auth_revoked", `{"code":40100,"message":"Phiên đăng nhập đã bị thu hồi hoặc tài khoản đã bị khóa"}`)
 				return
 			}
 		case ev, open := <-ch:

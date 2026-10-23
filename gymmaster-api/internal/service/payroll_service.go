@@ -24,8 +24,30 @@ import (
 
 const (
 	auditEntityPayroll = "payroll"
-	defaultBaseSalary  = 10000000.0
+	auditPayrollLock   = "LOCK"
+	auditPayrollPay    = "PAY"
 )
+
+var (
+	errPayrollNotDraft   = rescode.New(rescode.PayrollLocked, "Bảng lương đã khóa hoặc đã chi trả, không thể tổng hợp lại")
+	errPayrollAlreadyPay = rescode.New(rescode.PayrollLocked, "Bảng lương đã được chi trả trước đó")
+	errPayrollCommDrift  = rescode.New(rescode.Conflict,
+		"Hoa hồng PT trong bảng lương đã thay đổi (đã chi riêng hoặc bị hủy) sau khi tổng hợp; vui lòng tổng hợp lại bảng lương")
+)
+
+// withTx chạy fn trong transaction (tx nil – trong unit test – thì chạy trực tiếp).
+func (s *payrollService) withTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx == nil {
+		return fn(ctx)
+	}
+	return s.tx.WithTx(ctx, fn)
+}
+
+func (s *payrollService) auditLog(ctx context.Context, action string, id uint, before, after any) {
+	if s.audit != nil {
+		s.audit.Log(ctx, action, auditEntityPayroll, id, before, after)
+	}
+}
 
 type (
 	PayrollService interface {
@@ -234,7 +256,7 @@ func (s *payrollService) GeneratePayroll(ctx context.Context, req *v1.GeneratePa
 	}
 	if existing != nil {
 		if existing.Status != entity.PayrollStatusDraft {
-			return nil, rescode.New(rescode.PayrollLocked, "Bảng lương kỳ này đã khóa hoặc đã chi trả, không thể tổng hợp lại")
+			return nil, errPayrollNotDraft
 		}
 		payrollID = existing.ID
 	} else {
@@ -251,39 +273,51 @@ func (s *payrollService) GeneratePayroll(ctx context.Context, req *v1.GeneratePa
 		payrollID = p.ID
 	}
 
-	sources, err := s.repo.CollectStaffPayrollSources(ctx, req.BranchID, period, pStart, pEnd)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		// Khóa bảng lương: tổng hợp không chạy song song với khóa/chi lương (kiểm lại DRAFT sau khi khóa).
+		locked, err := s.repo.LockPayrollRow(ctx, payrollID)
+		if err != nil {
+			return err
+		}
+		if locked.Status != entity.PayrollStatusDraft {
+			return errPayrollNotDraft
+		}
+		// Hoa hồng PT: chỉ khoản PENDING chưa thuộc bảng lương khác (khoản đã chi riêng không cộng lại – PR-02).
+		if err := s.repo.AttachTrainerCommissions(ctx, payrollID, req.BranchID, period); err != nil {
+			return err
+		}
+		sources, err := s.repo.CollectStaffPayrollSources(ctx, req.BranchID, payrollID, period, pStart, pEnd)
+		if err != nil {
+			return err
+		}
+		for _, src := range sources {
+			// Lương cơ bản lấy đúng hồ sơ nhân viên (0đ là 0đ – không gán mặc định), trả theo ngày công.
+			item := &entity.PayrollItem{
+				PayrollID:       payrollID,
+				StaffID:         src.StaffID,
+				BaseSalary:      src.BaseSalary,
+				WorkDays:        src.WorkDays,
+				PTCommission:    src.PTCommission,
+				SalesCommission: src.SalesCommission,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}
+			item.RecalcTotal()
+			if err := s.repo.UpsertPayrollItem(ctx, item); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	for _, src := range sources {
-		baseSalary := src.BaseSalary
-		if baseSalary <= 0 {
-			baseSalary = defaultBaseSalary
-		}
-		total := baseSalary + src.PTCommission + src.SalesCommission
-		item := &entity.PayrollItem{
-			PayrollID:       payrollID,
-			StaffID:         src.StaffID,
-			BaseSalary:      baseSalary,
-			WorkDays:        src.WorkDays,
-			PTCommission:    src.PTCommission,
-			SalesCommission: src.SalesCommission,
-			Total:           total,
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-		if err := s.repo.UpsertPayrollItem(ctx, item); err != nil {
-			return nil, err
-		}
 	}
 
 	res, err := s.GetPayroll(ctx, payrollID)
 	if err != nil {
 		return nil, err
 	}
-	if s.audit != nil {
-		s.audit.Log(ctx, AuditCreate, auditEntityPayroll, payrollID, nil, res)
-	}
+	s.auditLog(ctx, AuditCreate, payrollID, nil, res)
 	return res, nil
 }
 
@@ -389,7 +423,7 @@ func (s *payrollService) UpdatePayroll(ctx context.Context, req *v1.UpdatePayrol
 		if in.Note != nil {
 			target.Note = strings.TrimSpace(*in.Note)
 		}
-		target.Total = target.BaseSalary + target.PTCommission + target.SalesCommission + target.Bonus - target.Penalty
+		target.RecalcTotal()
 		target.UpdatedAt = now
 		if err := s.repo.UpdatePayrollItem(ctx, target); err != nil {
 			return nil, err
@@ -418,10 +452,56 @@ func (s *payrollService) LockPayroll(ctx context.Context, id uint) (*v1.PayrollD
 	p.LockedBy = reqctx.UserID(ctx)
 	p.LockedAt = &now
 	p.UpdatedAt = now
-	if err := s.repo.UpdatePayroll(ctx, &p); err != nil {
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		// Khóa dòng bảng lương rồi mới kiểm hoa hồng; UPDATE có điều kiện status = 'DRAFT' → khóa đồng thời chỉ
+		// một yêu cầu thắng.
+		if _, err := s.repo.LockPayrollRow(ctx, id); err != nil {
+			return err
+		}
+		if err := s.checkCommissionDrift(ctx, id); err != nil {
+			return err
+		}
+		ok, err := s.repo.TransitionPayroll(ctx, &p, []string{entity.PayrollStatusDraft})
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return rescode.New(rescode.PayrollLocked, "Bảng lương đã được khóa trước đó")
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
+	s.auditLog(ctx, auditPayrollLock, id, map[string]any{"status": row.Status},
+		map[string]any{"status": p.Status, "locked_by": p.LockedBy, "locked_at": p.LockedAt})
 	return s.GetPayroll(ctx, id)
+}
+
+// checkCommissionDrift: hoa hồng PT trên từng dòng lương phải khớp các hoa hồng PENDING đang gắn vào bảng lương.
+// Lệch (vd đã chi riêng qua /commissions/pay sau khi tổng hợp) → chặn khóa/chi để không trả trùng.
+func (s *payrollService) checkCommissionDrift(ctx context.Context, payrollID uint) error {
+	pending, err := s.repo.SumPayrollCommissions(ctx, payrollID)
+	if err != nil {
+		return err
+	}
+	items, err := s.repo.ListPayrollItems(ctx, payrollID)
+	if err != nil {
+		return err
+	}
+	inItems := map[uint]bool{}
+	for _, it := range items {
+		inItems[it.StaffID] = true
+		if roundMoneyVND(it.PTCommission) != roundMoneyVND(pending[it.StaffID]) {
+			return errPayrollCommDrift
+		}
+	}
+	for staffID, amt := range pending {
+		if !inItems[staffID] && amt != 0 {
+			return errPayrollCommDrift
+		}
+	}
+	return nil
 }
 
 func (s *payrollService) PayPayroll(ctx context.Context, id uint) (*v1.PayrollDetail, error) {
@@ -436,7 +516,7 @@ func (s *payrollService) PayPayroll(ctx context.Context, id uint) (*v1.PayrollDe
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không được chi lương tại chi nhánh này")
 	}
 	if row.Status == entity.PayrollStatusPaid {
-		return nil, rescode.New(rescode.PayrollLocked, "Bảng lương đã được chi trả trước đó")
+		return nil, errPayrollAlreadyPay
 	}
 	now := s.now()
 	uid := reqctx.UserID(ctx)
@@ -450,20 +530,34 @@ func (s *payrollService) PayPayroll(ctx context.Context, id uint) (*v1.PayrollDe
 	p.PaidAt = &now
 	p.UpdatedAt = now
 
-	run := func(txCtx context.Context) error {
-		if err := s.repo.UpdatePayroll(txCtx, &p); err != nil {
+	err = s.withTx(ctx, func(txCtx context.Context) error {
+		// Khóa dòng bảng lương (yêu cầu chi đồng thời xếp hàng), kiểm hoa hồng, rồi UPDATE có điều kiện
+		// status IN (DRAFT, LOCKED): chi lương song song chỉ một yêu cầu thành công (FIN-PAY-10).
+		locked, err := s.repo.LockPayrollRow(txCtx, id)
+		if err != nil {
 			return err
 		}
-		return s.repo.MarkTrainerCommissionsPaid(txCtx, p.BranchID, p.Period, uid, now)
-	}
-	if s.tx != nil {
-		err = s.tx.WithTx(ctx, run)
-	} else {
-		err = run(ctx)
-	}
+		if locked.Status == entity.PayrollStatusPaid {
+			return errPayrollAlreadyPay
+		}
+		if err := s.checkCommissionDrift(txCtx, id); err != nil {
+			return err
+		}
+		ok, err := s.repo.TransitionPayroll(txCtx, &p, []string{entity.PayrollStatusDraft, entity.PayrollStatusLocked})
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errPayrollAlreadyPay
+		}
+		// Đánh dấu đã chi đúng các hoa hồng PT đã cộng vào bảng lương này.
+		return s.repo.MarkTrainerCommissionsPaid(txCtx, p.ID, uid, now)
+	})
 	if err != nil {
 		return nil, err
 	}
+	s.auditLog(ctx, auditPayrollPay, id, map[string]any{"status": row.Status},
+		map[string]any{"status": p.Status, "paid_by": p.PaidBy, "paid_at": p.PaidAt})
 	return s.GetPayroll(ctx, id)
 }
 
@@ -475,7 +569,7 @@ func (s *payrollService) ExportPayroll(ctx context.Context, id uint) (*v1.Export
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
 	_ = w.Write([]string{
-		"Mã NV", "Họ tên", "Vị trí", "Ngày công", "Lương cơ bản",
+		"Mã NV", "Họ tên", "Vị trí", "Ngày công", "Lương cơ bản", "Lương theo ngày công",
 		"Hoa hồng PT", "Hoa hồng Sales", "Thưởng", "Phạt", "Thực lĩnh", "Ghi chú",
 	})
 	for _, it := range detail.Items {
@@ -485,6 +579,7 @@ func (s *payrollService) ExportPayroll(ctx context.Context, id uint) (*v1.Export
 			it.Position,
 			fmt.Sprintf("%.1f", it.WorkDays),
 			strconv.FormatFloat(it.BaseSalary, 'f', 0, 64),
+			strconv.FormatFloat(it.BasePay, 'f', 0, 64),
 			strconv.FormatFloat(it.PTCommission, 'f', 0, 64),
 			strconv.FormatFloat(it.SalesCommission, 'f', 0, 64),
 			strconv.FormatFloat(it.Bonus, 'f', 0, 64),
@@ -568,22 +663,24 @@ func toPayrollSummary(r repository.PayrollRow) *v1.PayrollSummary {
 
 func toPayrollLineItem(r repository.PayrollItemRow) *v1.PayrollLineItem {
 	return &v1.PayrollLineItem{
-		ID:              r.ID,
-		PayrollID:       r.PayrollID,
-		StaffID:         r.StaffID,
-		StaffCode:       r.StaffCode,
-		StaffName:       r.StaffName,
-		Position:        r.Position,
-		BaseSalary:      r.BaseSalary,
-		WorkDays:        r.WorkDays,
-		OTHours:         r.OTHours,
-		PTCommission:    r.PTCommission,
-		SalesCommission: r.SalesCommission,
-		Bonus:           r.Bonus,
-		Penalty:         r.Penalty,
-		Total:           r.Total,
-		Note:            r.Note,
-		CreatedAt:       r.CreatedAt,
-		UpdatedAt:       r.UpdatedAt,
+		ID:               r.ID,
+		PayrollID:        r.PayrollID,
+		StaffID:          r.StaffID,
+		StaffCode:        r.StaffCode,
+		StaffName:        r.StaffName,
+		Position:         r.Position,
+		BaseSalary:       r.BaseSalary,
+		WorkDays:         r.WorkDays,
+		StandardWorkDays: entity.PayrollStandardWorkDays,
+		BasePay:          r.PayrollItem.BasePay(),
+		OTHours:          r.OTHours,
+		PTCommission:     r.PTCommission,
+		SalesCommission:  r.SalesCommission,
+		Bonus:            r.Bonus,
+		Penalty:          r.Penalty,
+		Total:            r.Total,
+		Note:             r.Note,
+		CreatedAt:        r.CreatedAt,
+		UpdatedAt:        r.UpdatedAt,
 	}
 }

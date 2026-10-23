@@ -443,3 +443,45 @@ func TestOnlinePayment_CheckoutDifferentPromoVoidsOldPending(t *testing.T) {
 	assert.Equal(t, entity.SubStatusCancelled, subFx.repo.subs[a.SubscriptionID].Status)
 	assert.Equal(t, 1215000.0, b.Amount)
 }
+
+// FIN-VNP-15 (B8): giao dịch EXPIRED đã nhận IPN thất bại → IPN 00 tới sau trả 02, giữ EXPIRED, không ghi tiền.
+func TestOnlinePayment_ExpiredTxnWithFailedIPNRejectsLaterSuccess(t *testing.T) {
+	svc, repo, subFx, _ := newOnlinePaymentFixture()
+	checkoutRes, err := svc.CheckoutSubscription(memberPortalCtx(50), &v1.CheckoutSubscriptionReq{PlanID: 1}, "127.0.0.1")
+	require.NoError(t, err)
+	subFx.clock = subFx.clock.Add(16 * time.Minute)
+	_, err = svc.ExpirePendingTxns(context.Background(), subFx.clock)
+	require.NoError(t, err)
+
+	res, err := svc.HandleIPN(context.Background(), buildSignedIPNParams(testVNPayCfg.HashSecret, checkoutRes.TxnRef, checkoutRes.Amount, "24"))
+	require.NoError(t, err)
+	assert.Equal(t, "00", res.RspCode)
+	assert.Equal(t, entity.OnlineTxnExpired, repo.txns[1].Status)
+
+	res, err = svc.HandleIPN(context.Background(), buildSignedIPNParams(testVNPayCfg.HashSecret, checkoutRes.TxnRef, checkoutRes.Amount, "00"))
+	require.NoError(t, err)
+	assert.Equal(t, "02", res.RspCode)
+	assert.Equal(t, entity.OnlineTxnExpired, repo.txns[1].Status)
+	assert.Empty(t, subFx.invRep.payments[checkoutRes.InvoiceID], "không được ghi tiền sau khi giao dịch đã chốt thất bại")
+	assert.Equal(t, entity.InvoiceStatusUnpaid, subFx.invRep.invoices[checkoutRes.InvoiceID].Status)
+}
+
+// FE-05: trang kết quả với TxnRef không tồn tại (dù chữ ký hợp lệ) không được báo thành công.
+func TestOnlinePayment_VerifyReturnUnknownTxnNotSuccess(t *testing.T) {
+	svc, _, _, _ := newOnlinePaymentFixture()
+	res, err := svc.VerifyReturn(context.Background(), buildSignedIPNParams(testVNPayCfg.HashSecret, "VNP_KHONG_TON_TAI", 1, "00"))
+	require.NoError(t, err)
+	assert.False(t, res.Success)
+	assert.Zero(t, res.InvoiceID)
+	assert.Contains(t, res.Message, "Không tìm thấy giao dịch")
+}
+
+// FE-06: gói giá 0đ không đăng ký trực tuyến được.
+func TestOnlinePayment_CheckoutFreePlanRejected(t *testing.T) {
+	svc, _, subFx, _ := newOnlinePaymentFixture()
+	subFx.repo.plans[9] = &entity.MembershipPlan{BaseEntity: entity.BaseEntity{ID: 9}, Code: "FREE", Name: "Gói 0đ", Type: entity.PlanTypeTime,
+		DurationDays: 30, Price: 0, AccessScope: entity.AccessSingleBranch, Status: consts.StatusActive}
+	_, err := svc.CheckoutSubscription(memberPortalCtx(50), &v1.CheckoutSubscriptionReq{PlanID: 9, BranchID: 1}, "127.0.0.1")
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+	assert.Empty(t, subFx.repo.subs, "không tạo gói")
+}

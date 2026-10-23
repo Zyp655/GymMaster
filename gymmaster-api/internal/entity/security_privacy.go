@@ -22,8 +22,8 @@ const (
 )
 
 type UserMFA struct {
-	UserID            uint           `gorm:"primaryKey"`
-	TOTPSecretEnc     string         `gorm:"column:totp_secret_enc;type:varchar(255);not null"`
+	UserID            uint   `gorm:"primaryKey"`
+	TOTPSecretEnc     string `gorm:"column:totp_secret_enc;type:varchar(255);not null"`
 	EnabledAt         *time.Time
 	RecoveryCodesHash datatypes.JSON `gorm:"type:jsonb;not null;default:'[]'"`
 	CreatedAt         time.Time

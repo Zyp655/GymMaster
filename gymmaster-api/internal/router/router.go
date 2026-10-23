@@ -82,4 +82,3 @@ func Register(s *ghttp.Server, d *module.Deps) {
 		module.RegisterSystemExt(d, admin)
 	})
 }
-

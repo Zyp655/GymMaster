@@ -93,7 +93,7 @@ export default function VoucherModal({ voucherNo, onClose }: VoucherModalProps) 
                 children: formatNumber(v.total_quantity),
               },
               { label: 'Tổng giá trị', children: <MoneyText value={v.total_value} strong /> },
-              ...(v.note ? [{ label: 'Ghi chú', children: v.note, span: 2 }] : []),
+              ...(v.note ? [{ label: 'Ghi chú', children: v.note, span: 'filled' as const }] : []),
             ]}
           />
           <Table<StockTransaction>

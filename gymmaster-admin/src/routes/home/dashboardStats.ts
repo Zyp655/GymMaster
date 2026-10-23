@@ -16,6 +16,7 @@ export function summarizeBranches(
 ): BranchSummary {
   const allowed = allowedIds ?? [];
   const scoped = allowed.length === 0 ? branches : branches.filter((b) => allowed.includes(b.id));
-  const active = scoped.filter((b) => b.status === 'ACTIVE').length;
+  // Không có `status` (danh sách /public/branches chỉ gồm chi nhánh đang hoạt động) → tính là hoạt động.
+  const active = scoped.filter((b) => !b.status || b.status === 'ACTIVE').length;
   return { total: scoped.length, active, inactive: scoped.length - active };
 }

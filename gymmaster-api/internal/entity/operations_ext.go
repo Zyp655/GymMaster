@@ -101,10 +101,10 @@ type ContractTemplate struct {
 func (ContractTemplate) TableName() string { return "contract_templates" }
 
 type MemberContract struct {
-	ID              uint   `gorm:"primaryKey;autoIncrement"`
-	MemberID        uint   `gorm:"not null"`
-	TemplateID      uint   `gorm:"not null"`
-	TemplateVersion int    `gorm:"not null;default:1"`
+	ID              uint `gorm:"primaryKey;autoIncrement"`
+	MemberID        uint `gorm:"not null"`
+	TemplateID      uint `gorm:"not null"`
+	TemplateVersion int  `gorm:"not null;default:1"`
 	SubscriptionID  *uint
 	RenderedHTML    string `gorm:"column:rendered_html;type:text;not null;default:''"`
 	Status          string `gorm:"type:varchar(20);not null;default:'PENDING'"`
@@ -120,10 +120,10 @@ type MemberContract struct {
 func (MemberContract) TableName() string { return "member_contracts" }
 
 type DayPass struct {
-	ID              uint      `gorm:"primaryKey;autoIncrement"`
-	BranchID        uint      `gorm:"not null"`
-	BuyerName       string    `gorm:"type:varchar(150);not null"`
-	Phone           string    `gorm:"type:varchar(20);not null"`
+	ID              uint   `gorm:"primaryKey;autoIncrement"`
+	BranchID        uint   `gorm:"not null"`
+	BuyerName       string `gorm:"type:varchar(150);not null"`
+	Phone           string `gorm:"type:varchar(20);not null"`
 	MemberID        *uint
 	SponsorMemberID *uint
 	Type            string    `gorm:"type:varchar(20);not null;default:'DAY'"`
@@ -161,8 +161,8 @@ type TrainerAvailability struct {
 func (TrainerAvailability) TableName() string { return "trainer_availabilities" }
 
 type StaffLeaveRequest struct {
-	ID         uint      `gorm:"primaryKey;autoIncrement"`
-	StaffID    uint      `gorm:"not null"`
+	ID         uint `gorm:"primaryKey;autoIncrement"`
+	StaffID    uint `gorm:"not null"`
 	BranchID   *uint
 	FromAt     time.Time `gorm:"not null"`
 	ToAt       time.Time `gorm:"not null"`

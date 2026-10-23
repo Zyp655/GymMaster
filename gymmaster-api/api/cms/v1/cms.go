@@ -9,18 +9,18 @@ import (
 // ==================== PUBLIC LANDING / MARKETING (SPRINT 29) ====================
 
 type PublicTrainerItem struct {
-	ID              uint    `json:"id"`
-	UserID          uint    `json:"user_id"`
-	FullName        string  `json:"full_name"`
-	Slug            string  `json:"slug"`
-	Headline        string  `json:"headline"`
-	Bio             string  `json:"bio"`
-	Specialties     string  `json:"specialties"`
-	Certifications  string  `json:"certifications"`
-	ExperienceYears int     `json:"experience_years"`
-	AvatarURL       string  `json:"avatar_url"`
-	Featured        bool    `json:"featured"`
-	 isPublished     bool
+	ID              uint   `json:"id"`
+	UserID          uint   `json:"user_id"`
+	FullName        string `json:"full_name"`
+	Slug            string `json:"slug"`
+	Headline        string `json:"headline"`
+	Bio             string `json:"bio"`
+	Specialties     string `json:"specialties"`
+	Certifications  string `json:"certifications"`
+	ExperienceYears int    `json:"experience_years"`
+	AvatarURL       string `json:"avatar_url"`
+	Featured        bool   `json:"featured"`
+	isPublished     bool
 	IsPublished     bool    `json:"is_published"`
 	RatingAvg       float64 `json:"rating_avg"`
 	RatingCount     int     `json:"rating_count"`
@@ -261,7 +261,7 @@ type AdminUpdatePostReq struct {
 	g.Meta   `path:"/posts/{id}" method:"put" perm:"cms.manage" tags:"Quản trị – Nội dung" summary:"Cập nhật bài viết Blog"`
 	ID       uint   `json:"id" in:"path" v:"required|min:1"`
 	Slug     string `json:"slug" v:"length:3,180|regex:^[a-z0-9]+(-[a-z0-9]+)*$#Đường dẫn bài viết phải từ 3 đến 180 ký tự|Đường dẫn bài viết chỉ gồm chữ thường không dấu (a-z), số và dấu gạch ngang '-'"`
-	Title    string `json:"title" v:"max-length:255#Tiêu đề tối đa 255 ký tự"`
+	Title    string `json:"title" v:"required|max-length:255#Vui lòng nhập tiêu đề bài viết|Tiêu đề tối đa 255 ký tự"`
 	Excerpt  string `json:"excerpt"`
 	CoverURL string `json:"cover_url" v:"max-length:500#Ảnh bìa tối đa 500 ký tự"`
 	Category string `json:"category" v:"in:TAP_LUYEN,DINH_DUONG,SU_KIEN#Chuyên mục bài viết không hợp lệ"`

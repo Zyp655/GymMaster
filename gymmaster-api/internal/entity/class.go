@@ -40,9 +40,9 @@ func (ClassType) TableName() string { return "class_types" }
 
 // ClassSchedule là một buổi lớp cụ thể. SeriesID gom các buổi tạo cùng lúc theo lịch lặp tuần.
 type ClassSchedule struct {
-	ID           uint `gorm:"primaryKey;autoIncrement"`
-	ClassTypeID  uint `gorm:"not null"`
-	BranchID     uint `gorm:"not null"`
+	ID                  uint `gorm:"primaryKey;autoIncrement"`
+	ClassTypeID         uint `gorm:"not null"`
+	BranchID            uint `gorm:"not null"`
 	RoomID              uint `gorm:"not null"`
 	TrainerID           uint `gorm:"not null"`
 	SubstituteTrainerID *uint
@@ -65,14 +65,15 @@ func (ClassSchedule) TableName() string { return "class_schedules" }
 // ClassScheduleDetail là buổi lớp kèm thông tin hiển thị lấy bằng JOIN.
 type ClassScheduleDetail struct {
 	ClassSchedule
-	ClassTypeCode  string
-	ClassTypeName  string
-	ClassTypeColor string
-	BranchName     string
-	RoomName       string
-	TrainerName    string
-	WaitlistCount  int
-	AttendedCount  int
+	ClassTypeCode         string
+	ClassTypeName         string
+	ClassTypeColor        string
+	BranchName            string
+	RoomName              string
+	TrainerName           string
+	SubstituteTrainerName string // tên HLV dạy thay ("" nếu không có)
+	WaitlistCount         int
+	AttendedCount         int
 }
 
 // ClassBooking là một lượt đặt chỗ của hội viên.
@@ -106,9 +107,10 @@ type ClassBookingDetail struct {
 	BranchID       uint
 	BranchName     string
 	RoomName       string
-	TrainerID      uint
+	TrainerID      uint // HLV thực dạy (HLV dạy thay nếu có)
 	TrainerName    string
 	StartAt        time.Time
 	EndAt          time.Time
 	ScheduleStatus string
+	WaitlistRank   *int // thứ hạng hiện tại trong danh sách chờ (1, 2, …); nil nếu không WAITLIST
 }

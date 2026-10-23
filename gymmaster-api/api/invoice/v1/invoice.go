@@ -172,7 +172,7 @@ type PaymentListReq struct {
 	g.Meta `path:"/payments" method:"get" tags:"Hóa đơn" summary:"Sổ thu tiền" perm:"invoice.view"`
 	dto.PageReq
 	BranchID   uint   `json:"branch_id"   in:"query"`
-	Method     string `json:"method"      in:"query" v:"in:CASH,TRANSFER,CARD#Phương thức không hợp lệ"`
+	Method     string `json:"method"      in:"query" v:"in:CASH,TRANSFER,CARD,VNPAY#Phương thức không hợp lệ" dc:"CASH | TRANSFER | CARD | VNPAY"`
 	From       string `json:"from"        in:"query" v:"date-format:Y-m-d#Từ ngày phải có dạng YYYY-MM-DD"`
 	To         string `json:"to"          in:"query" v:"date-format:Y-m-d#Đến ngày phải có dạng YYYY-MM-DD"`
 	ReceivedBy uint   `json:"received_by" in:"query" dc:"Người thu (users.id)"`
@@ -197,7 +197,7 @@ type MethodTotal struct {
 type PaymentSummary struct {
 	TotalAmount float64        `json:"total_amount"`
 	Count       int64          `json:"count"`
-	ByMethod    []*MethodTotal `json:"by_method" dc:"Luôn đủ 3 phương thức CASH, TRANSFER, CARD"`
+	ByMethod    []*MethodTotal `json:"by_method" dc:"Sổ thu tiền: luôn đủ 4 phương thức CASH, TRANSFER, CARD, VNPAY (tổng = Σ mọi phương thức)"`
 }
 
 type PaymentListRes struct {

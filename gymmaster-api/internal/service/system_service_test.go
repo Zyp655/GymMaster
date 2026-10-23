@@ -165,11 +165,11 @@ type fakeJobScheduler struct {
 	runResult *entity.JobRun
 }
 
-func (f *fakeJobScheduler) Jobs() []cron.Job              { return f.jobs }
-func (f *fakeJobScheduler) Scheduled() bool               { return f.scheduled }
-func (f *fakeJobScheduler) IsRunning(name string) bool    { return f.running[name] }
-func (f *fakeJobScheduler) NextRun(string) *time.Time     { return &f.nextAt }
-func (f *fakeJobScheduler) NextBySpec(string) *time.Time  { return &f.nextAt }
+func (f *fakeJobScheduler) Jobs() []cron.Job             { return f.jobs }
+func (f *fakeJobScheduler) Scheduled() bool              { return f.scheduled }
+func (f *fakeJobScheduler) IsRunning(name string) bool   { return f.running[name] }
+func (f *fakeJobScheduler) NextRun(string) *time.Time    { return &f.nextAt }
+func (f *fakeJobScheduler) NextBySpec(string) *time.Time { return &f.nextAt }
 func (f *fakeJobScheduler) Run(_ context.Context, name string) (*entity.JobRun, error) {
 	if f.runErr != nil {
 		return nil, f.runErr
@@ -497,8 +497,8 @@ type fakeSettingStore struct {
 	rows map[string]entity.Setting
 }
 
-func (f *fakeSettingStore) Int(context.Context, string, int) int             { return 0 }
-func (f *fakeSettingStore) IntSlice(context.Context, string, []int) []int    { return nil }
+func (f *fakeSettingStore) Int(context.Context, string, int) int          { return 0 }
+func (f *fakeSettingStore) IntSlice(context.Context, string, []int) []int { return nil }
 func (f *fakeSettingStore) All(context.Context) ([]entity.Setting, error) {
 	out := make([]entity.Setting, 0, len(f.rows))
 	for _, r := range f.rows {

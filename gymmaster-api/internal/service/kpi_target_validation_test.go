@@ -19,6 +19,7 @@ import (
 
 // mockKPIRepo (kpi_scheduleext_service_test.go): mọi chi nhánh/nhân viên đều hợp lệ.
 func (m *mockKPIRepo) BranchExists(context.Context, uint) (bool, error) { return true, nil }
+func (m *mockKPIRepo) BranchActive(context.Context, uint) (bool, error) { return true, nil }
 func (m *mockKPIRepo) StaffBranchStatus(context.Context, uint, uint) (bool, bool, error) {
 	return true, true, nil
 }
@@ -29,10 +30,14 @@ type kpiScopedRepo struct {
 	branches map[uint]bool
 	staff    map[uint]map[uint]bool // staffID → branchID → true; nil map = không phải nhân viên
 	actualBy map[uint]repository.KPIActuals
+	inactive map[uint]bool // chi nhánh tồn tại nhưng ngừng hoạt động
 }
 
 func (r *kpiScopedRepo) BranchExists(_ context.Context, id uint) (bool, error) {
 	return r.branches[id], nil
+}
+func (r *kpiScopedRepo) BranchActive(_ context.Context, id uint) (bool, error) {
+	return r.branches[id] && !r.inactive[id], nil
 }
 func (r *kpiScopedRepo) StaffBranchStatus(_ context.Context, staffID, branchID uint) (bool, bool, error) {
 	b, ok := r.staff[staffID]
@@ -129,4 +134,17 @@ func TestKPIService_SystemWideComparesOnlyBranchesWithTargets(t *testing.T) {
 	assert.False(t, nm.HasTarget)
 	assert.Equal(t, float64(40), nm.Actual, "chưa đặt chỉ tiêu → thực tế toàn hệ thống")
 	assert.Equal(t, 0.0, nm.AchievementPct)
+}
+
+// D5 (FIN-RPT-12): đặt chỉ tiêu cho chi nhánh ngừng hoạt động → 400.
+func TestKPIService_CreateSalesTargetRejectsInactiveBranch(t *testing.T) {
+	svc, repo := newKPIScopedService()
+	repo.branches[3] = true
+	repo.inactive = map[uint]bool{3: true}
+	owner := reqctx.WithAuth(context.Background(), &token.Payload{UserID: 1, Roles: []string{consts.RoleOwner}})
+	_, err := svc.CreateSalesTarget(owner, &kpiv1.CreateSalesTargetReq{BranchID: 3, Period: "2026-10",
+		Metric: entity.KPIMetricRevenue, TargetValue: 1000})
+	require.Error(t, err)
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+	assert.Contains(t, err.Error(), "ngừng hoạt động")
 }

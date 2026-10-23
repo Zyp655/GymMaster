@@ -192,7 +192,7 @@ type DeleteFoodReq struct {
 type DeleteEngagementRes struct{}
 
 type ListMealPlansReq struct {
-	g.Meta    `path:"/meal-plans" method:"get" tags:"Dinh dưỡng & Tương tác" summary:"Danh sách thực đơn dinh dưỡng" perm:"engagement.view,engagement.manage"`
+	g.Meta `path:"/meal-plans" method:"get" tags:"Dinh dưỡng & Tương tác" summary:"Danh sách thực đơn dinh dưỡng" perm:"engagement.view,engagement.manage"`
 	dto.PageReq
 	MemberID  uint   `json:"member_id"  in:"query"`
 	TrainerID uint   `json:"trainer_id" in:"query"`
@@ -225,7 +225,7 @@ type DeleteMealPlanReq struct {
 }
 
 type ListAnnouncementsReq struct {
-	g.Meta   `path:"/announcements" method:"get" tags:"Dinh dưỡng & Tương tác" summary:"Danh sách thông báo bảng tin" perm:"engagement.view,engagement.manage"`
+	g.Meta `path:"/announcements" method:"get" tags:"Dinh dưỡng & Tương tác" summary:"Danh sách thông báo bảng tin" perm:"engagement.view,engagement.manage"`
 	dto.PageReq
 	BranchID uint `json:"branch_id" in:"query"`
 }
@@ -296,11 +296,33 @@ type NPSReportRes struct {
 
 type MemberNutritionOverviewReq struct {
 	g.Meta `path:"/meal-plans" method:"get" tags:"Cổng hội viên" summary:"Tổng quan dinh dưỡng & thực đơn của tôi" role:"MEMBER"`
+	Goal   string `json:"goal" in:"query" dc:"Mục tiêu để chọn goal_target: CUT (giảm mỡ) | MAINTAIN (duy trì) | BULK (tăng cơ). Bỏ trống = suy từ thực đơn đang áp dụng, mặc định MAINTAIN"`
 }
+
+// NutritionGoalTarget: gợi ý calo & macro/ngày theo một mục tiêu (NU-01).
+type NutritionGoalTarget struct {
+	Goal          string `json:"goal"           dc:"CUT | MAINTAIN | BULK"`
+	Label         string `json:"label"          dc:"Tên mục tiêu tiếng Việt"`
+	AdjustmentPct int    `json:"adjustment_pct" dc:"Điều chỉnh so với TDEE (%): CUT -20, MAINTAIN 0, BULK +10"`
+	Calories      int    `json:"calories"       dc:"kcal/ngày"`
+	ProteinG      int    `json:"protein_g"`
+	CarbsG        int    `json:"carbs_g"`
+	FatG          int    `json:"fat_g"`
+}
+
 type MemberNutritionOverviewRes struct {
-	RecommendedCalories int               `json:"recommended_calories"`
+	RecommendedCalories int               `json:"recommended_calories" dc:"Calo duy trì (TDEE) – giữ như cũ"`
 	Plans               []*MealPlanDetail `json:"plans"`
 	Foods               []*FoodItem       `json:"foods"`
+	// NU-01: gợi ý theo mục tiêu (bổ sung, không đổi các trường cũ).
+	BMR            int                    `json:"bmr"             dc:"BMR Mifflin–St Jeor (0 khi chưa có chỉ số cơ thể)"`
+	TDEE           int                    `json:"tdee"            dc:"BMR × hệ số vận động (= recommended_calories)"`
+	ActivityFactor float64                `json:"activity_factor" dc:"Hệ số vận động (1.55 – vận động vừa)"`
+	HasBodyMetric  bool                   `json:"has_body_metric" dc:"false → TDEE là giá trị mặc định 2000 kcal"`
+	Goal           string                 `json:"goal"            dc:"Mục tiêu đang áp dụng: CUT | MAINTAIN | BULK"`
+	GoalSource     string                 `json:"goal_source"     dc:"QUERY (tham số goal) | MEAL_PLAN (suy từ thực đơn) | DEFAULT"`
+	GoalTarget     *NutritionGoalTarget   `json:"goal_target"     dc:"Gợi ý cho mục tiêu đang áp dụng"`
+	GoalTargets    []*NutritionGoalTarget `json:"goal_targets"    dc:"Gợi ý cho cả 3 mục tiêu (CUT, MAINTAIN, BULK)"`
 }
 
 type MemberFoodLogsReq struct {

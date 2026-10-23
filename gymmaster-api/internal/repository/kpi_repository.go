@@ -50,6 +50,8 @@ type (
 
 		// BranchExists: chi nhánh tồn tại và chưa bị xóa mềm.
 		BranchExists(ctx context.Context, branchID uint) (bool, error)
+		// BranchActive: chi nhánh tồn tại, chưa xóa và đang hoạt động (status = ACTIVE).
+		BranchActive(ctx context.Context, branchID uint) (bool, error)
 		// StaffBranchStatus: exists = tài khoản nhân viên (có vai trò khác MEMBER) đang ACTIVE, chưa xóa;
 		// inBranch = có vai trò tại branchID hoặc vai trò toàn hệ thống (branch_id NULL).
 		StaffBranchStatus(ctx context.Context, staffID, branchID uint) (exists, inBranch bool, err error)
@@ -72,9 +74,8 @@ func (r *kpiRepository) ListBranchOccupancy(ctx context.Context, since time.Time
 	var rows []BranchOccupancyRow
 	err := postgres.Conn(ctx, r.db).Table("branches b").
 		Select(`b.id AS branch_id, b.code AS branch_code, b.name AS branch_name, COALESCE(b.capacity, 120) AS capacity,
-			(SELECT COUNT(DISTINCT COALESCE('m' || ck.member_id::text, 'd' || ck.day_pass_id::text, 't' || ck.trial_pass_id::text)) FROM checkins ck
-			 WHERE ck.branch_id = b.id AND ck.result = 'ALLOWED'
-			   AND ck.checked_in_at >= ? AND ck.checked_out_at IS NULL) AS present_count`, since).
+			(SELECT COUNT(DISTINCT `+presentPersonKey("ck")+`) FROM checkins ck
+			 WHERE ck.branch_id = b.id AND `+presentCond("ck")+`) AS present_count`, since).
 		Where("b.deleted_at IS NULL AND b.status = 'ACTIVE'").
 		Order("b.id ASC").
 		Scan(&rows).Error
@@ -161,6 +162,13 @@ func (r *kpiRepository) BranchExists(ctx context.Context, branchID uint) (bool, 
 	return n > 0, err
 }
 
+func (r *kpiRepository) BranchActive(ctx context.Context, branchID uint) (bool, error) {
+	var n int64
+	err := postgres.Conn(ctx, r.db).Table("branches").
+		Where("id = ? AND deleted_at IS NULL AND status = 'ACTIVE'", branchID).Count(&n).Error
+	return n > 0, err
+}
+
 func (r *kpiRepository) StaffBranchStatus(ctx context.Context, staffID, branchID uint) (exists, inBranch bool, err error) {
 	var row struct {
 		Total    int64
@@ -206,11 +214,12 @@ func (r *kpiRepository) ComputeKPIActuals(ctx context.Context, branchID uint, fr
 	}
 	out.NewMembers = float64(newMembers)
 
-	// 3. RENEWALS: subscriptions created in [from, to) with previous_id IS NOT NULL or RENEWED event
+	// 3. RENEWALS: chỉ đếm sự kiện gia hạn (subscription_events.event_type = 'RENEWED') trong [from, to) – cùng định
+	// nghĩa với báo cáo Gói tập (cột "Gia hạn"); KHÔNG đếm nâng cấp/chuyển nhượng/gói nối tiếp (previous_id) như trước.
 	var renewals int64
-	renTx := conn.Table("subscriptions s").
-		Where("s.status <> 'CANCELLED' AND s.created_at >= ? AND s.created_at < ?", from, to).
-		Where("(s.previous_id IS NOT NULL OR EXISTS (SELECT 1 FROM subscription_events se WHERE se.subscription_id = s.id AND se.event_type = 'RENEWED'))")
+	renTx := conn.Table("subscription_events se").
+		Joins("JOIN subscriptions s ON s.id = se.subscription_id").
+		Where("se.event_type = 'RENEWED' AND se.created_at >= ? AND se.created_at < ?", from, to)
 	if branchID > 0 {
 		renTx = renTx.Where("s.branch_id = ?", branchID)
 	}

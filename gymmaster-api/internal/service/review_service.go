@@ -177,6 +177,7 @@ func (s *reviewService) Create(ctx context.Context, req *v1.CreateReviewReq) (*v
 	if s.audit != nil {
 		s.audit.Log(ctx, AuditCreate, auditEntityReview, rev.ID, nil, res)
 	}
+	awardReviewPoints(ctx, m.ID, rev.ID)
 	return res, nil
 }
 

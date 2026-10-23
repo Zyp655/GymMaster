@@ -7,31 +7,33 @@ import (
 )
 
 type ClassSchedule struct {
-	ID             uint      `json:"id"`
-	ClassTypeID    uint      `json:"class_type_id"`
-	ClassTypeCode  string    `json:"class_type_code"`
-	ClassTypeName  string    `json:"class_type_name"`
-	ClassTypeColor string    `json:"class_type_color"`
-	BranchID       uint      `json:"branch_id"`
-	BranchName     string    `json:"branch_name"`
-	RoomID         uint      `json:"room_id"`
-	RoomName       string    `json:"room_name"`
-	TrainerID      uint      `json:"trainer_id"`
-	TrainerName    string    `json:"trainer_name"`
-	StartAt        time.Time `json:"start_at"`
-	EndAt          time.Time `json:"end_at"`
-	DurationMin    int       `json:"duration_min"`
-	Capacity       int       `json:"capacity"`
-	BookedCount    int       `json:"booked_count"`
-	WaitlistCount  int       `json:"waitlist_count"`
-	AttendedCount  int       `json:"attended_count"`
-	AvailableSlots int       `json:"available_slots"`
-	Status         string    `json:"status"`
-	SeriesID       string    `json:"series_id"`
-	CancelReason   string    `json:"cancel_reason"`
-	Note           string    `json:"note"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                    uint      `json:"id"`
+	ClassTypeID           uint      `json:"class_type_id"`
+	ClassTypeCode         string    `json:"class_type_code"`
+	ClassTypeName         string    `json:"class_type_name"`
+	ClassTypeColor        string    `json:"class_type_color"`
+	BranchID              uint      `json:"branch_id"`
+	BranchName            string    `json:"branch_name"`
+	RoomID                uint      `json:"room_id"`
+	RoomName              string    `json:"room_name"`
+	TrainerID             uint      `json:"trainer_id"`
+	TrainerName           string    `json:"trainer_name"`
+	SubstituteTrainerID   *uint     `json:"substitute_trainer_id"` // HLV dạy thay (null nếu không có); HLV thực dạy = substitute ?? trainer
+	SubstituteTrainerName string    `json:"substitute_trainer_name"`
+	StartAt               time.Time `json:"start_at"`
+	EndAt                 time.Time `json:"end_at"`
+	DurationMin           int       `json:"duration_min"`
+	Capacity              int       `json:"capacity"`
+	BookedCount           int       `json:"booked_count"`
+	WaitlistCount         int       `json:"waitlist_count"`
+	AttendedCount         int       `json:"attended_count"`
+	AvailableSlots        int       `json:"available_slots"`
+	Status                string    `json:"status"`
+	SeriesID              string    `json:"series_id"`
+	CancelReason          string    `json:"cancel_reason"`
+	Note                  string    `json:"note"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 type ListScheduleReq struct {

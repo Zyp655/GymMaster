@@ -22,8 +22,17 @@ export function checkinColumns({ showMember = true } = {}): ColumnsType<CheckinI
       title: 'Thời điểm',
       dataIndex: 'checked_in_at',
       sorter: true,
-      width: 160,
-      render: (v: string) => <DateText value={v} format="DD/MM/YYYY HH:mm:ss" />,
+      width: 110,
+      // Ngày / giờ hai dòng để bảng vừa khung 1440 (C11).
+      render: (v: string) => (
+        <div style={{ lineHeight: 1.3 }}>
+          <DateText value={v} format="DD/MM/YYYY" />
+          <br />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            <DateText value={v} format="HH:mm:ss" relative={false} />
+          </Typography.Text>
+        </div>
+      ),
     },
     ...(showMember
       ? ([
@@ -54,10 +63,9 @@ export function checkinColumns({ showMember = true } = {}): ColumnsType<CheckinI
     {
       title: 'Kết quả',
       dataIndex: 'result',
-      width: 240,
       // Giới hạn bề rộng để lý do từ chối dài tự xuống dòng, không đẩy các cột sau ra khỏi khung nhìn.
       render: (_, r) => (
-        <div style={{ maxWidth: 240, whiteSpace: 'normal' }}>
+        <div style={{ maxWidth: 190, whiteSpace: 'normal' }}>
           <Tag color={CHECKIN_RESULT_MAP[r.result].color} bordered={false}>
             {CHECKIN_RESULT_MAP[r.result].label}
           </Tag>
@@ -74,7 +82,7 @@ export function checkinColumns({ showMember = true } = {}): ColumnsType<CheckinI
       dataIndex: 'plan_name',
       render: (v: string | null) =>
         v ? (
-          <div style={{ maxWidth: 180, whiteSpace: 'normal' }}>{v}</div>
+          <div style={{ maxWidth: 150, whiteSpace: 'normal' }}>{v}</div>
         ) : (
           <Typography.Text type="secondary">—</Typography.Text>
         ),
@@ -105,7 +113,7 @@ export function checkinColumns({ showMember = true } = {}): ColumnsType<CheckinI
       title: 'Nhân viên',
       dataIndex: 'staff_name',
       render: (v: string | null, r) => (
-        <div style={{ maxWidth: 200, whiteSpace: 'normal' }}>
+        <div style={{ maxWidth: 160, whiteSpace: 'normal' }}>
           {v ?? '—'}
           {r.note && (
             <>

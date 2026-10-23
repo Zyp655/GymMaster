@@ -125,6 +125,8 @@ export interface LegacyImportRow {
   remaining_sessions?: number;
   pt_package_code?: string;
   pt_remaining_sessions?: number;
+  /** Email HLV phụ trách hợp đồng PT chuyển sang – bắt buộc khi có `pt_package_code`. */
+  pt_trainer_email?: string;
   debt_amount?: number;
 }
 

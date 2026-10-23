@@ -18,7 +18,11 @@ import { CheckOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
-import notificationApi, { NOTIFICATION_TYPE_LABEL, toAppLink } from '@/api/notification';
+import notificationApi, {
+  NOTIFICATION_TYPE_LABEL,
+  notificationTypeLabel,
+  toAppLink,
+} from '@/api/notification';
 import type { Notification, NotificationListParams } from '@/api/notification';
 import PageTitle from '@/components/PageTitle';
 import { useTableQuery } from '@/hooks/useTableQuery';
@@ -172,7 +176,7 @@ export default function NotificationsPage() {
                     <div className="notif-row__title">
                       {n.title}{' '}
                       <Tag bordered={false} style={{ marginLeft: 6, fontWeight: 400 }}>
-                        {NOTIFICATION_TYPE_LABEL[n.type] ?? n.type}
+                        {notificationTypeLabel(n.type)}
                       </Tag>
                     </div>
                     {n.body && (

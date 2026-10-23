@@ -282,8 +282,30 @@ func (f *fakeLoyaltyRepo) AddMemberPoints(_ context.Context, memberID uint, delt
 	if !ok {
 		return 0, gorm.ErrRecordNotFound
 	}
+	if m.LoyaltyPoints+delta < 0 {
+		return 0, repository.ErrInsufficientPoints
+	}
 	m.LoyaltyPoints += delta
 	return m.LoyaltyPoints, nil
+}
+
+func (f *fakeLoyaltyRepo) LockMember(_ context.Context, id uint) (*entity.Member, error) {
+	if m, ok := f.members[id]; ok {
+		cp := *m
+		return &cp, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (f *fakeLoyaltyRepo) CreateLedgerOnce(ctx context.Context, l *entity.LoyaltyLedger) (bool, error) {
+	if l.RefID != nil {
+		for _, e := range f.ledgers {
+			if e.MemberID == l.MemberID && e.Reason == l.Reason && e.RefType == l.RefType && e.RefID != nil && *e.RefID == *l.RefID {
+				return false, nil
+			}
+		}
+	}
+	return true, f.CreateLedger(ctx, l)
 }
 
 func (f *fakeLoyaltyRepo) UpdateMemberReferralCode(_ context.Context, memberID uint, code string) error {

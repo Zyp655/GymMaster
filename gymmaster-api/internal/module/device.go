@@ -40,7 +40,7 @@ func DeviceServiceOf(d *Deps) service.DeviceService {
 		cron.Register(cron.Job{
 			Name:        service.JobDeviceHeartbeatCheck,
 			Spec:        "*/5 * * * *",
-			Description: "Đánh dấu OFFLINE các thiết bị kiểm soát ra vào không gửi heartbeat quá 10 phút",
+			Description: "Đánh dấu Mất kết nối các thiết bị kiểm soát ra vào không gửi tín hiệu quá 10 phút",
 			Run: func(ctx context.Context) (int, error) {
 				return s.CheckOfflineDevices(ctx, time.Now())
 			},

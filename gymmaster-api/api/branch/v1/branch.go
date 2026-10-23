@@ -32,6 +32,8 @@ type BranchInput struct {
 	OpenTime  string `json:"open_time"  v:"required|regex:^([01][0-9]|2[0-3]):[0-5][0-9]$#Vui lòng nhập giờ mở cửa|Giờ mở cửa phải có dạng HH:mm"`
 	CloseTime string `json:"close_time" v:"required|regex:^([01][0-9]|2[0-3]):[0-5][0-9]$#Vui lòng nhập giờ đóng cửa|Giờ đóng cửa phải có dạng HH:mm"`
 	Status    string `json:"status"     v:"required|in:ACTIVE,INACTIVE#Vui lòng chọn trạng thái|Trạng thái không hợp lệ" d:"ACTIVE"`
+	// Force: vẫn lưu giờ mở cửa mới dù còn lớp/buổi PT tương lai nằm ngoài khung giờ (chỉ dùng khi cập nhật).
+	Force bool `json:"force" dc:"true = bỏ qua cảnh báo lớp/PT tương lai nằm ngoài giờ mở cửa mới"`
 }
 
 type ListReq struct {

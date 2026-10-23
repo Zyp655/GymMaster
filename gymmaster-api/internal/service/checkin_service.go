@@ -719,6 +719,10 @@ func (s *checkinService) process(ctx context.Context, a checkinAttempt) (*v1.Sca
 	if err != nil {
 		return nil, err
 	}
+	// Tích điểm check-in (tối đa 1 lần/ngày) sau khi transaction đã commit – lỗi tích điểm không ảnh hưởng lượt vào.
+	if res != nil && res.Result == entity.CheckinAllowed && res.Checkin != nil && res.Member != nil {
+		awardCheckinPoints(ctx, res.Member.ID, res.Checkin.CheckedInAt)
+	}
 	return res, nil
 }
 
@@ -782,7 +786,8 @@ func (s *checkinService) Present(ctx context.Context, branchID uint) (v1.Present
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không được xem chi nhánh này")
 	}
 	now := s.now()
-	rows, err := s.repo.Present(ctx, branchIDs, checkinStartOfDay(now))
+	// Cùng định nghĩa với Mật độ & dashboard: chưa checkout, vào trong repository.PresentWindow gần nhất.
+	rows, err := s.repo.Present(ctx, branchIDs, repository.PresentSince(now))
 	if err != nil {
 		return nil, err
 	}
@@ -885,7 +890,13 @@ func (s *checkinService) Stats(ctx context.Context, branchID uint, date string) 
 		d := checkinStartOfDay(s.now())
 		day = &d
 	}
-	rows, err := s.repo.Stats(ctx, branchIDs, *day, day.AddDate(0, 0, 1))
+	// "Đang trong phòng tập" chỉ có nghĩa với hôm nay (định nghĩa chung repository.PresentSince); ngày khác → 0.
+	var presentSince *time.Time
+	if now := s.now(); day.Equal(checkinStartOfDay(now)) {
+		ps := repository.PresentSince(now)
+		presentSince = &ps
+	}
+	rows, err := s.repo.Stats(ctx, branchIDs, *day, day.AddDate(0, 0, 1), presentSince)
 	if err != nil {
 		return nil, err
 	}

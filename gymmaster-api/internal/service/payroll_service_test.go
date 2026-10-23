@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -28,6 +29,9 @@ type fakePayrollRepo struct {
 	items         map[uint]*entity.PayrollItem
 	sources       []repository.StaffPayrollSource
 	paidComm      bool
+	paidCommCalls int
+	// pendingComm: hoa hồng PT PENDING đang gắn vào bảng lương (theo HLV) – mô phỏng trainer_commissions.payroll_id.
+	pendingComm map[uint]float64
 }
 
 func newFakePayrollRepo() *fakePayrollRepo {
@@ -148,7 +152,7 @@ func (f *fakePayrollRepo) UpsertPayrollItem(_ context.Context, item *entity.Payr
 			existing.WorkDays = item.WorkDays
 			existing.PTCommission = item.PTCommission
 			existing.SalesCommission = item.SalesCommission
-			existing.Total = existing.BaseSalary + existing.PTCommission + existing.SalesCommission + existing.Bonus - existing.Penalty
+			existing.RecalcTotal()
 			*item = *existing
 			return nil
 		}
@@ -166,13 +170,52 @@ func (f *fakePayrollRepo) UpdatePayrollItem(_ context.Context, item *entity.Payr
 	return nil
 }
 
-func (f *fakePayrollRepo) CollectStaffPayrollSources(context.Context, uint, string, time.Time, time.Time) ([]repository.StaffPayrollSource, error) {
+func (f *fakePayrollRepo) CollectStaffPayrollSources(context.Context, uint, uint, string, time.Time, time.Time) ([]repository.StaffPayrollSource, error) {
 	return f.sources, nil
 }
 
-func (f *fakePayrollRepo) MarkTrainerCommissionsPaid(context.Context, uint, string, *uint, time.Time) error {
+func (f *fakePayrollRepo) MarkTrainerCommissionsPaid(context.Context, uint, *uint, time.Time) error {
 	f.paidComm = true
+	f.paidCommCalls++
+	f.pendingComm = nil
 	return nil
+}
+
+func (f *fakePayrollRepo) LockPayrollRow(_ context.Context, id uint) (*entity.Payroll, error) {
+	if p, ok := f.payrolls[id]; ok {
+		cp := *p
+		return &cp, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (f *fakePayrollRepo) TransitionPayroll(_ context.Context, p *entity.Payroll, from []string) (bool, error) {
+	cur, ok := f.payrolls[p.ID]
+	if !ok || !slices.Contains(from, cur.Status) {
+		return false, nil
+	}
+	cp := *p
+	f.payrolls[p.ID] = &cp
+	return true, nil
+}
+
+// AttachTrainerCommissions: mặc định gắn đúng PT commission của nguồn (khớp, không lệch).
+func (f *fakePayrollRepo) AttachTrainerCommissions(context.Context, uint, uint, string) error {
+	f.pendingComm = map[uint]float64{}
+	for _, src := range f.sources {
+		if src.PTCommission != 0 {
+			f.pendingComm[src.StaffID] = src.PTCommission
+		}
+	}
+	return nil
+}
+
+func (f *fakePayrollRepo) SumPayrollCommissions(context.Context, uint) (map[uint]float64, error) {
+	out := map[uint]float64{}
+	for k, v := range f.pendingComm {
+		out[k] = v
+	}
+	return out, nil
 }
 
 func (f *fakePayrollRepo) ListPayslipsByStaff(_ context.Context, staffID uint) ([]repository.PayslipRow, error) {
@@ -240,7 +283,9 @@ func TestPayrollService_AttendanceAndPayrollLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, entity.PayrollStatusDraft, detail.Status)
 	require.Len(t, detail.Items, 1)
-	assert.Equal(t, float64(15500000), detail.Items[0].Total)
+	// Lương CB theo ngày công: 12.000.000 × 24/26 = 11.076.923 (+3.000.000 PT +500.000 sales).
+	assert.Equal(t, float64(11076923), detail.Items[0].BasePay)
+	assert.Equal(t, float64(14576923), detail.Items[0].Total)
 
 	// 4. Update bonus and penalty while DRAFT
 	bonus := 1000000.0
@@ -252,7 +297,7 @@ func TestPayrollService_AttendanceAndPayrollLifecycle(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, float64(16300000), updated.Items[0].Total)
+	assert.Equal(t, float64(15376923), updated.Items[0].Total)
 
 	// 5. Lock payroll -> further UpdatePayroll returns PayrollLocked
 	locked, err := svc.LockPayroll(ctx, detail.ID)

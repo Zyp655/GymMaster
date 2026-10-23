@@ -73,8 +73,8 @@ func (WorkoutPlanItem) TableName() string { return "workout_plan_items" }
 
 // WorkoutLog là nhật ký buổi tập do hội viên tự ghi nhận.
 type WorkoutLog struct {
-	ID          uint      `gorm:"primaryKey;autoIncrement"`
-	MemberID    uint      `gorm:"not null"`
+	ID          uint `gorm:"primaryKey;autoIncrement"`
+	MemberID    uint `gorm:"not null"`
 	PlanItemID  *uint
 	ExerciseID  uint      `gorm:"not null"`
 	PerformedAt time.Time `gorm:"not null"`

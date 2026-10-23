@@ -29,17 +29,17 @@ const (
 
 // TrainerPublicProfile là hồ sơ HLV công khai trên trang chủ / landing page.
 type TrainerPublicProfile struct {
-	ID              uint      `gorm:"primaryKey;autoIncrement"`
-	UserID          uint      `gorm:"not null;unique"`
-	Slug            string    `gorm:"type:varchar(120);not null;unique"`
-	Headline        string    `gorm:"type:varchar(255);not null;default:''"`
-	Bio             string    `gorm:"type:text;not null;default:''"`
-	Specialties     string    `gorm:"type:text;not null;default:''"`
-	Certifications  string    `gorm:"type:text;not null;default:''"`
-	ExperienceYears int       `gorm:"not null;default:1"`
-	AvatarURL       string    `gorm:"column:avatar_url;type:varchar(500);not null;default:''"`
-	Featured        bool      `gorm:"not null;default:false"`
-	IsPublished     bool      `gorm:"not null;default:true"`
+	ID              uint   `gorm:"primaryKey;autoIncrement"`
+	UserID          uint   `gorm:"not null;unique"`
+	Slug            string `gorm:"type:varchar(120);not null;unique"`
+	Headline        string `gorm:"type:varchar(255);not null;default:''"`
+	Bio             string `gorm:"type:text;not null;default:''"`
+	Specialties     string `gorm:"type:text;not null;default:''"`
+	Certifications  string `gorm:"type:text;not null;default:''"`
+	ExperienceYears int    `gorm:"not null;default:1"`
+	AvatarURL       string `gorm:"column:avatar_url;type:varchar(500);not null;default:''"`
+	Featured        bool   `gorm:"not null;default:false"`
+	IsPublished     bool   `gorm:"not null;default:true"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -48,7 +48,7 @@ func (TrainerPublicProfile) TableName() string { return "trainer_public_profiles
 
 // Testimonial là cảm nhận hội viên hiển thị trên landing page (sau khi admin duyệt).
 type Testimonial struct {
-	ID              uint   `gorm:"primaryKey;autoIncrement"`
+	ID              uint `gorm:"primaryKey;autoIncrement"`
 	MemberID        *uint
 	AuthorName      string `gorm:"type:varchar(150);not null"`
 	AuthorRole      string `gorm:"type:varchar(120);not null;default:''"`
@@ -85,7 +85,7 @@ func (Post) TableName() string { return "posts" }
 
 // ContactMessage là lời nhắn liên hệ gửi từ trang chủ.
 type ContactMessage struct {
-	ID          uint   `gorm:"primaryKey;autoIncrement"`
+	ID          uint `gorm:"primaryKey;autoIncrement"`
 	BranchID    *uint
 	FullName    string `gorm:"type:varchar(150);not null"`
 	Phone       string `gorm:"type:varchar(30);not null"`
@@ -103,10 +103,13 @@ func (ContactMessage) TableName() string { return "contact_messages" }
 
 // Conversation là cuộc trò chuyện giữa HLV và hội viên gắn với một hợp đồng PT.
 type Conversation struct {
-	ID                 uint `gorm:"primaryKey;autoIncrement"`
-	PTContractID       uint `gorm:"column:pt_contract_id;not null;unique"`
-	MemberID           uint `gorm:"not null"`
-	TrainerID          uint `gorm:"not null"`
+	ID           uint `gorm:"primaryKey;autoIncrement"`
+	PTContractID uint `gorm:"column:pt_contract_id;not null;unique"`
+	MemberID     uint `gorm:"not null"`
+	TrainerID    uint `gorm:"not null"`
+	// TrainerJoinedAt: thời điểm HLV hiện tại tham gia hội thoại (đổi HLV hợp đồng); NULL = tham gia từ đầu.
+	// Tin hội viên gửi trước mốc này (gửi HLV cũ) không tính "chưa đọc" cho HLV mới (C11).
+	TrainerJoinedAt    *time.Time
 	LastMessageAt      *time.Time
 	LastMessagePreview string `gorm:"type:varchar(255);not null;default:''"`
 	CreatedAt          time.Time
@@ -131,11 +134,13 @@ func (Message) TableName() string { return "messages" }
 
 // NotificationPreference là tùy chọn bật/tắt thông báo theo loại & kênh của người dùng.
 type NotificationPreference struct {
-	ID        uint      `gorm:"primaryKey;autoIncrement"`
-	UserID    uint      `gorm:"not null"`
-	Type      string    `gorm:"type:varchar(50);not null"`
-	Channel   string    `gorm:"type:varchar(20);not null;default:'IN_APP'"`
-	Enabled   bool      `gorm:"not null;default:true"`
+	ID      uint   `gorm:"primaryKey;autoIncrement"`
+	UserID  uint   `gorm:"not null"`
+	Type    string `gorm:"type:varchar(50);not null"`
+	Channel string `gorm:"type:varchar(20);not null;default:'IN_APP'"`
+	// Không đặt default:true ở tag: GORM sẽ bỏ qua giá trị false (zero value) khi Create/Upsert
+	// và DB dùng mặc định true → không tắt được thông báo (NT-01). Mặc định true đã có ở migration.
+	Enabled   bool `gorm:"not null"`
 	UpdatedAt time.Time
 }
 
@@ -143,10 +148,10 @@ func (NotificationPreference) TableName() string { return "notification_preferen
 
 // MemberBranchTransfer là lịch sử chuyển chi nhánh sinh hoạt chính của hội viên.
 type MemberBranchTransfer struct {
-	ID             uint    `gorm:"primaryKey;autoIncrement"`
-	MemberID       uint    `gorm:"not null"`
-	FromBranchID   uint    `gorm:"not null"`
-	ToBranchID     uint    `gorm:"not null"`
+	ID             uint `gorm:"primaryKey;autoIncrement"`
+	MemberID       uint `gorm:"not null"`
+	FromBranchID   uint `gorm:"not null"`
+	ToBranchID     uint `gorm:"not null"`
 	SubscriptionID *uint
 	TransferFee    float64 `gorm:"type:numeric(14,2);not null;default:0"`
 	Reason         string  `gorm:"type:text;not null;default:''"`

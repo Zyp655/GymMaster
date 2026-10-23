@@ -109,7 +109,7 @@ func (s *ptService) PayCommissions(ctx context.Context, req *v1.CommissionPayReq
 			return err
 		}
 		if n == 0 {
-			return rescode.New(rescode.BadRequest, fmt.Sprintf("Không có hoa hồng nào chờ chi trả của HLV %s trong kỳ %s", name, req.Period))
+			return rescode.New(rescode.BadRequest, fmt.Sprintf("Không có hoa hồng nào chờ chi trả riêng của HLV %s trong kỳ %s (khoản đã đưa vào bảng lương sẽ được chi cùng lương)", name, req.Period))
 		}
 		res.Count, res.Amount = n, roundMoneyVND(amount)
 		s.logAudit(ctx, ptActPay, ptAuditCommission, req.TrainerID, nil, map[string]any{

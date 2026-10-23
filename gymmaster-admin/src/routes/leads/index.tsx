@@ -494,7 +494,7 @@ function LeadDetailDrawer({
             <Descriptions.Item label="Ngày hẹn tập thử">
               {formatDate(currentLead.trial_date)}
             </Descriptions.Item>
-            <Descriptions.Item label="Ghi chú" span={2}>
+            <Descriptions.Item label="Ghi chú" span="filled">
               {currentLead.note || '—'}
             </Descriptions.Item>
           </Descriptions>

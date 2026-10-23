@@ -128,9 +128,19 @@ export function RegisterMemberForm() {
     }
   }, [branchesQuery.data, form]);
 
-  const signInOrRedirect = async (email: string, password: string) => {
+  /**
+   * Đăng nhập sau đăng ký. API đã cấp token ở register / verify-otp → nhận lại phiên đó qua
+   * refresh token (không gọi login lần nữa, tránh sinh phiên "ma" – FB-03). Chỉ khi không có
+   * token mới đăng nhập bằng email/mật khẩu.
+   */
+  const signInOrRedirect = async (email: string, password: string, issuedRefreshToken?: string) => {
     try {
-      const result = await signIn('credentials', { email, password, redirect: false });
+      const result = await signIn(
+        'credentials',
+        issuedRefreshToken
+          ? { refresh_token: issuedRefreshToken, redirect: false }
+          : { email, password, redirect: false },
+      );
       if (result && !result.error) {
         router.replace('/me');
         router.refresh();
@@ -163,7 +173,7 @@ export function RegisterMemberForm() {
     }
 
     toast.success(res.message || t('success'));
-    await signInOrRedirect(request.email, request.password);
+    await signInOrRedirect(request.email, request.password, res.token?.refresh_token);
   };
 
   const onSubmitRegister = form.handleSubmit(async values => {
@@ -226,7 +236,7 @@ export function RegisterMemberForm() {
       );
       toast.success(t('otpSuccess'));
       // Tài khoản dùng email trong hồ sơ (không phải email đã nhập) → đăng nhập bằng user.email trả về.
-      await signInOrRedirect(res.user.email, password);
+      await signInOrRedirect(res.user.email, password, res.refresh_token);
     } catch (error) {
       const kind = classifyVerifyOtpError(error);
       if (kind === 'invalid') {

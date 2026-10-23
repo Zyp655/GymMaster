@@ -58,7 +58,9 @@
     "maxLength": "Tối đa {max} ký tự",
     "phone": "Số điện thoại không hợp lệ",
     "time": "Giờ không hợp lệ (định dạng HH:mm)",
-    "positiveNumber": "Giá trị phải lớn hơn 0"
+    "positiveNumber": "Giá trị phải lớn hơn 0",
+    "maxValue": "Giá trị tối đa là {max}",
+    "notFutureDate": "Không được chọn ngày trong tương lai"
   },
   "confirm": {
     "deleteTitle": "Xác nhận xóa",
@@ -134,7 +136,19 @@
       "singleBranch": "Tập tại chi nhánh đăng ký",
       "cta": "Đăng ký tại quầy",
       "emptyTitle": "Chưa có gói tập đang mở bán",
-      "emptyDescription": "Vui lòng quay lại sau hoặc liên hệ chi nhánh gần nhất."
+      "emptyDescription": "Vui lòng quay lại sau hoặc liên hệ chi nhánh gần nhất.",
+      "accessHours": "Khung giờ tập: {hours}",
+      "guestPasses": "{count} vé khách mời/tháng",
+      "everyDay": "Hằng ngày",
+      "dow": {
+        "1": "T2",
+        "2": "T3",
+        "3": "T4",
+        "4": "T5",
+        "5": "T6",
+        "6": "T7",
+        "7": "CN"
+      }
     },
     "pt": {
       "eyebrow": "Huấn luyện cá nhân",

@@ -118,8 +118,8 @@ type CreateExpenseReq struct {
 	CategoryID       uint    `json:"category_id"        v:"required|min:1#Vui lòng chọn danh mục chi phí|Vui lòng chọn danh mục chi phí"`
 	Amount           float64 `json:"amount"             v:"required|min:1|max:999999999999#Vui lòng nhập số tiền chi phí|Số tiền chi phí phải lớn hơn 0|Số tiền chi phí vượt quá giới hạn cho phép"`
 	SpentAt          string  `json:"spent_at"`
-	Description      string  `json:"description"`
-	AttachmentURL    string  `json:"attachment_url"`
+	Description      string  `json:"description"        v:"max-length:500#Mô tả tối đa 500 ký tự"`
+	AttachmentURL    string  `json:"attachment_url"     v:"max-length:500#Đường dẫn chứng từ tối đa 500 ký tự"`
 	MaintenanceLogID *uint   `json:"maintenance_log_id"`
 }
 type CreateExpenseRes = ExpenseItem
@@ -130,8 +130,8 @@ type UpdateExpenseReq struct {
 	CategoryID    uint     `json:"category_id"`
 	Amount        *float64 `json:"amount"         v:"min:1|max:999999999999#Số tiền chi phí phải lớn hơn 0|Số tiền chi phí vượt quá giới hạn cho phép"`
 	SpentAt       string   `json:"spent_at"`
-	Description   *string  `json:"description"`
-	AttachmentURL *string  `json:"attachment_url"`
+	Description   *string  `json:"description"    v:"max-length:500#Mô tả tối đa 500 ký tự"`
+	AttachmentURL *string  `json:"attachment_url" v:"max-length:500#Đường dẫn chứng từ tối đa 500 ký tự"`
 	// Status chỉ để tương thích ngược: PUT không đổi được trạng thái – dùng POST /expenses/{id}/approve.
 	Status string `json:"status" dc:"Không dùng – duyệt/từ chối qua POST /expenses/{id}/approve"`
 }
@@ -156,7 +156,7 @@ type OpenCashSessionReq struct {
 	g.Meta      `path:"/cash-sessions/open" method:"post" tags:"Tài chính & Kế toán" summary:"Mở ca thu ngân" perm:"cash_session.manage"`
 	BranchID    uint    `json:"branch_id"    v:"required|min:1#Vui lòng chọn chi nhánh|Vui lòng chọn chi nhánh"`
 	OpeningCash float64 `json:"opening_cash" v:"min:0|max:999999999999#Tiền mặt đầu ca không được âm|Tiền mặt đầu ca vượt quá giới hạn cho phép"`
-	Note        string  `json:"note"`
+	Note        string  `json:"note"         v:"max-length:500#Ghi chú tối đa 500 ký tự"`
 }
 type OpenCashSessionRes = CashSessionItem
 
@@ -164,7 +164,7 @@ type CloseCashSessionReq struct {
 	g.Meta      `path:"/cash-sessions/{id}/close" method:"post" tags:"Tài chính & Kế toán" summary:"Đóng ca thu ngân & đối soát tiền mặt" perm:"cash_session.manage"`
 	ID          uint    `json:"id"           in:"path" v:"required|min:1"`
 	CountedCash float64 `json:"counted_cash" v:"min:0|max:999999999999#Tiền mặt đếm thực tế không được âm|Tiền mặt đếm thực tế vượt quá giới hạn cho phép"`
-	Note        string  `json:"note"`
+	Note        string  `json:"note"         v:"max-length:500#Ghi chú tối đa 500 ký tự"`
 }
 type CloseCashSessionRes = CashSessionItem
 

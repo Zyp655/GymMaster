@@ -50,10 +50,9 @@ func TestBuildBranchHoliday(t *testing.T) {
 	if err != nil || !h.Closed || h.OpenTime != nil || h.BranchID != nil {
 		t.Fatalf("mặc định đóng cửa sai: %+v err=%v", h, err)
 	}
-	// closed=false không có giờ → ngày lễ mở theo giờ thường.
-	h, err = buildBranchHoliday(&b1, "2026-12-31", "Lễ", schedBoolPtr(false), nil, schedStrPtr(" "))
-	if err != nil || h.Closed || h.OpenTime != nil {
-		t.Fatalf("ngày lễ không giờ sai: %+v err=%v", h, err)
+	// C11-01: closed=false bắt buộc có giờ mở/đóng đặc biệt.
+	if _, err = buildBranchHoliday(&b1, "2026-12-31", "Lễ", schedBoolPtr(false), nil, schedStrPtr(" ")); gerror.Code(err) != rescode.BadRequest {
+		t.Fatalf("ngày lễ mở cửa không có giờ phải 400, nhận %v", err)
 	}
 	bad := []struct {
 		name        string

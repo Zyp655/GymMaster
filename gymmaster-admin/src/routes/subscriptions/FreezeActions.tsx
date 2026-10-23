@@ -5,7 +5,7 @@ import dayjs from 'dayjs';
 import type { Freeze } from '@/api/subscription';
 import { PERM } from '@/constants/permissions';
 import { usePermission } from '@/hooks/usePermission';
-import { showError } from '@/utils/errors';
+import { showError, validateForm } from '@/utils/errors';
 import { formatDate } from '@/utils/format';
 import { useReviewFreeze } from './queries';
 
@@ -45,7 +45,9 @@ export default function FreezeActions({
 
   const submit = async () => {
     if (!action) return;
-    const { note } = await form.validateFields();
+    const parsed = await validateForm(form);
+    if (!parsed) return;
+    const { note } = parsed;
     review.mutate(
       { id: freeze.id, action, note: note?.trim() || '' },
       {

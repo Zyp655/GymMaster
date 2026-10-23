@@ -723,10 +723,18 @@ func (s *workoutService) MemberWorkoutPlans(ctx context.Context) (v1.MemberWorko
 	return out, nil
 }
 
-func workoutParsePerformedAt(s string, now time.Time) (time.Time, error) {
+// workoutMaxWeightKg: giới hạn trên hợp lý của mức tạ một bài tập (FD-05).
+const workoutMaxWeightKg = 500
+
+// workoutFutureTolerance: cho phép lệch đồng hồ thiết bị vài phút.
+const workoutFutureTolerance = 5 * time.Minute
+
+// parseFlexibleTime đọc thời điểm dạng RFC3339, "YYYY-MM-DDTHH:mm" hoặc "YYYY-MM-DD" (giờ VN); rỗng → def.
+// Không giới hạn quá khứ/tương lai (thông báo, khảo sát được hẹn giờ ở tương lai).
+func parseFlexibleTime(s string, def time.Time) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return now, nil
+		return def, nil
 	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t, nil
@@ -737,7 +745,19 @@ func workoutParsePerformedAt(s string, now time.Time) (time.Time, error) {
 	if t, err := time.ParseInLocation(consts.DateLayout, s, memberVNLoc); err == nil {
 		return t, nil
 	}
-	return time.Time{}, rescode.New(rescode.BadRequest, "Thời gian tập luyện không hợp lệ")
+	return time.Time{}, rescode.New(rescode.BadRequest, "Thời gian không hợp lệ")
+}
+
+// workoutParsePerformedAt: thời điểm tập không được ở tương lai (WO-03).
+func workoutParsePerformedAt(s string, now time.Time) (time.Time, error) {
+	t, err := parseFlexibleTime(s, now)
+	if err != nil {
+		return time.Time{}, rescode.New(rescode.BadRequest, "Thời gian tập luyện không hợp lệ")
+	}
+	if t.After(now.Add(workoutFutureTolerance)) {
+		return time.Time{}, rescode.New(rescode.BadRequest, "Thời gian tập luyện không được ở tương lai")
+	}
+	return t, nil
 }
 
 func (s *workoutService) memberOwnsPlanItem(ctx context.Context, memberID, planItemID uint) (bool, error) {
@@ -770,6 +790,9 @@ func (s *workoutService) CreateWorkoutLog(ctx context.Context, req *v1.CreateWor
 	}
 	if req.Sets <= 0 || req.Reps <= 0 || req.Weight < 0 {
 		return nil, rescode.New(rescode.BadRequest, "Thông số hiệp, lần lặp và mức tạ không hợp lệ")
+	}
+	if req.Weight > workoutMaxWeightKg {
+		return nil, rescode.New(rescode.BadRequest, "Mức tạ tối đa 500 kg")
 	}
 	if req.PlanItemID != nil && *req.PlanItemID > 0 {
 		owned, err := s.memberOwnsPlanItem(ctx, m.ID, *req.PlanItemID)

@@ -29,4 +29,9 @@ export const REVENUE_HELP = {
   posDaily:
     'Doanh thu thuần = tổng hóa đơn POS lập trong ngày − tiền hoàn trả hàng phát sinh trong ngày. ' +
     'SL bán = số lượng trên hóa đơn trong ngày − số lượng trả trong ngày (cùng cơ sở).',
+  /** "Thu theo phương thức" của tổng kết ngày POS (pos_repository.PaymentsByMethod). */
+  posByMethod:
+    'Tiền GỘP đã thu theo NGÀY THU TIỀN cho đơn bán hàng POS (kể cả thu nợ đơn lập ngày trước), chia theo phương thức; ' +
+    '"lần" = số phiếu thu. CHƯA trừ tiền hoàn trả hàng (xem "Hoàn trả" ở thẻ Doanh thu thuần) và không gồm phần khách ' +
+    'còn nợ, nên có thể khác Doanh thu gộp/thuần.',
 } as const;

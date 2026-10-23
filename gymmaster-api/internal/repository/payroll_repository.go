@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"gymmaster-api/internal/entity"
 	"gymmaster-api/internal/storage/postgres"
@@ -84,8 +86,20 @@ type (
 		UpsertPayrollItem(ctx context.Context, item *entity.PayrollItem) error
 		UpdatePayrollItem(ctx context.Context, item *entity.PayrollItem) error
 
-		CollectStaffPayrollSources(ctx context.Context, branchID uint, period string, from, to time.Time) ([]StaffPayrollSource, error)
-		MarkTrainerCommissionsPaid(ctx context.Context, branchID uint, period string, paidBy *uint, paidAt time.Time) error
+		// LockPayrollRow khóa (SELECT ... FOR UPDATE) bảng lương – gọi trong transaction; trả bản ghi mới nhất.
+		LockPayrollRow(ctx context.Context, id uint) (*entity.Payroll, error)
+		// TransitionPayroll đổi trạng thái có điều kiện (UPDATE ... WHERE status IN from); false = đã bị yêu cầu
+		// khác đổi trước (khóa/chi lương đồng thời) → không ghi đè.
+		TransitionPayroll(ctx context.Context, p *entity.Payroll, from []string) (bool, error)
+
+		// AttachTrainerCommissions gắn các hoa hồng PT PENDING (chưa thuộc bảng lương nào) của chi nhánh/kỳ vào
+		// bảng lương payrollID; trước đó gỡ các hoa hồng PENDING đã gắn từ lần tổng hợp trước (tổng hợp lại DRAFT).
+		AttachTrainerCommissions(ctx context.Context, payrollID, branchID uint, period string) error
+		// SumPayrollCommissions: tổng hoa hồng PT còn PENDING đang gắn vào bảng lương, theo HLV.
+		SumPayrollCommissions(ctx context.Context, payrollID uint) (map[uint]float64, error)
+		CollectStaffPayrollSources(ctx context.Context, branchID, payrollID uint, period string, from, to time.Time) ([]StaffPayrollSource, error)
+		// MarkTrainerCommissionsPaid đánh dấu PAID đúng các hoa hồng PENDING đã cộng vào bảng lương payrollID.
+		MarkTrainerCommissionsPaid(ctx context.Context, payrollID uint, paidBy *uint, paidAt time.Time) error
 		ListPayslipsByStaff(ctx context.Context, staffID uint) ([]PayslipRow, error)
 	}
 
@@ -230,6 +244,57 @@ func (r *payrollRepository) UpdatePayroll(ctx context.Context, p *entity.Payroll
 	return postgres.Conn(ctx, r.db).Save(p).Error
 }
 
+func (r *payrollRepository) LockPayrollRow(ctx context.Context, id uint) (*entity.Payroll, error) {
+	var p entity.Payroll
+	if err := postgres.Conn(ctx, r.db).Clauses(clause.Locking{Strength: "UPDATE"}).First(&p, id).Error; err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *payrollRepository) TransitionPayroll(ctx context.Context, p *entity.Payroll, from []string) (bool, error) {
+	res := postgres.Conn(ctx, r.db).Model(&entity.Payroll{}).
+		Where("id = ? AND status IN ?", p.ID, from).
+		Updates(map[string]any{
+			"status": p.Status, "locked_by": p.LockedBy, "locked_at": p.LockedAt,
+			"paid_by": p.PaidBy, "paid_at": p.PaidAt, "updated_at": p.UpdatedAt,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+func (r *payrollRepository) AttachTrainerCommissions(ctx context.Context, payrollID, branchID uint, period string) error {
+	db := postgres.Conn(ctx, r.db)
+	if err := db.Table("trainer_commissions").
+		Where("payroll_id = ? AND status = ?", payrollID, entity.CommissionPending).
+		Update("payroll_id", nil).Error; err != nil {
+		return err
+	}
+	return db.Table("trainer_commissions").
+		Where("branch_id = ? AND period = ? AND status = ? AND payroll_id IS NULL", branchID, period, entity.CommissionPending).
+		Update("payroll_id", payrollID).Error
+}
+
+func (r *payrollRepository) SumPayrollCommissions(ctx context.Context, payrollID uint) (map[uint]float64, error) {
+	var rows []struct {
+		TrainerID uint
+		Amount    float64
+	}
+	if err := postgres.Conn(ctx, r.db).Table("trainer_commissions").
+		Select("trainer_id, COALESCE(SUM(amount), 0) AS amount").
+		Where("payroll_id = ? AND status = ?", payrollID, entity.CommissionPending).
+		Group("trainer_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[uint]float64, len(rows))
+	for _, r := range rows {
+		out[r.TrainerID] = r.Amount
+	}
+	return out, nil
+}
+
 func (r *payrollRepository) ListPayrollItems(ctx context.Context, payrollID uint) ([]PayrollItemRow, error) {
 	var rows []PayrollItemRow
 	err := postgres.Conn(ctx, r.db).
@@ -256,7 +321,7 @@ func (r *payrollRepository) UpsertPayrollItem(ctx context.Context, item *entity.
 		if existing.BaseSalary <= 0 {
 			existing.BaseSalary = item.BaseSalary
 		}
-		existing.Total = existing.BaseSalary + existing.PTCommission + existing.SalesCommission + existing.Bonus - existing.Penalty
+		existing.RecalcTotal()
 		existing.UpdatedAt = item.UpdatedAt
 		*item = existing
 		return db.Save(&existing).Error
@@ -268,22 +333,27 @@ func (r *payrollRepository) UpdatePayrollItem(ctx context.Context, item *entity.
 	return postgres.Conn(ctx, r.db).Save(item).Error
 }
 
-func (r *payrollRepository) CollectStaffPayrollSources(ctx context.Context, branchID uint, period string, from, to time.Time) ([]StaffPayrollSource, error) {
+// payrollDefaultSalesRate: tỷ lệ hoa hồng bán gói (%) khi hồ sơ nhân viên chưa đặt commission_rate.
+const payrollDefaultSalesRate = 2.0
+
+func (r *payrollRepository) CollectStaffPayrollSources(ctx context.Context, branchID, payrollID uint, period string, from, to time.Time) ([]StaffPayrollSource, error) {
 	db := postgres.Conn(ctx, r.db)
 	var staffRows []struct {
-		StaffID    uint
-		StaffCode  string
-		StaffName  string
-		Position   string
-		BaseSalary float64
+		StaffID        uint
+		StaffCode      string
+		StaffName      string
+		Position       string
+		BaseSalary     float64
+		CommissionRate float64
 	}
 	err := db.Table("staff_profiles sp").
-		Select(`sp.user_id AS staff_id, sp.staff_code, COALESCE(u.full_name, '') AS staff_name, sp.position, sp.base_salary`).
+		Select(`sp.user_id AS staff_id, sp.staff_code, COALESCE(u.full_name, '') AS staff_name, sp.position, sp.base_salary,
+			sp.commission_rate`).
 		Joins("JOIN users u ON u.id = sp.user_id AND u.deleted_at IS NULL").
 		Where(`EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = sp.user_id AND (ur.branch_id = ? OR ur.branch_id IS NULL))
 			OR EXISTS (SELECT 1 FROM staff_attendances sa WHERE sa.staff_id = sp.user_id AND sa.branch_id = ? AND sa.check_in_at >= ? AND sa.check_in_at < ?)
-			OR EXISTS (SELECT 1 FROM trainer_commissions tc WHERE tc.trainer_id = sp.user_id AND tc.branch_id = ? AND tc.period = ?)`,
-			branchID, branchID, from, to, branchID, period).
+			OR EXISTS (SELECT 1 FROM trainer_commissions tc WHERE tc.trainer_id = sp.user_id AND tc.payroll_id = ? AND tc.status = 'PENDING')`,
+			branchID, branchID, from, to, payrollID).
 		Order("sp.user_id ASC").
 		Scan(&staffRows).Error
 	if err != nil {
@@ -292,22 +362,39 @@ func (r *payrollRepository) CollectStaffPayrollSources(ctx context.Context, bran
 
 	out := make([]StaffPayrollSource, 0, len(staffRows))
 	for _, st := range staffRows {
+		// Ngày công = số NGÀY (giờ VN) có chấm công vào, không phải số lượt quét (quét 2 lần/ngày vẫn là 1 công).
 		var workDays int64
-		_ = db.Table("staff_attendances").
+		if err := db.Table("staff_attendances").
+			Select("COUNT(DISTINCT (check_in_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)").
 			Where("staff_id = ? AND branch_id = ? AND check_in_at >= ? AND check_in_at < ?", st.StaffID, branchID, from, to).
-			Count(&workDays).Error
+			Scan(&workDays).Error; err != nil {
+			return nil, err
+		}
 
+		// Hoa hồng PT: chỉ khoản PENDING đã gắn vào bảng lương này – khoản đã chi riêng (PAID) không cộng lại.
 		var ptComm float64
-		_ = db.Table("trainer_commissions").
+		if err := db.Table("trainer_commissions").
 			Select("COALESCE(SUM(amount), 0)").
-			Where("trainer_id = ? AND branch_id = ? AND period = ?", st.StaffID, branchID, period).
-			Scan(&ptComm).Error
+			Where("trainer_id = ? AND payroll_id = ? AND status = ?", st.StaffID, payrollID, entity.CommissionPending).
+			Scan(&ptComm).Error; err != nil {
+			return nil, err
+		}
 
+		// Hoa hồng bán gói: chỉ gói có hóa đơn đã thanh toán đủ (PAID), không tính gói chờ thanh toán/đã hủy.
 		var subSales float64
-		_ = db.Table("subscriptions").
-			Select("COALESCE(SUM(price), 0)").
-			Where("sold_by = ? AND branch_id = ? AND status <> 'CANCELLED' AND created_at >= ? AND created_at < ?", st.StaffID, branchID, from, to).
-			Scan(&subSales).Error
+		if err := db.Table("subscriptions s").
+			Select("COALESCE(SUM(s.price), 0)").
+			Joins("JOIN invoices i ON i.id = s.invoice_id AND i.status = ?", entity.InvoiceStatusPaid).
+			Where("s.sold_by = ? AND s.branch_id = ? AND s.status <> 'CANCELLED' AND s.created_at >= ? AND s.created_at < ?",
+				st.StaffID, branchID, from, to).
+			Scan(&subSales).Error; err != nil {
+			return nil, err
+		}
+		// commission_rate của HLV là tỷ lệ hoa hồng DẠY PT (trainer_commissions), không áp cho doanh số bán gói.
+		rate := st.CommissionRate
+		if rate <= 0 || st.Position == "TRAINER" {
+			rate = payrollDefaultSalesRate
+		}
 
 		out = append(out, StaffPayrollSource{
 			StaffID:         st.StaffID,
@@ -317,15 +404,15 @@ func (r *payrollRepository) CollectStaffPayrollSources(ctx context.Context, bran
 			BaseSalary:      st.BaseSalary,
 			WorkDays:        float64(workDays),
 			PTCommission:    ptComm,
-			SalesCommission: subSales * 0.02,
+			SalesCommission: math.Round(subSales * rate / 100),
 		})
 	}
 	return out, nil
 }
 
-func (r *payrollRepository) MarkTrainerCommissionsPaid(ctx context.Context, branchID uint, period string, paidBy *uint, paidAt time.Time) error {
+func (r *payrollRepository) MarkTrainerCommissionsPaid(ctx context.Context, payrollID uint, paidBy *uint, paidAt time.Time) error {
 	return postgres.Conn(ctx, r.db).Table("trainer_commissions").
-		Where("branch_id = ? AND period = ? AND status = ?", branchID, period, entity.CommissionPending).
+		Where("payroll_id = ? AND status = ?", payrollID, entity.CommissionPending).
 		Updates(map[string]any{
 			"status":  entity.CommissionPaid,
 			"paid_at": paidAt,

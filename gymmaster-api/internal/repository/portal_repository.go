@@ -70,7 +70,7 @@ type (
 		EmailInUse(ctx context.Context, email string, memberID uint, userID *uint) (bool, error)
 		// FindContract: hợp đồng PT (không khóa) kèm HLV, chi nhánh, giờ mở cửa.
 		FindContract(ctx context.Context, id uint) (*PortalContract, error)
-		// TrainerBusy: buổi PT (SCHEDULED/COMPLETED) + lớp chưa hủy của HLV giao với [from, to).
+		// TrainerBusy: buổi PT (SCHEDULED/COMPLETED) + lớp chưa hủy HLV thực dạy (chính hoặc dạy thay) giao với [from, to).
 		TrainerBusy(ctx context.Context, trainerID uint, from, to time.Time) ([]PortalBusy, error)
 		// MemberBusy: buổi PT (SCHEDULED/COMPLETED) + lớp đã đặt (BOOKED/WAITLIST/ATTENDED, lớp chưa hủy) của hội viên giao với [from, to).
 		MemberBusy(ctx context.Context, memberID uint, from, to time.Time) ([]PortalBusy, error)
@@ -173,7 +173,7 @@ func (r *portalRepository) TrainerBusy(ctx context.Context, trainerID uint, from
 		 WHERE trainer_id = ? AND status IN ('SCHEDULED', 'COMPLETED') AND start_at < ? AND end_at > ?
 		UNION ALL
 		SELECT start_at, end_at FROM class_schedules
-		 WHERE trainer_id = ? AND status <> 'CANCELLED' AND start_at < ? AND end_at > ?
+		 WHERE COALESCE(substitute_trainer_id, trainer_id) = ? AND status <> 'CANCELLED' AND start_at < ? AND end_at > ?
 		ORDER BY start_at`, trainerID, to, from, trainerID, to, from).Scan(&items).Error
 	return items, err
 }

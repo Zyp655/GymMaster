@@ -229,15 +229,61 @@ func normalizePlanInput(in v1.PlanInput) (v1.PlanInput, error) {
 		// Chuẩn hóa "8:00" → "08:00" (so khớp khung giờ khi check-in/hiển thị dùng dạng HH:MM).
 		in.AccessHours[i].From = fmt.Sprintf("%02d:%02d", from/60, from%60)
 		in.AccessHours[i].To = fmt.Sprintf("%02d:%02d", to/60, to%60)
+		seen := map[int]bool{}
 		for _, d := range sl.Dow {
 			if d < 0 || d > 7 {
 				return in, rescode.New(rescode.BadRequest, "Thứ trong khung giờ vào tập không hợp lệ")
 			}
+			if seen[d%7] { // 0 và 7 cùng là Chủ nhật
+				return in, rescode.New(rescode.BadRequest, "Thứ trong một khung giờ vào tập bị trùng lặp")
+			}
+			seen[d%7] = true
 		}
+	}
+	if err := planCheckAccessHoursOverlap(in.AccessHours); err != nil {
+		return in, err
 	}
 	in.Price = roundMoneyVND(in.Price)
 	in.TransferFee = roundMoneyVND(in.TransferFee)
 	return in, nil
+}
+
+// planCheckAccessHoursOverlap: hai khung giờ vào tập có chung ít nhất một thứ (dow rỗng = mọi ngày) thì không được
+// chồng thời gian (khung liền nhau 06:00–09:00 và 09:00–12:00 vẫn hợp lệ). Gọi sau khi đã chuẩn hóa HH:MM.
+func planCheckAccessHoursOverlap(slots []v1.AccessHoursSlot) error {
+	days := func(sl v1.AccessHoursSlot) map[int]bool {
+		out := map[int]bool{}
+		if len(sl.Dow) == 0 {
+			for d := 0; d < 7; d++ {
+				out[d] = true
+			}
+			return out
+		}
+		for _, d := range sl.Dow {
+			out[d%7] = true
+		}
+		return out
+	}
+	for i := 0; i < len(slots); i++ {
+		fi, _ := parseHHMM(slots[i].From)
+		ti, _ := parseHHMM(slots[i].To)
+		di := days(slots[i])
+		for j := i + 1; j < len(slots); j++ {
+			fj, _ := parseHHMM(slots[j].From)
+			tj, _ := parseHHMM(slots[j].To)
+			if fi >= tj || fj >= ti {
+				continue
+			}
+			for d := range days(slots[j]) {
+				if di[d] {
+					return rescode.New(rescode.BadRequest, fmt.Sprintf(
+						"Khung giờ vào tập %s–%s và %s–%s bị chồng lấn trong cùng ngày",
+						slots[i].From, slots[i].To, slots[j].From, slots[j].To))
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func applyPlanInput(p *entity.MembershipPlan, in v1.PlanInput) {

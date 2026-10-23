@@ -14,6 +14,22 @@ export interface PublicPlan {
   access_scope: AccessScope;
   max_freeze_days: number;
   includes_classes: boolean;
+  /** Khung giờ được vào tập (gói Off-Peak); rỗng/thiếu = mọi giờ mở cửa. */
+  access_hours?: AccessHoursSlot[] | null;
+  /** Số vé khách mời mỗi tháng; 0/thiếu = không có. */
+  guest_passes_per_month?: number | null;
+}
+
+/**
+ * Một khung giờ vào tập. API: `dow` (1=T2 … 6=T7, 0/7=CN; mảng hoặc một số; trống = mọi ngày)
+ * + `from`/`to` (HH:MM). Chấp nhận thêm `start`/`end` để tương thích.
+ */
+export interface AccessHoursSlot {
+  dow?: number | number[] | null;
+  from?: string;
+  to?: string;
+  start?: string;
+  end?: string;
 }
 
 export interface PublicPTPackage {

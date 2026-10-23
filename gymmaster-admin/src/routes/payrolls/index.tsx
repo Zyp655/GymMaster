@@ -19,6 +19,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -37,7 +38,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import { ATTENDANCE_METHOD_LABELS, payrollApi } from '@/api/payroll-finance';
+import { ATTENDANCE_METHOD_LABELS, payrollApi, payrollBasePay } from '@/api/payroll-finance';
 import type {
   AttendanceMethod,
   Payroll,
@@ -65,7 +66,8 @@ import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
 import { useTableQuery } from '@/hooks/useTableQuery';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
-import { showError } from '@/utils/errors';
+import { ErrorCode, isApiError } from '@/utils/api';
+import { getErrorMessage, showError } from '@/utils/errors';
 import { formatDateTime, formatMoney } from '@/utils/format';
 
 function EditPayrollItemModal({
@@ -147,7 +149,7 @@ function EditPayrollItemModal({
 }
 
 function MonthlyPayrollTab({ canManage }: { canManage: boolean }) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const qc = useQueryClient();
   const { branchId } = useWorkingBranch();
   const { branches } = useBranchOptions();
@@ -215,13 +217,28 @@ function MonthlyPayrollTab({ canManage }: { canManage: boolean }) {
     onError: (err) => showError(err, 'Không thể tạo bảng lương tháng'),
   });
 
+  // 409: hoa hồng thay đổi sau khi tổng hợp → nêu lý do và gợi ý tính lại bảng lương.
+  const onPayrollConflict = (err: unknown, fallback: string) => {
+    if (isApiError(err) && err.code === ErrorCode.CONFLICT && canManage) {
+      modal.confirm({
+        title: 'Bảng lương cần tính lại',
+        content: getErrorMessage(err, fallback),
+        okText: 'Tính lại bảng lương',
+        cancelText: 'Đóng',
+        onOk: () => generateMut.mutateAsync(),
+      });
+      return;
+    }
+    showError(err, fallback);
+  };
+
   const lockMut = useMutation({
     mutationFn: (id: number) => payrollApi.lock(id),
     onSuccess: () => {
       message.success('Đã khóa sổ bảng lương tháng!');
       void qc.invalidateQueries({ queryKey: [payrollApi.key] });
     },
-    onError: (err) => showError(err, 'Không thể khóa bảng lương'),
+    onError: (err) => onPayrollConflict(err, 'Không thể khóa bảng lương'),
   });
 
   const payMut = useMutation({
@@ -230,13 +247,13 @@ function MonthlyPayrollTab({ canManage }: { canManage: boolean }) {
       message.success('Đã xác nhận chi trả lương và tất toán hoa hồng HLV!');
       void qc.invalidateQueries({ queryKey: [payrollApi.key] });
     },
-    onError: (err) => showError(err, 'Không thể chi trả bảng lương'),
+    onError: (err) => onPayrollConflict(err, 'Không thể chi trả bảng lương'),
   });
 
   const totals = useMemo(() => {
     return payrollItems.reduce(
       (acc, it) => ({
-        base: acc.base + (Number(it.base_salary) || 0),
+        base: acc.base + payrollBasePay(it),
         comm: acc.comm + (Number(it.pt_commission) || 0) + (Number(it.sales_commission) || 0),
         bonusPenalty: acc.bonusPenalty + (Number(it.bonus) || 0) - (Number(it.penalty) || 0),
         net: acc.net + (Number(it.total) || 0),
@@ -266,14 +283,14 @@ function MonthlyPayrollTab({ canManage }: { canManage: boolean }) {
         title: 'Ngày công',
         dataIndex: 'work_days',
         align: 'right',
-        width: 100,
+        width: 88,
         render: (v: number) => <strong>{v ?? 0}</strong>,
       },
       {
         title: 'Giờ OT',
         dataIndex: 'ot_hours',
         align: 'right',
-        width: 90,
+        width: 72,
         render: (v: number) => v || 0,
       },
       {
@@ -283,65 +300,109 @@ function MonthlyPayrollTab({ canManage }: { canManage: boolean }) {
         render: (v: number) => <MoneyText value={v} />,
       },
       {
-        title: 'Hoa hồng PT',
-        dataIndex: 'pt_commission',
+        title: (
+          <Tooltip title="Lương cơ bản × ngày công ÷ công chuẩn (26 ngày/tháng)">
+            <span>
+              Lương theo
+              <br />
+              ngày công
+            </span>
+          </Tooltip>
+        ),
+        key: 'base_pay',
         align: 'right',
-        render: (v: number) => <MoneyText value={v} />,
-      },
-      {
-        title: 'HH Bán gói',
-        dataIndex: 'sales_commission',
-        align: 'right',
-        render: (v: number) => <MoneyText value={v} />,
-      },
-      {
-        title: 'Thưởng',
-        dataIndex: 'bonus',
-        align: 'right',
-        render: (v: number) => (
-          <Typography.Text type={v > 0 ? 'success' : undefined}>
-            {formatMoney(v || 0)}
-          </Typography.Text>
+        render: (_, r) => (
+          <Tooltip
+            title={`${formatMoney(r.base_salary)} × ${r.work_days ?? 0} / ${r.standard_work_days ?? 26} công chuẩn`}
+          >
+            <span>
+              <MoneyText value={payrollBasePay(r)} />
+            </span>
+          </Tooltip>
         ),
       },
       {
-        title: 'Phạt / Trừ',
-        dataIndex: 'penalty',
-        align: 'right',
-        render: (v: number) => (
-          <Typography.Text type={v > 0 ? 'danger' : undefined}>
-            {formatMoney(v || 0)}
-          </Typography.Text>
+        // Gộp 2 loại hoa hồng / thưởng – phạt (2 dòng) để bảng vừa khung 1440 (D8).
+        title: (
+          <span>
+            Hoa hồng PT
+            <br />/ Bán gói
+          </span>
         ),
+        key: 'commission',
+        align: 'right',
+        render: (_, r) => (
+          <div style={{ lineHeight: 1.35 }}>
+            <MoneyText value={r.pt_commission} />
+            <br />
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {formatMoney(r.sales_commission || 0)}
+            </Typography.Text>
+          </div>
+        ),
+      },
+      {
+        title: (
+          <span>
+            Thưởng
+            <br />/ Phạt
+          </span>
+        ),
+        key: 'bonus_penalty',
+        align: 'right',
+        render: (_, r) => (
+          <div style={{ lineHeight: 1.35 }}>
+            <Typography.Text type={r.bonus > 0 ? 'success' : undefined}>
+              +{formatMoney(r.bonus || 0)}
+            </Typography.Text>
+            <br />
+            <Typography.Text type={r.penalty > 0 ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
+              −{formatMoney(r.penalty || 0)}
+            </Typography.Text>
+          </div>
+        ),
+      },
+      {
+        title: 'Ghi chú',
+        dataIndex: 'note',
+        render: (v: string) =>
+          v ? (
+            <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth: 120 }}>
+              {v}
+            </Typography.Text>
+          ) : (
+            '—'
+          ),
       },
       {
         title: 'Thực lĩnh',
         dataIndex: 'total',
         align: 'right',
+        fixed: 'right',
         render: (v: number) => <MoneyText value={v} strong />,
       },
-      {
-        title: 'Ghi chú',
-        dataIndex: 'note',
-        render: (v: string) => v || '—',
-      },
-      {
-        title: '',
-        key: 'actions',
-        fixed: 'right',
-        width: 120,
-        render: (_, r) =>
-          canManage && isDraft ? (
-            <Button
-              size="small"
-              type="link"
-              icon={<EditOutlined />}
-              onClick={() => setEditingItem(r)}
-            >
-              Thưởng/Phạt
-            </Button>
-          ) : null,
-      },
+      // Cột thao tác chỉ có khi sửa được (tránh cột trống cố định che cột Thực lĩnh – D8).
+      ...(canManage && isDraft
+        ? [
+            {
+              title: '',
+              key: 'actions',
+              fixed: 'right' as const,
+              width: 110,
+              render: (_: unknown, r: PayrollItem) => (
+                <Button
+                  size="small"
+                  type="link"
+                  style={{ paddingInline: 0 }}
+                  icon={<EditOutlined />}
+                  onClick={() => setEditingItem(r)}
+                >
+                  Thưởng/Phạt
+                </Button>
+              ),
+            },
+          ]
+        : []),
     ],
     [canManage, isDraft],
   );
@@ -451,7 +512,7 @@ function MonthlyPayrollTab({ canManage }: { canManage: boolean }) {
         </Col>
         <Col xs={12} md={6}>
           <StatCard
-            label="Tổng lương cơ bản"
+            label="Tổng lương theo ngày công"
             value={totals.base}
             currency
             icon={<TeamOutlined />}
@@ -520,7 +581,7 @@ function MonthlyPayrollTab({ canManage }: { canManage: boolean }) {
               type="info"
               showIcon
               style={{ marginBottom: 12 }}
-              message="Bảng lương đang ở trạng thái Nháp (DRAFT) – Bạn có thể bấm 'Thưởng/Phạt' ở từng nhân viên để điều chỉnh trước khi Khóa sổ."
+              message="Bảng lương đang ở trạng thái Nháp – bạn có thể bấm 'Thưởng/Phạt' ở từng nhân viên để điều chỉnh trước khi Khóa sổ."
             />
           )}
           <Table<PayrollItem>
@@ -801,6 +862,12 @@ function MyPayslipsTab() {
         render: (v: number) => <MoneyText value={v} />,
       },
       {
+        title: 'Lương theo ngày công',
+        key: 'base_pay',
+        align: 'right',
+        render: (_, r) => <MoneyText value={payrollBasePay(r)} />,
+      },
+      {
         title: 'Hoa hồng PT & Sales',
         key: 'commission',
         align: 'right',
@@ -867,6 +934,11 @@ function MyPayslipsTab() {
             </Descriptions.Item>
             <Descriptions.Item label="Lương cơ bản">
               {formatMoney(selectedSlip.base_salary)}
+            </Descriptions.Item>
+            <Descriptions.Item
+              label={`Lương theo ngày công (công chuẩn ${selectedSlip.standard_work_days ?? 26})`}
+            >
+              {formatMoney(payrollBasePay(selectedSlip))}
             </Descriptions.Item>
             <Descriptions.Item label="Hoa hồng dạy PT">
               {formatMoney(selectedSlip.pt_commission)}

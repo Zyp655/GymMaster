@@ -57,6 +57,7 @@ import {
 } from '../queries';
 import { createWorkoutLogSchema, type WorkoutLogFormValues } from '../schema';
 import type { ExerciseItem, WorkoutPlan, WorkoutPlanItem } from '../types';
+import { localDateISO, MAX_WORKOUT_WEIGHT_KG } from '../workout';
 import { PortalPageHeader } from './PortalPageHeader';
 
 type WorkoutT = ReturnType<typeof useTranslations<'portal.workout'>>;
@@ -332,6 +333,7 @@ function WorkoutLogDialog({
       sets: preset?.sets ?? 3,
       reps: preset?.reps ?? 10,
       weight: preset?.weight ?? 20,
+      performed_date: localDateISO(),
       note: preset?.note ?? '',
     },
   });
@@ -344,6 +346,7 @@ function WorkoutLogDialog({
         sets: preset.sets ?? 3,
         reps: preset.reps ?? 10,
         weight: preset.weight ?? 20,
+        performed_date: localDateISO(),
         note: preset.note ?? '',
       });
     }
@@ -357,6 +360,11 @@ function WorkoutLogDialog({
         sets: values.sets,
         reps: values.reps,
         weight: values.weight,
+        // Hôm nay → để API ghi thời điểm hiện tại; ngày cũ hơn → gửi ngày (API hiểu theo giờ VN).
+        performed_at:
+          values.performed_date && values.performed_date !== localDateISO()
+            ? values.performed_date
+            : undefined,
         note: values.note?.trim() || undefined,
       });
       toast.success(t('success'));
@@ -455,6 +463,7 @@ function WorkoutLogDialog({
                         type="number"
                         step="0.5"
                         min={0}
+                        max={MAX_WORKOUT_WEIGHT_KG}
                         value={field.value}
                         onChange={e => field.onChange(Number(e.target.value))}
                       />
@@ -464,6 +473,25 @@ function WorkoutLogDialog({
                 )}
               />
             </div>
+
+            <FormField
+              control={form.control}
+              name="performed_date"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('dateLabel')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="date"
+                      max={localDateISO()}
+                      value={field.value ?? ''}
+                      onChange={e => field.onChange(e.target.value)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}

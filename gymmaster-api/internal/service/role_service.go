@@ -108,7 +108,7 @@ func (s *roleService) Update(ctx context.Context, req *v1.UpdateReq) (*v1.Role, 
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureCanManageRole(ctx, role); err != nil {
+	if err := s.ensureCanManageRole(ctx, role); err != nil {
 		return nil, err
 	}
 	perms, err := s.resolvePermissions(ctx, req.Permissions)
@@ -154,7 +154,7 @@ func (s *roleService) Delete(ctx context.Context, id uint) error {
 	if role.IsSystem {
 		return rescode.New(rescode.Conflict, "Không thể xóa vai trò hệ thống")
 	}
-	if err := ensureCanManageRole(ctx, role); err != nil {
+	if err := s.ensureCanManageRole(ctx, role); err != nil {
 		return err
 	}
 	n, err := s.roleRepo.CountUsers(ctx, id)
@@ -197,20 +197,35 @@ func ensureCanGrantPermissions(ctx context.Context, perms []entity.Permission) e
 	return nil
 }
 
-// ensureCanManageRole: người không phải OWNER không được sửa/xóa vai trò OWNER, vai trò mình đang giữ
-// (tránh tự nâng quyền) và vai trò có quyền vượt ngoài quyền của mình.
-func ensureCanManageRole(ctx context.Context, role *entity.Role) error {
+// ensureCanManageRole: người không phải OWNER không được sửa/xóa vai trò OWNER, vai trò MEMBER
+// (vai trò hệ thống không dành cho nhân viên), vai trò mình đang giữ (tránh tự nâng quyền),
+// vai trò có quyền vượt ngoài quyền của mình và vai trò đang gán cho người dùng ngoài chi nhánh mình quản lý.
+func (s *roleService) ensureCanManageRole(ctx context.Context, role *entity.Role) error {
 	if reqctx.HasRole(ctx, consts.RoleOwner) {
 		return nil
 	}
 	if role.Code == consts.RoleOwner {
 		return rescode.New(rescode.PermissionDenied, "Chỉ chủ trung tâm mới được thay đổi vai trò chủ trung tâm")
 	}
+	if role.Code == consts.RoleMember {
+		return rescode.New(rescode.PermissionDenied, "Chỉ chủ trung tâm mới được thay đổi vai trò hội viên")
+	}
 	if reqctx.HasRole(ctx, role.Code) {
 		return rescode.New(rescode.PermissionDenied, "Không thể tự thay đổi vai trò mà chính mình đang giữ")
 	}
 	if len(missingPermissions(ctx, role.Permissions)) > 0 {
 		return rescode.New(rescode.PermissionDenied, "Không thể thay đổi vai trò có quyền cao hơn quyền của bạn")
+	}
+	// Người quản trị gắn chi nhánh không được sửa vai trò toàn cục đang dùng ở chi nhánh khác.
+	if allowed := reqctx.AllowedBranches(ctx); allowed != nil {
+		n, err := s.roleRepo.CountUsersOutsideBranches(ctx, role.ID, allowed)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			return rescode.New(rescode.PermissionDenied,
+				"Không thể thay đổi vai trò đang được gán cho nhân viên ngoài chi nhánh bạn quản lý")
+		}
 	}
 	return nil
 }

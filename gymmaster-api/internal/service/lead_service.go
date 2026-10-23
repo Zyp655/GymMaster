@@ -178,13 +178,11 @@ func (s *leadService) checkIPRateLimit(ip string, now time.Time) bool {
 func (s *leadService) PublicCreateLead(ctx context.Context, req *v1.PublicCreateLeadReq, clientIP string) (*v1.Lead, error) {
 	now := s.now()
 	if !s.checkIPRateLimit(clientIP, now) {
-		return nil, rescode.New(rescode.TooManyAttempts, "Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau 15 phút")
+		// 429 (không phải 401/40105) để client không hiểu nhầm là hết phiên đăng nhập (LD-08).
+		return nil, rescode.New(rescode.TooManyRequests, "Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau 15 phút")
 	}
 
-	if _, err := s.repo.FindBranch(ctx, req.BranchID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, rescode.New(rescode.NotFound, "Không tìm thấy chi nhánh")
-		}
+	if err := s.ensureLeadBranchActive(ctx, req.BranchID); err != nil {
 		return nil, err
 	}
 	phone, err := leadNormalizePhone(req.Phone)
@@ -194,6 +192,15 @@ func (s *leadService) PublicCreateLead(ctx context.Context, req *v1.PublicCreate
 	email, err := leadEmail(req.Email)
 	if err != nil {
 		return nil, err
+	}
+
+	// Gửi lại form cùng SĐT khi đã có lead đang mở ở chi nhánh → ghi chú vào lead cũ, không tạo lead trùng (FA-04).
+	existing, err := s.repo.FindOpenLeadByPhone(ctx, req.BranchID, phone)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return s.mergePublicLead(ctx, existing, req, email, now)
 	}
 
 	lead := &entity.Lead{
@@ -238,6 +245,56 @@ func (s *leadService) PublicCreateLead(ctx context.Context, req *v1.PublicCreate
 		}, nil
 	}
 	return toLeadDTO(row, nil, nil), nil
+}
+
+// ensureLeadBranchActive: chi nhánh phải tồn tại (404) và đang hoạt động (400, LD-02).
+func (s *leadService) ensureLeadBranchActive(ctx context.Context, branchID uint) error {
+	b, err := s.repo.FindBranch(ctx, branchID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return rescode.New(rescode.NotFound, "Không tìm thấy chi nhánh")
+		}
+		return err
+	}
+	if b.Status != consts.StatusActive {
+		return rescode.New(rescode.BadRequest, "Chi nhánh đang ngừng hoạt động, vui lòng chọn chi nhánh khác")
+	}
+	return nil
+}
+
+// mergePublicLead ghi nhận lần đăng ký lặp lại vào lead đang mở (hoạt động NOTE), bổ sung email nếu trước đó trống.
+func (s *leadService) mergePublicLead(ctx context.Context, l *entity.Lead, req *v1.PublicCreateLeadReq, email string, now time.Time) (*v1.Lead, error) {
+	content := "Khách gửi lại form đăng ký tập thử từ website"
+	if note := strings.TrimSpace(req.Note); note != "" {
+		content += ": " + note
+	}
+	err := s.withinTx(ctx, func(txCtx context.Context) error {
+		if err := s.repo.CreateLeadActivity(txCtx, &entity.LeadActivity{
+			LeadID: l.ID, Type: "NOTE", Content: content, CreatedAt: now,
+		}); err != nil {
+			return err
+		}
+		changed := false
+		if l.Email == "" && email != "" {
+			l.Email, changed = email, true
+		}
+		if l.InterestPlanID == nil && req.InterestPlanID != nil {
+			l.InterestPlanID, changed = req.InterestPlanID, true
+		}
+		if changed {
+			return s.repo.UpdateLead(txCtx, l)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Trang công khai: chỉ trả lại dữ liệu người gửi vừa nhập, không lộ thông tin đã lưu của lead cũ.
+	return &v1.Lead{
+		ID: l.ID, BranchID: l.BranchID, FullName: strings.TrimSpace(req.FullName), Phone: l.Phone, Email: email,
+		Source: entity.LeadSourceWebsite, Status: entity.LeadStatusNew, Note: strings.TrimSpace(req.Note),
+		CreatedAt: now, UpdatedAt: now,
+	}, nil
 }
 
 // publicAvailableSlots tính số chỗ còn trống của lớp, không bao giờ âm.
@@ -346,10 +403,7 @@ func (s *leadService) CreateLead(ctx context.Context, req *v1.CreateLeadReq) (*v
 	if !reqctx.CanAccessBranch(ctx, req.BranchID) {
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền thêm khách tiềm năng cho chi nhánh này")
 	}
-	if _, err := s.repo.FindBranch(ctx, req.BranchID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, rescode.New(rescode.NotFound, "Không tìm thấy chi nhánh")
-		}
+	if err := s.ensureLeadBranchActive(ctx, req.BranchID); err != nil {
 		return nil, err
 	}
 	trialDate, err := leadParseDateOpt(req.TrialDate)
@@ -607,6 +661,9 @@ func (s *leadService) IssueTrialPass(ctx context.Context, req *v1.IssueTrialPass
 
 	if row.Status == entity.LeadStatusConverted {
 		return nil, rescode.New(rescode.BadRequest, "Khách đã chuyển đổi thành hội viên, không cần cấp vé tập thử")
+	}
+	if err := s.ensureLeadBranchActive(ctx, row.BranchID); err != nil {
+		return nil, err
 	}
 	now := s.now()
 	today := leadToday(now)

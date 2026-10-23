@@ -35,7 +35,10 @@ type (
 		MemberID *uint  // nil = khách vãng lai (chỉ hợp lệ với POS)
 		BranchID uint   // chi nhánh lập hóa đơn (phải thuộc phạm vi người dùng)
 		Source   string // COUNTER (mặc định) | POS | PORTAL
-		Items    []InvoiceItemDraft
+		// WalkIn: cho phép hóa đơn tại quầy (COUNTER) không gắn hội viên – vd bán vé tập theo ngày cho khách lẻ
+		// (không ghi source POS để không lẫn vào tổng kết bán hàng POS).
+		WalkIn bool
+		Items  []InvoiceItemDraft
 		// PromotionCode: mã khuyến mãi (tùy chọn). Khi có thì AppliesTo bắt buộc.
 		PromotionCode string
 		AppliesTo     string // MEMBERSHIP | PT | PRODUCT – loại đơn để kiểm tra mã
@@ -55,7 +58,7 @@ type (
 
 	PaymentInput struct {
 		Amount    float64
-		Method    string // CASH | TRANSFER | CARD
+		Method    string // CASH | TRANSFER | CARD (VNPAY chỉ dùng nội bộ cho IPN)
 		Reference string
 		Note      string
 	}
@@ -112,7 +115,9 @@ type (
 		AddPayment(ctx context.Context, invoiceID uint, in PaymentInput) (*entity.Invoice, error)
 		// Void hủy hóa đơn – chỉ khi CHƯA thu đồng nào (UNPAID). Trả lại lượt khuyến mãi, gọi VoidHandler.
 		Void(ctx context.Context, invoiceID uint, reason string) error
-		// Refund hoàn tiền ≤ paid_amount − refunded_amount; hoàn hết số đã thu → REFUNDED.
+		// Refund hoàn tiền tại quầy (CASH/TRANSFER/CARD) ≤ paid_amount − refunded_amount; hoàn hết số đã thu → REFUNDED
+		// (phần còn nợ, nếu có, được xóa nợ để hóa đơn không còn "Còn nợ" và RefundHandler được gọi).
+		// Hóa đơn của gói tập đã nâng cấp / chuyển nhượng (giá trị đã trả đã khấu trừ sang gói khác) → 409.
 		Refund(ctx context.Context, invoiceID uint, in RefundInput) (*entity.Invoice, error)
 		// RegisterPaidHandler / RegisterVoidHandler: đăng ký xử lý theo item_type (gọi khi khởi tạo module,
 		// có thể đăng ký nhiều handler cho một loại).
@@ -121,6 +126,9 @@ type (
 		// RegisterPayGuard: kiểm tra trước khi thu tiền theo item_type (vd. gói tập đã hủy thì không thu nữa).
 		// Guard trả lỗi → AddPayment bị từ chối.
 		RegisterPayGuard(itemType string, h InvoiceItemHandler)
+		// RegisterRefundHandler: xử lý khi hóa đơn chuyển sang REFUNDED (hoàn hết số đã thu), vd. gói PENDING chưa
+		// từng kích hoạt → hủy. Chạy trong transaction của thao tác hoàn tiền.
+		RegisterRefundHandler(itemType string, h InvoiceItemHandler)
 		// WriteOffRemaining khóa sổ phần còn nợ của hóa đơn (vd. khi hủy gói tập đã thu một phần):
 		// chưa thu đồng nào → VOID; đã thu một phần → giảm total = paid_amount (phần nợ chuyển thành giảm trừ)
 		// để hóa đơn không còn nợ và không thu tiếp. Không gọi Paid/VoidHandler.
@@ -149,10 +157,11 @@ type (
 		audit      AuditService
 		now        func() time.Time
 
-		mu           sync.RWMutex
-		paidHandlers map[string][]InvoiceItemHandler
-		voidHandlers map[string][]InvoiceItemHandler
-		payGuards    map[string][]InvoiceItemHandler
+		mu             sync.RWMutex
+		paidHandlers   map[string][]InvoiceItemHandler
+		voidHandlers   map[string][]InvoiceItemHandler
+		payGuards      map[string][]InvoiceItemHandler
+		refundHandlers map[string][]InvoiceItemHandler
 	}
 )
 
@@ -160,14 +169,15 @@ type (
 // để handler của các module cùng đăng ký vào một chỗ. promotions/audit có thể nil (test).
 func NewInvoiceService(repo repository.InvoiceRepository, promotions PromotionService, tx postgres.TxManager, audit AuditService) InvoiceService {
 	return &invoiceService{
-		repo:         repo,
-		promotions:   promotions,
-		tx:           tx,
-		audit:        audit,
-		now:          time.Now,
-		paidHandlers: map[string][]InvoiceItemHandler{},
-		voidHandlers: map[string][]InvoiceItemHandler{},
-		payGuards:    map[string][]InvoiceItemHandler{},
+		repo:           repo,
+		promotions:     promotions,
+		tx:             tx,
+		audit:          audit,
+		now:            time.Now,
+		paidHandlers:   map[string][]InvoiceItemHandler{},
+		voidHandlers:   map[string][]InvoiceItemHandler{},
+		payGuards:      map[string][]InvoiceItemHandler{},
+		refundHandlers: map[string][]InvoiceItemHandler{},
 	}
 }
 
@@ -181,9 +191,11 @@ func invoiceActorID(ctx context.Context) *uint {
 }
 
 var (
-	invoiceItemTypes     = []string{entity.InvoiceItemMembership, entity.InvoiceItemPT, entity.InvoiceItemProduct, entity.InvoiceItemFee, entity.InvoiceItemLocker, entity.InvoiceItemOther}
-	invoiceSources       = []string{entity.InvoiceSourceCounter, entity.InvoiceSourcePOS, entity.InvoiceSourcePortal}
-	invoicePayMethods    = []string{entity.PaymentCash, entity.PaymentTransfer, entity.PaymentCard}
+	invoiceItemTypes  = []string{entity.InvoiceItemMembership, entity.InvoiceItemPT, entity.InvoiceItemProduct, entity.InvoiceItemFee, entity.InvoiceItemLocker, entity.InvoiceItemOther}
+	invoiceSources    = []string{entity.InvoiceSourceCounter, entity.InvoiceSourcePOS, entity.InvoiceSourcePortal}
+	invoicePayMethods = []string{entity.PaymentCash, entity.PaymentTransfer, entity.PaymentCard}
+	// invoiceLedgerMethods: mọi phương thức có thể xuất hiện trong sổ thu tiền (gồm VNPay do IPN ghi nhận).
+	invoiceLedgerMethods = []string{entity.PaymentCash, entity.PaymentTransfer, entity.PaymentCard, entity.PaymentVNPay}
 	invoiceOrderable     = []string{"id", "issued_at", "total", "paid_amount", "invoice_no", "status"}
 	paymentOrderable     = []string{"id", "paid_at", "amount", "method"}
 	errInvoiceNotFound   = rescode.New(rescode.NotFound, "Không tìm thấy hóa đơn")
@@ -206,6 +218,12 @@ func (s *invoiceService) RegisterPayGuard(itemType string, h InvoiceItemHandler)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.payGuards[itemType] = append(s.payGuards[itemType], h)
+}
+
+func (s *invoiceService) RegisterRefundHandler(itemType string, h InvoiceItemHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refundHandlers[itemType] = append(s.refundHandlers[itemType], h)
 }
 
 func (s *invoiceService) runHandlers(ctx context.Context, handlers map[string][]InvoiceItemHandler, inv *entity.Invoice, items []entity.InvoiceItem) error {
@@ -351,7 +369,7 @@ func (s *invoiceService) CreateInvoice(ctx context.Context, draft InvoiceDraft) 
 	if !slices.Contains(invoiceSources, draft.Source) {
 		return nil, rescode.New(rescode.BadRequest, "Kênh lập hóa đơn không hợp lệ")
 	}
-	if draft.MemberID == nil && draft.Source != entity.InvoiceSourcePOS {
+	if draft.MemberID == nil && draft.Source != entity.InvoiceSourcePOS && !(draft.WalkIn && draft.Source == entity.InvoiceSourceCounter) {
 		return nil, rescode.New(rescode.BadRequest, "Hóa đơn phải gắn với hội viên")
 	}
 	preview, err := s.Preview(ctx, draft)
@@ -412,7 +430,17 @@ func (s *invoiceService) lock(ctx context.Context, id uint) (*entity.Invoice, er
 	return inv, nil
 }
 
+// invoiceValidMethod: phương thức thu/hoàn tại quầy – chỉ CASH/TRANSFER/CARD. VNPAY chỉ được ghi bởi IPN/hoàn
+// giao dịch VNPay (nhân viên không được tạo phiếu thu/hoàn "VNPay" giả ở quầy).
 func invoiceValidMethod(m string) error {
+	if !slices.Contains(invoicePayMethods, m) {
+		return rescode.New(rescode.BadRequest, "Phương thức thanh toán không hợp lệ (tại quầy chỉ nhận Tiền mặt, Chuyển khoản, Thẻ)")
+	}
+	return nil
+}
+
+// invoiceValidLedgerMethod: phương thức được ghi vào sổ thu/hoàn ở tầng nội bộ (gồm VNPAY cho IPN / hoàn VNPay).
+func invoiceValidLedgerMethod(m string) error {
 	if m != entity.PaymentVNPay && !slices.Contains(invoicePayMethods, m) {
 		return rescode.New(rescode.BadRequest, "Phương thức thanh toán không hợp lệ")
 	}
@@ -424,7 +452,9 @@ func invoiceApplyPayment(inv *entity.Invoice, amount float64) error {
 	switch inv.Status {
 	case entity.InvoiceStatusVoid:
 		return rescode.New(rescode.BadRequest, "Hóa đơn đã bị hủy, không thể thu tiền")
-	case entity.InvoiceStatusPaid, entity.InvoiceStatusRefunded:
+	case entity.InvoiceStatusRefunded:
+		return rescode.New(rescode.BadRequest, "Hóa đơn đã được hoàn tiền toàn bộ, không thể thu thêm")
+	case entity.InvoiceStatusPaid:
 		return rescode.New(rescode.BadRequest, "Hóa đơn đã được thanh toán đủ")
 	}
 	due := roundMoneyVND(inv.Total - inv.PaidAmount)
@@ -445,7 +475,7 @@ func (s *invoiceService) AddPayment(ctx context.Context, invoiceID uint, in Paym
 	if amount <= 0 {
 		return nil, rescode.New(rescode.BadRequest, "Số tiền thu phải lớn hơn 0")
 	}
-	if err := invoiceValidMethod(in.Method); err != nil {
+	if err := invoiceValidLedgerMethod(in.Method); err != nil {
 		return nil, err
 	}
 	var out *entity.Invoice
@@ -639,7 +669,9 @@ func (s *invoiceService) Void(ctx context.Context, invoiceID uint, reason string
 	})
 }
 
-// invoiceApplyRefund cập nhật số đã hoàn và trạng thái (hàm thuần).
+// invoiceApplyRefund cập nhật số đã hoàn và trạng thái (hàm thuần). Hoàn hết số đã thu → REFUNDED; nếu hóa đơn
+// còn nợ (PARTIAL) thì phần nợ được xóa (write_off_amount, total = paid_amount) để hóa đơn REFUNDED không còn
+// "Còn nợ" và không thu tiếp được.
 func invoiceApplyRefund(inv *entity.Invoice, amount float64) error {
 	switch inv.Status {
 	case entity.InvoiceStatusVoid:
@@ -656,11 +688,46 @@ func invoiceApplyRefund(inv *entity.Invoice, amount float64) error {
 	inv.RefundedAmount = roundMoneyVND(inv.RefundedAmount + amount)
 	if inv.RefundedAmount >= inv.PaidAmount {
 		inv.Status = entity.InvoiceStatusRefunded
+		if due := roundMoneyVND(inv.Total - inv.PaidAmount); due > 0 {
+			inv.WriteOffAmount = roundMoneyVND(inv.WriteOffAmount + due)
+			inv.Total = roundMoneyVND(inv.PaidAmount)
+			if inv.WriteOffReason == "" {
+				inv.WriteOffReason = invoiceRefundWriteOffReason
+			}
+		}
 	}
 	return nil
 }
 
+// invoiceRefundWriteOffReason: lý do xóa nợ tự động khi hoàn hết số đã thu của hóa đơn còn nợ.
+const invoiceRefundWriteOffReason = "Hoàn toàn bộ số đã thu – xóa phần còn nợ"
+
+// invoiceRefundBlockedErr: lỗi 409 khi hóa đơn thuộc gói tập mà giá trị đã trả đã được khấu trừ sang gói khác
+// (nâng cấp / chuyển nhượng). Hoàn hóa đơn gốc lúc này sẽ trả tiền hai lần (thất thoát) → chặn.
+func invoiceRefundBlockedErr(consumed []repository.InvoiceConsumedSub) error {
+	if len(consumed) == 0 {
+		return nil
+	}
+	c := consumed[0]
+	action := "nâng cấp"
+	detail := "giá trị đã trả đã được khấu trừ vào gói mới"
+	if c.EventType == entity.SubEventTransferred {
+		action, detail = "chuyển nhượng", "giá trị còn lại đã chuyển cho người nhận"
+	}
+	to := ""
+	if c.ToSubscriptionID > 0 {
+		to = fmt.Sprintf(" sang gói #%d", c.ToSubscriptionID)
+	}
+	return rescode.New(rescode.Conflict, fmt.Sprintf(
+		"Không thể hoàn tiền hóa đơn này: gói tập #%d đã được %s%s (%s). Vui lòng xử lý hủy/hoàn tiền trên gói hiện tại",
+		c.SubscriptionID, action, to, detail))
+}
+
 func (s *invoiceService) Refund(ctx context.Context, invoiceID uint, in RefundInput) (*entity.Invoice, error) {
+	// Hoàn tại quầy không được ghi phương thức VNPAY (hoàn VNPay đi qua chức năng hoàn giao dịch trực tuyến).
+	if err := invoiceValidMethod(in.Method); err != nil {
+		return nil, err
+	}
 	inv, _, err := s.refund(ctx, invoiceID, in, nil, "")
 	return inv, err
 }
@@ -672,7 +739,7 @@ func (s *invoiceService) refund(ctx context.Context, invoiceID uint, in RefundIn
 	if amount <= 0 {
 		return nil, nil, rescode.New(rescode.BadRequest, "Số tiền hoàn phải lớn hơn 0")
 	}
-	if err := invoiceValidMethod(in.Method); err != nil {
+	if err := invoiceValidLedgerMethod(in.Method); err != nil {
 		return nil, nil, err
 	}
 	reason := strings.TrimSpace(in.Reason)
@@ -690,19 +757,45 @@ func (s *invoiceService) refund(ctx context.Context, invoiceID uint, in RefundIn
 		if err := invoiceApplyRefund(inv, amount); err != nil {
 			return err
 		}
+		// Gói tập của hóa đơn đã nâng cấp / chuyển nhượng → giá trị đã trả đã được dùng ở gói khác, không hoàn được.
+		consumed, err := s.repo.ConsumedSubscriptions(ctx, inv.ID)
+		if err != nil {
+			return err
+		}
+		if err := invoiceRefundBlockedErr(consumed); err != nil {
+			return err
+		}
 		rf := &entity.Refund{InvoiceID: inv.ID, Amount: amount, Method: in.Method, Reason: invoiceTruncate(reason, 255), RefundedBy: invoiceActorID(ctx),
 			OnlineTxnID: onlineTxnID, GatewayRef: invoiceTruncate(gatewayRef, 100), Status: "SUCCESS"}
 		if err := s.repo.CreateRefund(ctx, rf); err != nil {
 			return err
 		}
-		if err := s.repo.UpdateFields(ctx, inv.ID, map[string]any{"refunded_amount": inv.RefundedAmount, "status": inv.Status}); err != nil {
+		fields := map[string]any{"refunded_amount": inv.RefundedAmount, "status": inv.Status}
+		writtenOff := roundMoneyVND(inv.WriteOffAmount - before.WriteOffAmount)
+		if writtenOff > 0 {
+			fields["total"], fields["write_off_amount"], fields["write_off_reason"] = inv.Total, inv.WriteOffAmount, inv.WriteOffReason
+		}
+		if err := s.repo.UpdateFields(ctx, inv.ID, fields); err != nil {
 			return err
 		}
+		after := map[string]any{"refund_id": rf.ID, "amount": amount, "method": rf.Method, "reason": rf.Reason, "refunded_amount": inv.RefundedAmount, "status": inv.Status, "online_txn_id": onlineTxnID}
+		if writtenOff > 0 {
+			after["written_off"], after["total"] = writtenOff, inv.Total
+		}
 		auditCatalog(ctx, s.audit, AuditRefund, auditEntityInvoice, inv.ID,
-			map[string]any{"refunded_amount": before.RefundedAmount, "status": before.Status},
-			map[string]any{"refund_id": rf.ID, "amount": amount, "method": rf.Method, "reason": rf.Reason, "refunded_amount": inv.RefundedAmount, "status": inv.Status, "online_txn_id": onlineTxnID})
+			map[string]any{"refunded_amount": before.RefundedAmount, "status": before.Status, "total": before.Total}, after)
 		if err := s.syncInstallments(ctx, inv, installmentCancelled); err != nil {
 			return err
+		}
+		if inv.Status == entity.InvoiceStatusRefunded && before.Status != entity.InvoiceStatusRefunded {
+			items, err := s.repo.Items(ctx, inv.ID)
+			if err != nil {
+				return err
+			}
+			inv.Items = items
+			if err := s.runHandlers(ctx, s.refundHandlers, inv, items); err != nil {
+				return err
+			}
 		}
 		out, outRefund = inv, rf
 		return nil
@@ -837,21 +930,34 @@ func (s *invoiceService) ListPayments(ctx context.Context, req *v1.PaymentListRe
 				MemberID: p.MemberID, MemberCode: p.MemberCode, MemberName: p.MemberName}
 		}), total, q),
 	}
-	res.Summary = invoiceSummarize(sums)
+	// Sổ thu tiền: luôn đủ 4 phương thức (gồm VNPAY) và tổng = Σ mọi phiếu thu theo bộ lọc.
+	res.Summary = invoiceSummarizeMethods(sums, invoiceLedgerMethods)
 	return res, nil
 }
 
-// invoiceSummarize gộp tổng thu theo phương thức (luôn đủ CASH, TRANSFER, CARD).
+// invoiceSummarize gộp tổng thu theo phương thức (luôn đủ CASH, TRANSFER, CARD; phương thức khác – vd VNPAY –
+// có phát sinh thì được thêm vào sau). Tổng luôn = Σ mọi phương thức.
 func invoiceSummarize(sums []repository.PaymentMethodTotal) v1.PaymentSummary {
-	out := v1.PaymentSummary{ByMethod: make([]*v1.MethodTotal, 0, len(invoicePayMethods))}
-	for _, m := range invoicePayMethods {
+	return invoiceSummarizeMethods(sums, invoicePayMethods)
+}
+
+// invoiceSummarizeMethods: như invoiceSummarize với danh sách phương thức luôn hiện (theo thứ tự) là base.
+func invoiceSummarizeMethods(sums []repository.PaymentMethodTotal, base []string) v1.PaymentSummary {
+	methods := slices.Clone(base)
+	for _, s := range sums {
+		if !slices.Contains(methods, s.Method) {
+			methods = append(methods, s.Method)
+		}
+	}
+	out := v1.PaymentSummary{ByMethod: make([]*v1.MethodTotal, 0, len(methods))}
+	for _, m := range methods {
 		mt := &v1.MethodTotal{Method: m}
 		for _, s := range sums {
 			if s.Method == m {
-				mt.Amount, mt.Count = roundMoneyVND(s.Amount), s.Count
+				mt.Amount, mt.Count = roundMoneyVND(mt.Amount+s.Amount), mt.Count+s.Count
 			}
 		}
-		out.TotalAmount += mt.Amount
+		out.TotalAmount = roundMoneyVND(out.TotalAmount + mt.Amount)
 		out.Count += mt.Count
 		out.ByMethod = append(out.ByMethod, mt)
 	}
@@ -971,7 +1077,8 @@ func toInvoiceRes(r repository.InvoiceRow) *v1.Invoice {
 		VoidedAt: r.VoidedAt, VoidReason: r.VoidReason, CreatedAt: r.CreatedAt,
 		WriteOffAmount: r.WriteOffAmount, WriteOffReason: r.WriteOffReason,
 	}
-	if r.Status == entity.InvoiceStatusVoid {
+	// Hóa đơn hủy / đã hoàn toàn bộ không còn nợ (dữ liệu cũ có thể còn total > paid_amount).
+	if r.Status == entity.InvoiceStatusVoid || r.Status == entity.InvoiceStatusRefunded || out.Due < 0 {
 		out.Due = 0
 	}
 	if r.MemberID != nil {

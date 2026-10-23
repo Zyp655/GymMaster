@@ -29,6 +29,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToastApiError } from '@/hooks/use-api-error';
 import { formatCurrency } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import type { PublicPlan } from '@/features/landing/types';
+import { formatAccessHours, guestPassesPerMonth } from '@/features/landing/utils';
 import {
   useCheckPromotionMutation,
   useCheckoutSubscriptionMutation,
@@ -42,6 +44,10 @@ import { PortalPageHeader } from './PortalPageHeader';
 export function BuySubscriptionView() {
   const t = useTranslations('portal.buySubscription');
   const ts = useTranslations('portal.status');
+  const dayLabel = (day: number) => t(`dow.${day}` as 'dow.1');
+  // Khung giờ vào tập của gói Off-Peak ('' = mọi giờ) – API cũ chưa trả trường này thì bỏ qua.
+  const accessHoursText = (plan: PublicPlan) =>
+    formatAccessHours(plan.access_hours, dayLabel, t('everyDay')).join('; ');
   const toastError = useToastApiError();
 
   const plansQuery = usePublicPlansQuery();
@@ -212,6 +218,16 @@ export function BuySubscriptionView() {
                               {t('freezeDays', { days: plan.max_freeze_days })}
                             </Badge>
                           ) : null}
+                          {accessHoursText(plan) ? (
+                            <Badge variant="warning">
+                              {t('accessHours', { hours: accessHoursText(plan) })}
+                            </Badge>
+                          ) : null}
+                          {guestPassesPerMonth(plan) > 0 ? (
+                            <Badge variant="outline">
+                              {t('guestPasses', { count: guestPassesPerMonth(plan) })}
+                            </Badge>
+                          ) : null}
                         </div>
                       </div>
                     </button>
@@ -293,6 +309,11 @@ export function BuySubscriptionView() {
                       ? t('allBranches')
                       : t('singleBranch')}
                   </p>
+                  {accessHoursText(selectedPlan) ? (
+                    <p className="text-caption text-secondary">
+                      {t('accessHours', { hours: accessHoursText(selectedPlan) })}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-2.5 border-t border-line pt-4 text-body">

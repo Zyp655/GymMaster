@@ -30,6 +30,7 @@ type fakeContractPassRepo struct {
 	passes    map[uint]*entity.DayPass
 	members   map[uint]*entity.Member
 	plans     map[uint]*entity.MembershipPlan
+	subEnds   map[uint]time.Time // ngày hết hạn gói của hội viên (mặc định hôm nay + 60)
 }
 
 func newFakeContractPassRepo() *fakeContractPassRepo {
@@ -39,6 +40,7 @@ func newFakeContractPassRepo() *fakeContractPassRepo {
 		passes:    map[uint]*entity.DayPass{},
 		members:   map[uint]*entity.Member{},
 		plans:     map[uint]*entity.MembershipPlan{},
+		subEnds:   map[uint]time.Time{},
 	}
 }
 
@@ -160,6 +162,15 @@ func (f *fakeContractPassRepo) CountSponsorGuestPassesInMonth(_ context.Context,
 	return cnt, nil
 }
 
+func (f *fakeContractPassRepo) ExistsGuestPassOnDate(_ context.Context, phone string, validDate time.Time) (bool, error) {
+	for _, dp := range f.passes {
+		if dp.Type == entity.DayPassTypeGuest && dp.Phone == phone && dp.ValidDate.Format("2006-01-02") == validDate.Format("2006-01-02") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeContractPassRepo) FindDayPassByID(_ context.Context, id uint) (*repository.DayPassRow, error) {
 	if dp, ok := f.passes[id]; ok {
 		return &repository.DayPassRow{DayPass: *dp}, nil
@@ -206,7 +217,13 @@ func (f *fakeContractPassRepo) FindActiveMemberPlan(_ context.Context, memberID 
 
 func (f *fakeContractPassRepo) ListActiveSubPlans(_ context.Context, memberID uint, _ time.Time) ([]repository.ActiveSubPlan, error) {
 	if p, ok := f.plans[memberID]; ok {
-		sub := entity.Subscription{MemberID: memberID, PlanID: p.ID, BranchID: 1, Status: entity.SubStatusActive}
+		today := subDateOf(time.Now())
+		end := today.AddDate(0, 0, 60)
+		if e, ok := f.subEnds[memberID]; ok {
+			end = e
+		}
+		sub := entity.Subscription{MemberID: memberID, PlanID: p.ID, BranchID: 1, Status: entity.SubStatusActive,
+			StartDate: today.AddDate(0, 0, -10), EndDate: end}
 		return []repository.ActiveSubPlan{{Sub: sub, Plan: *p}}, nil
 	}
 	return nil, nil
@@ -389,4 +406,65 @@ func TestContractPassService_XSSAndSignatureValidation(t *testing.T) {
 	signed, err := svc.SignMemberContract(memberCtx, &v1.SignMemberContractReq{ID: contracts[0].ID, SignatureData: "/uploads/2026/10/sig.png"})
 	require.NoError(t, err)
 	assert.Equal(t, "/uploads/2026/10/sig.png", signed.SignatureURL)
+}
+
+// FIN-PL-18/19 (B9): vé mời không được đặt quá xa (> 30 ngày tới / ngoài thời hạn gói) và một SĐT không nhận
+// hai vé mời cho cùng một ngày.
+func TestContractPassService_GuestPassDateAndPhoneLimits(t *testing.T) {
+	repo := newFakeContractPassRepo()
+	svc := NewContractPassService(repo, nil, nil)
+	uid := uint(201)
+	m := &entity.Member{UserID: &uid, FullName: "Người mời", Phone: "0912000111", HomeBranchID: 1}
+	m.ID = 20
+	repo.members[20] = m
+	plan := &entity.MembershipPlan{Name: "M3", GuestPassesPerMonth: 5, AccessScope: entity.AccessSingleBranch}
+	plan.ID = 3
+	repo.plans[20] = plan
+	memberCtx := reqctx.WithAuth(context.Background(), &token.Payload{UserID: uid, Roles: []string{consts.RoleMember}})
+	today := time.Now().In(memberVNLoc)
+	day := func(n int) string { return today.AddDate(0, 0, n).Format("2006-01-02") }
+
+	// Ngày quá xa (2030) / quá 30 ngày tới → 400.
+	_, err := svc.CreateGuestPass(memberCtx, &v1.CreateGuestPassReq{BuyerName: "Bạn", Phone: "0912345688", ValidDate: "2030-01-15"})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "ngày 2030 phải bị từ chối")
+	_, err = svc.CreateGuestPass(memberCtx, &v1.CreateGuestPassReq{BuyerName: "Bạn", Phone: "0912345688", ValidDate: day(31)})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "quá 30 ngày tới phải bị từ chối")
+
+	// Gói hết hạn sau 5 ngày → ngày thứ 6 bị từ chối dù chưa quá 30 ngày.
+	repo.subEnds[20] = subDateOf(time.Now()).AddDate(0, 0, 5)
+	_, err = svc.CreateGuestPass(memberCtx, &v1.CreateGuestPassReq{BuyerName: "Bạn", Phone: "0912345688", ValidDate: day(6)})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), "ngoài thời hạn gói phải bị từ chối")
+	_, err = svc.CreateGuestPass(memberCtx, &v1.CreateGuestPassReq{BuyerName: "Bạn", Phone: "0912345688", ValidDate: day(5)})
+	require.NoError(t, err, "ngày cuối của gói vẫn hợp lệ")
+	delete(repo.subEnds, 20)
+
+	// Cùng SĐT, cùng ngày → 409 (kể cả viết khác định dạng); khác ngày → được.
+	_, err = svc.CreateGuestPass(memberCtx, &v1.CreateGuestPassReq{BuyerName: "Bạn A", Phone: "0912345699", ValidDate: day(1)})
+	require.NoError(t, err)
+	_, err = svc.CreateGuestPass(memberCtx, &v1.CreateGuestPassReq{BuyerName: "Bạn A", Phone: "+84 912 345 699", ValidDate: day(1)})
+	assert.Equal(t, rescode.Conflict.Code(), codeOf(err), "vé thứ 2 cùng SĐT cùng ngày phải bị từ chối")
+	_, err = svc.CreateGuestPass(memberCtx, &v1.CreateGuestPassReq{BuyerName: "Bạn A", Phone: "0912345699", ValidDate: day(2)})
+	require.NoError(t, err)
+}
+
+// FIN-POS-31 (B6): hóa đơn bán vé ngày là hóa đơn tại quầy (COUNTER) cho khách lẻ, không ghi source POS.
+func TestContractPassService_DayPassInvoiceIsCounter(t *testing.T) {
+	fx := newSubFixture()
+	repo := newFakeContractPassRepo()
+	svc := NewContractPassService(repo, nil, nil, fx.inv)
+	ownerCtx := reqctx.WithAuth(context.Background(), &token.Payload{UserID: 1, Roles: []string{consts.RoleOwner}})
+	dp, err := svc.CreateDayPass(ownerCtx, &v1.CreateDayPassReq{BranchID: 1, BuyerName: "Khách lẻ", Phone: "0988111222", Price: 120000, PaymentMethod: "CASH"})
+	require.NoError(t, err)
+	require.NotNil(t, dp.InvoiceID)
+	inv := fx.invRep.invoices[*dp.InvoiceID]
+	assert.Equal(t, entity.InvoiceSourceCounter, inv.Source)
+	assert.Nil(t, inv.MemberID)
+	assert.Equal(t, entity.InvoiceStatusPaid, inv.Status)
+
+	// Hóa đơn COUNTER không gắn hội viên chỉ hợp lệ khi đánh dấu WalkIn.
+	_, err = fx.inv.CreateInvoice(ownerCtx, InvoiceDraft{BranchID: 1, Items: []InvoiceItemDraft{{ItemType: entity.InvoiceItemOther, Description: "X", UnitPrice: 1000}}})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
+	// VNPAY không được nhận ở quầy bán vé ngày.
+	_, err = svc.CreateDayPass(ownerCtx, &v1.CreateDayPassReq{BranchID: 1, BuyerName: "Khách lẻ", Phone: "0988111222", Price: 120000, PaymentMethod: "VNPAY"})
+	assert.Equal(t, rescode.BadRequest.Code(), codeOf(err))
 }

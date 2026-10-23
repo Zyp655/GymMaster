@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Column, Line, Pie } from '@ant-design/charts';
+import { Column, Line, Pie } from '@/components/Charts';
 import { useQuery } from '@tanstack/react-query';
 import { Col, Row, Segmented, Table } from 'antd';
 import type { ColumnsType } from 'antd/es/table';

@@ -71,3 +71,28 @@ export function setFormError<V>(
   form.setFields([{ name: field as never, errors: [msg] }]);
   return true;
 }
+
+/** Lỗi validate phía client của antd (`form.validateFields()` reject `{ errorFields }`). */
+export function isFieldValidationError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    Array.isArray((error as { errorFields?: unknown }).errorFields)
+  );
+}
+
+/**
+ * `form.validateFields()` an toàn: ô lỗi đã hiện dưới form → trả `null` thay vì reject
+ * (tránh "Unhandled promise rejection" khi handler gắn trực tiếp vào onClick/onOk).
+ *
+ *   const v = await validateForm(form);
+ *   if (!v) return;
+ */
+export async function validateForm<V>(form: FormInstance<V>): Promise<V | null> {
+  try {
+    return await form.validateFields();
+  } catch (error) {
+    if (isFieldValidationError(error)) return null;
+    throw error;
+  }
+}

@@ -3,7 +3,7 @@ import { Alert, App, Button, Form, Input, Modal } from 'antd';
 import type { SubscriptionDetail } from '@/api/subscription';
 import MemberSelect from '@/components/MemberSelect';
 import { formatDate, formatMoney } from '@/utils/format';
-import { setFormError, showError } from '@/utils/errors';
+import { setFormError, showError, validateForm } from '@/utils/errors';
 import PaymentFields from './PaymentFields';
 import { DEFAULT_PAYMENT, toPaymentInput } from './payment';
 import type { PaymentFormValues } from './payment';
@@ -39,7 +39,8 @@ export default function TransferModal({ open, sub, onClose }: TransferModalProps
 
   const submit = async () => {
     if (!sub) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     modal.confirm({
       title: 'Xác nhận chuyển nhượng gói?',
       content: `Gói ${sub.plan_name} của ${sub.member_name} sẽ chuyển sang trạng thái “Đã chuyển nhượng”. Thao tác không thể hoàn tác (trừ khi hủy hóa đơn phí chưa thu).`,

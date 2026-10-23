@@ -54,6 +54,8 @@ type (
 
 		FindMember(ctx context.Context, id uint) (*entity.Member, error)
 		SetMemberBlockedUntil(ctx context.Context, memberID uint, until time.Time) error
+		// ClearMemberBlock gỡ khóa đặt lớp của hội viên (booking_blocked_until = NULL).
+		ClearMemberBlock(ctx context.Context, memberID uint) error
 		// ActiveSubscriptions trả các đăng ký ACTIVE của hội viên (sắp theo end_date tăng dần).
 		ActiveSubscriptions(ctx context.Context, memberID uint) ([]ClassBookingSubscription, error)
 	}
@@ -67,19 +69,26 @@ func NewClassBookingRepository(db *gorm.DB) ClassBookingRepository {
 	return &classBookingRepository{db: db}
 }
 
+// detail: lượt đặt kèm hội viên + buổi lớp. trainer_* là HLV thực dạy; waitlist_rank là thứ hạng hiện tại trong danh sách
+// chờ (cùng thứ tự đẩy lên của FirstWaitlist: waitlist_position, booked_at, id).
 func (r *classBookingRepository) detail(ctx context.Context) *gorm.DB {
 	return postgres.Conn(ctx, r.db).Table("class_bookings cb").
 		Select(`cb.*, m.member_code, m.full_name AS member_name, m.phone AS member_phone, m.user_id AS member_user_id,
 			cs.class_type_id, ct.name AS class_type_name, ct.color AS class_type_color,
 			cs.branch_id, COALESCE(b.name, '') AS branch_name, COALESCE(rm.name, '') AS room_name,
-			cs.trainer_id, COALESCE(u.full_name, '') AS trainer_name,
-			cs.start_at, cs.end_at, cs.status AS schedule_status`).
+			COALESCE(cs.substitute_trainer_id, cs.trainer_id) AS trainer_id, COALESCE(u.full_name, '') AS trainer_name,
+			cs.start_at, cs.end_at, cs.status AS schedule_status,
+			CASE WHEN cb.status = 'WAITLIST' THEN (SELECT count(*) FROM class_bookings w
+				WHERE w.schedule_id = cb.schedule_id AND w.status = 'WAITLIST'
+				  AND (COALESCE(w.waitlist_position, 0), w.booked_at, w.id) <= (COALESCE(cb.waitlist_position, 0), cb.booked_at, cb.id))
+			END AS waitlist_rank`).
 		Joins("JOIN members m ON m.id = cb.member_id").
 		Joins("JOIN class_schedules cs ON cs.id = cb.schedule_id").
 		Joins("JOIN class_types ct ON ct.id = cs.class_type_id").
 		Joins("LEFT JOIN branches b ON b.id = cs.branch_id").
 		Joins("LEFT JOIN rooms rm ON rm.id = cs.room_id").
-		Joins("LEFT JOIN users u ON u.id = cs.trainer_id")
+		// HLV thực dạy: HLV dạy thay (nếu có), ngược lại HLV chính.
+		Joins("LEFT JOIN users u ON u.id = COALESCE(cs.substitute_trainer_id, cs.trainer_id)")
 }
 
 func (r *classBookingRepository) Create(ctx context.Context, b *entity.ClassBooking) error {
@@ -212,6 +221,11 @@ func (r *classBookingRepository) FindMember(ctx context.Context, id uint) (*enti
 func (r *classBookingRepository) SetMemberBlockedUntil(ctx context.Context, memberID uint, until time.Time) error {
 	return postgres.Conn(ctx, r.db).Model(&entity.Member{}).Where("id = ?", memberID).
 		UpdateColumn("booking_blocked_until", until).Error
+}
+
+func (r *classBookingRepository) ClearMemberBlock(ctx context.Context, memberID uint) error {
+	return postgres.Conn(ctx, r.db).Model(&entity.Member{}).Where("id = ?", memberID).
+		UpdateColumn("booking_blocked_until", nil).Error
 }
 
 func (r *classBookingRepository) ActiveSubscriptions(ctx context.Context, memberID uint) ([]ClassBookingSubscription, error) {

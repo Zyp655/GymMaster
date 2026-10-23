@@ -26,7 +26,7 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import jobApi from '@/api/job';
+import jobApi, { humanizeJobText } from '@/api/job';
 import type { JobInfo, JobRun, JobRunStatus } from '@/api/job';
 import ConfirmButton from '@/components/ConfirmButton';
 import DateText from '@/components/DateText';
@@ -36,7 +36,7 @@ import { PERM } from '@/constants/permissions';
 import type { StatusMeta } from '@/constants/status';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { usePermission } from '@/hooks/usePermission';
-import { getErrorMessage, setFormError, showError } from '@/utils/errors';
+import { getErrorMessage, setFormError, showError, validateForm } from '@/utils/errors';
 import { formatDateTime, formatNumber } from '@/utils/format';
 
 const JOB_RUN_STATUS_MAP: Record<string, StatusMeta> = {
@@ -186,7 +186,8 @@ function TestEmailModal({ open, onClose }: { open: boolean; onClose: () => void 
   });
 
   const handleSubmit = async () => {
-    const values = await form.validateFields();
+    const values = await validateForm(form);
+    if (!values) return;
     mutation.mutate(values.to.trim());
   };
 
@@ -264,7 +265,7 @@ export default function JobsPage() {
               icon={<PlayCircleOutlined />}
               disabled={r.running}
               confirmTitle={`Chạy ngay job "${r.name}"?`}
-              confirmContent={r.description}
+              confirmContent={humanizeJobText(r.description)}
               okText="Chạy ngay"
               onConfirm={() => runJob.mutateAsync(r.name)}
               aria-label="Chạy ngay"
@@ -304,9 +305,9 @@ export default function JobsPage() {
             <Typography.Paragraph
               type="secondary"
               style={{ fontSize: 12, marginBottom: 0 }}
-              ellipsis={{ rows: 2, tooltip: r.description }}
+              ellipsis={{ rows: 2, tooltip: humanizeJobText(r.description) }}
             >
-              {r.description}
+              {humanizeJobText(r.description)}
             </Typography.Paragraph>
           </Space>
         ),
@@ -424,7 +425,7 @@ export default function JobsPage() {
                   <Tag className="code-text">{r.spec}</Tag>
                 </Space>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  {r.description}
+                  {humanizeJobText(r.description)}
                 </Typography.Text>
                 <Typography.Text style={{ fontSize: 12 }}>
                   Kế tiếp: {r.next_run_at ? formatDateTime(r.next_run_at) : '—'}

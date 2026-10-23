@@ -228,6 +228,8 @@ func (f *reportFakeRepo) BranchNames(context.Context) (map[uint]string, error) {
 	return map[uint]string{1: "Cầu Giấy"}, nil
 }
 
+func (f *reportFakeRepo) BranchExists(_ context.Context, id uint) (bool, error) { return id == 1, nil }
+
 func (f *reportFakeRepo) RevenueFlows(_ context.Context, s repository.ReportScope, _ string) ([]repository.ReportRevenueRow, error) {
 	f.scopes = append(f.scopes, s)
 	if len(f.scopes) == 1 {
@@ -304,4 +306,16 @@ func TestReportServiceExportInvoices(t *testing.T) {
 	assert.True(t, panes.Freeze)
 	w, _ := f.GetColWidth("Danh sách", "D")
 	assert.Equal(t, 26.0, w)
+}
+
+// D6 (FIN-RPT-09/10): revenue/overview với branch_id không tồn tại → 404 (không trả báo cáo toàn số 0).
+func TestReportServiceUnknownBranch404(t *testing.T) {
+	svc := reportTestService(&reportFakeRepo{})
+	owner := reqctx.WithAuth(context.Background(), &token.Payload{UserID: 1, Roles: []string{consts.RoleOwner}})
+	_, err := svc.Revenue(owner, &v1.RevenueReq{Filter: v1.Filter{BranchID: 999999}})
+	require.Error(t, err)
+	assert.Equal(t, rescode.NotFound.Code(), reportErrCode(err))
+	_, err = svc.Overview(owner, &v1.OverviewReq{BranchID: 999999})
+	require.Error(t, err)
+	assert.Equal(t, rescode.NotFound.Code(), reportErrCode(err))
 }

@@ -175,7 +175,9 @@ describe('gymmaster-admin: utils/apiClient interceptors (in-memory adapter)', ()
 
     await assert.rejects(
       () => client.http.get('/unauth'),
-      (err: unknown) => err instanceof ApiError && err.code === ErrorCode.UNAUTHORIZED,
+      // UIA-076: hết phiên đã được onSessionExpired báo → handled để showError không toast lần 2.
+      (err: unknown) =>
+        err instanceof ApiError && err.code === ErrorCode.UNAUTHORIZED && err.handled === true,
     );
     assert.equal(expiredCount, 1);
     assert.equal(accessToken, null);
@@ -401,5 +403,367 @@ describe('gymmaster-admin: lịch rảnh / ngày lễ – giờ HH:mm', () => {
       }),
       { classes: 1, pt: 0 },
     );
+  });
+});
+
+import { readdirSync, readFileSync } from 'node:fs';
+import { AUDIT_ACTION_LABEL, AUDIT_ENTITY_LABEL } from '../src/api/audit.ts';
+
+/**
+ * Quét tĩnh `gymmaster-api/internal/service/*.go`: mọi action/entity (chuỗi hoặc hằng chuỗi) truyền
+ * vào `<x>audit.Log(` và các hàm bọc phải có nhãn tiếng Việt trong `src/api/audit.ts` (UIA-077 / A7).
+ */
+function collectGoAuditCodes() {
+  const dir = new URL('../../gymmaster-api/internal/service/', import.meta.url);
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.go') && !f.endsWith('_test.go'))
+    .map((f) => readFileSync(new URL(f, dir), 'utf8'));
+  const all = files.join('\n');
+  const consts = new Map<string, string>();
+  for (const m of all.matchAll(/(?:^|\bconst)\s*(\w+)\s+(?:string\s+)?=\s*"([^"]*)"/gm)) {
+    consts.set(m[1], m[2]);
+  }
+  const resolve = (t: string | undefined): string | undefined => {
+    if (t === undefined) return undefined;
+    const lit = /^"([^"]*)"$/.exec(t);
+    return lit ? lit[1] : consts.get(t);
+  };
+  /** Tách đối số của lời gọi bắt đầu ngay sau "(" tại `from`. */
+  const splitArgs = (src: string, from: number): string[] => {
+    const args: string[] = [];
+    let depth = 0;
+    let cur = '';
+    let inStr = false;
+    for (let i = from; i < src.length; i++) {
+      const c = src[i];
+      if (inStr) {
+        cur += c;
+        if (c === '\\') cur += src[++i];
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      if ('([{'.includes(c)) depth++;
+      if (')]}'.includes(c)) {
+        if (depth === 0) break;
+        depth--;
+      }
+      if (c === ',' && depth === 0) {
+        args.push(cur.trim());
+        cur = '';
+        continue;
+      }
+      cur += c;
+    }
+    args.push(cur.trim());
+    return args;
+  };
+  /** Danh sách tên tham số Go: "ctx context.Context, action, entityName string, id uint" → [ctx, action, entityName, id]. */
+  const paramNames = (list: string) =>
+    list
+      .split(',')
+      .map((p) => p.trim().split(/\s+/)[0])
+      .filter(Boolean);
+
+  // Hàm bọc: có tham số `action`; vị trí entity theo tham số `entityName`, hoặc cố định theo lời gọi bên trong.
+  type Wrapper = { action: number; entity: number | string };
+  const DEF = /\bfunc\s+(\([^)]*\)\s*)?(\w+)\(([^)]*)\)[^{]*\{/g;
+  const collectWrappers = (src: string, methods: boolean) => {
+    const out = new Map<string, Wrapper>();
+    for (const m of src.matchAll(DEF)) {
+      if (!!m[1] !== methods) continue;
+      const names = paramNames(m[3]);
+      const ai = names.indexOf('action');
+      if (ai < 0 || !names.includes('ctx')) continue;
+      const ei = names.indexOf('entityName');
+      if (ei >= 0) {
+        out.set(m[2], { action: ai, entity: ei });
+        continue;
+      }
+      // Entity cố định: lấy từ lời gọi audit trong thân hàm (vài dòng đầu).
+      const body = src.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 600);
+      const inner = /(?:\.Log|auditLogSafe)\(([^)]*)/.exec(body);
+      const innerArgs = inner ? inner[1].split(',').map((x) => x.trim()) : [];
+      const ent = innerArgs.find((x, i) => i > 0 && x !== 'action' && x !== 'ctx' && resolve(x));
+      if (ent) out.set(m[2], { action: ai, entity: resolve(ent)! });
+    }
+    return out;
+  };
+  const globals = collectWrappers(all, false);
+  globals.set('Log', { action: 1, entity: 2 });
+
+  const actions = new Set<string>();
+  const entities = new Set<string>();
+  const unresolved = new Set<string>();
+  let calls = 0;
+  for (const src of files) {
+    const wrappers = new Map([...globals, ...collectWrappers(src, true)]);
+    const names = [...wrappers.keys()].join('|');
+    const re = new RegExp(
+      `(\\bfunc\\s+(?:\\([^)]*\\)\\s*)?)?(?:\\b([\\w.]*?)\\.)?\\b(${names})\\(`,
+      'g',
+    );
+    for (const m of src.matchAll(re)) {
+      if (m[1]) continue; // định nghĩa hàm
+      const name = m[3];
+      if (name === 'Log' && !/[Aa]udit$/.test(m[2] ?? '')) continue; // g.Log(...) – không phải audit
+      const w = wrappers.get(name)!;
+      const args = splitArgs(src, (m.index ?? 0) + m[0].length);
+      if (args[0] !== 'ctx' && !args.includes('ctx')) continue;
+      calls++;
+      const a = resolve(args[w.action]);
+      const e = typeof w.entity === 'string' ? w.entity : resolve(args[w.entity]);
+      if (a === undefined) unresolved.add(String(args[w.action]));
+      else actions.add(a);
+      if (e === undefined) unresolved.add(String(args[w.entity as number]));
+      else entities.add(e);
+    }
+  }
+  return { calls, actions, entities, unresolved };
+}
+
+describe('gymmaster-admin: nhãn nhật ký kiểm toán phủ đủ mã backend (quét tĩnh)', () => {
+  const { calls, actions, entities, unresolved } = collectGoAuditCodes();
+  it('tìm thấy các lời gọi audit (bộ quét còn đúng)', () => {
+    assert.ok(calls > 150, `chỉ tìm thấy ${calls} lời gọi audit`);
+    assert.ok(actions.has('REASSIGN_TRAINER') && entities.has('online_payment_txn'));
+    // Tham số biến chỉ được phép trong các hàm bọc / tiền tố BULK_ (nhãn tự sinh).
+    for (const u of unresolved) {
+      assert.match(u, /^(action|entityName|entity|auditBulk\w*\+.*)$/, `không giải được: ${u}`);
+    }
+  });
+  it('mọi action có nhãn tiếng Việt', () => {
+    const missing = [...actions].filter((a) => !AUDIT_ACTION_LABEL[a]);
+    assert.deepEqual(missing, []);
+  });
+  it('mọi entity có nhãn tiếng Việt', () => {
+    const missing = [...entities].filter((e) => !AUDIT_ENTITY_LABEL[e]);
+    assert.deepEqual(missing, []);
+  });
+});
+
+import {
+  checkNewPassword,
+  passwordErrorField,
+} from '../src/components/ChangePasswordModal/passwordPolicy.ts';
+import { scheduleTrainer, scheduleTrainerText } from '../src/routes/classes/constants.ts';
+import { humanizeJobText } from '../src/api/job.ts';
+import { notificationTypeLabel } from '../src/api/notification.ts';
+import { isFieldValidationError, validateForm } from '../src/utils/errors.ts';
+import { connectSse, sseBackoffDelay } from '../src/layouts/sseReconnect.ts';
+import type { SseLike } from '../src/layouts/sseReconnect.ts';
+
+describe('QA vòng 4 (fix-ua)', () => {
+  it('UIA-072: chính sách mật khẩu mới + lỗi server hiện dưới đúng ô', () => {
+    assert.ok(checkNewPassword('abcdefghij'), 'thiếu số');
+    assert.ok(checkNewPassword('12345678'), 'thiếu chữ');
+    assert.ok(checkNewPassword('abc123'), 'ngắn');
+    assert.equal(checkNewPassword('Matkhau123'), null);
+    assert.equal(checkNewPassword('mậtkhẩu12'), null);
+    assert.equal(
+      passwordErrorField(40000, 'Mật khẩu phải có ít nhất 8 ký tự, gồm cả chữ và số'),
+      'new_password',
+    );
+    assert.equal(passwordErrorField(40102, 'Mật khẩu không đúng'), 'old_password');
+    assert.equal(passwordErrorField(40000, 'Mật khẩu hiện tại không đúng'), 'old_password');
+  });
+
+  it('UIA-065: HLV dạy thay – an toàn khi API chưa có trường substitute_*', () => {
+    assert.deepEqual(scheduleTrainer({ trainer_name: 'A' }), {
+      name: 'A',
+      substituted: false,
+      original: 'A',
+    });
+    const sub = { trainer_name: 'A', substitute_trainer_id: 9, substitute_trainer_name: 'B' };
+    assert.equal(scheduleTrainer(sub).name, 'B');
+    assert.equal(scheduleTrainerText(sub), 'B (dạy thay A)');
+    assert.equal(
+      scheduleTrainer({
+        trainer_name: 'A',
+        substitute_trainer_id: null,
+        substitute_trainer_name: '',
+      }).substituted,
+      false,
+    );
+  });
+
+  it('UIA-074: không hiển thị mã thô', () => {
+    assert.equal(notificationTypeLabel('DEVICE_OFFLINE'), 'Thiết bị mất kết nối');
+    assert.equal(notificationTypeLabel('SOMETHING_NEW'), 'Thông báo');
+    assert.equal(
+      humanizeJobText('Chuyển gói tập quá hạn sang EXPIRED, quét gói ACTIVE'),
+      'Chuyển gói tập quá hạn sang Hết hạn, quét gói Đang hiệu lực',
+    );
+    assert.equal(humanizeJobText('Đánh dấu NO_SHOW lượt đặt'), 'Đánh dấu Vắng mặt lượt đặt');
+  });
+
+  it('UIA-075: validateForm trả null khi lỗi validate client, ném lại lỗi khác', async () => {
+    const bad = { validateFields: () => Promise.reject({ errorFields: [{ name: ['reason'] }] }) };
+    const ok = { validateFields: () => Promise.resolve({ reason: 'x' }) };
+    const boom = { validateFields: () => Promise.reject(new Error('boom')) };
+    assert.equal(await validateForm(bad as never), null);
+    assert.deepEqual(await validateForm(ok as never), { reason: 'x' });
+    await assert.rejects(() => validateForm(boom as never), /boom/);
+    assert.equal(isFieldValidationError(new Error('x')), false);
+  });
+
+  it('A3: SSE nối lại có backoff, auth_expired → refresh rồi mở lại, refresh lỗi → dừng', async () => {
+    assert.equal(sseBackoffDelay(0), 1000);
+    assert.equal(sseBackoffDelay(3), 8000);
+    assert.equal(sseBackoffDelay(20), 60000);
+
+    class FakeEs implements SseLike {
+      listeners: Record<string, ((e: MessageEvent) => void)[]> = {};
+      onmessage: SseLike['onmessage'] = null;
+      onerror: SseLike['onerror'] = null;
+      onopen: SseLike['onopen'] = null;
+      closed = false;
+      url: string;
+      constructor(url: string) {
+        this.url = url;
+      }
+      addEventListener(t: string, l: (e: MessageEvent) => void) {
+        (this.listeners[t] ??= []).push(l);
+      }
+      emit(t: string) {
+        this.listeners[t]?.forEach((l) => l({ data: '' } as MessageEvent));
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+    const sources: FakeEs[] = [];
+    const timers: { fn: () => void; ms: number }[] = [];
+    let token = 't1';
+    let refreshOk = true;
+    let refreshes = 0;
+    const stop = connectSse({
+      buildUrl: () => `/stream?token=${token}`,
+      refresh: async () => {
+        refreshes++;
+        if (!refreshOk) throw new Error('revoked');
+        token = `t${refreshes + 1}`;
+      },
+      onEvent: () => undefined,
+      createSource: (url) => {
+        const es = new FakeEs(url);
+        sources.push(es);
+        return es;
+      },
+      setTimer: (fn, ms) => {
+        timers.push({ fn, ms });
+        return timers.length;
+      },
+      clearTimer: () => undefined,
+    });
+    const flush = async () => {
+      const t = timers.shift();
+      t?.fn();
+      await new Promise((r) => setImmediate(r));
+      return t;
+    };
+    assert.equal(sources.length, 1);
+
+    // auth_expired → đóng, refresh ngay, mở lại bằng token mới (không mở trùng khi onerror theo sau).
+    sources[0].emit('auth_expired');
+    sources[0].onerror?.(new Event('error'));
+    assert.equal(sources[0].closed, true);
+    assert.equal(timers.length, 1);
+    assert.equal((await flush())?.ms, 0);
+    assert.equal(refreshes, 1);
+    assert.equal(sources.length, 2);
+    assert.equal(sources[1].url, '/stream?token=t2');
+
+    // Mất mạng: lần 1 nối lại sau 1s không refresh; lần 2 (2s) có refresh.
+    sources[1].onerror?.(new Event('error'));
+    assert.equal((await flush())?.ms, 1000);
+    assert.equal(refreshes, 1);
+    sources[2].onerror?.(new Event('error'));
+    assert.equal((await flush())?.ms, 2000);
+    assert.equal(refreshes, 2);
+    assert.equal(sources.length, 4);
+
+    // Bị thu hồi + refresh thất bại → dừng hẳn.
+    refreshOk = false;
+    sources[3].emit('auth_revoked');
+    await flush();
+    assert.equal(sources.length, 4);
+    assert.equal(timers.length, 0);
+    stop();
+  });
+});
+
+import { nextActiveIndex } from '../src/layouts/globalSearch.ts';
+import { groupLockersByBranch, summarizeLockers } from '../src/routes/lockers/board.ts';
+import type { Locker } from '../src/api/operations-ext.ts';
+
+describe('QA vòng 5 (fix-ra)', () => {
+  it('Ctrl+K: ↑/↓ chọn kết quả vòng tròn, danh sách rỗng → -1', () => {
+    assert.equal(nextActiveIndex(-1, 'ArrowDown', 3), 0);
+    assert.equal(nextActiveIndex(0, 'ArrowDown', 3), 1);
+    assert.equal(nextActiveIndex(2, 'ArrowDown', 3), 0);
+    assert.equal(nextActiveIndex(0, 'ArrowUp', 3), 2);
+    assert.equal(nextActiveIndex(2, 'ArrowUp', 3), 1);
+    assert.equal(nextActiveIndex(-1, 'ArrowUp', 3), 2);
+    assert.equal(nextActiveIndex(1, 'Home', 3), 0);
+    assert.equal(nextActiveIndex(0, 'End', 3), 2);
+    assert.equal(nextActiveIndex(5, 'x', 3), 2);
+    assert.equal(nextActiveIndex(0, 'ArrowDown', 0), -1);
+  });
+
+  it('Sơ đồ tủ "Tất cả chi nhánh": tủ cùng mã A-01 không bị trộn, thống kê theo chi nhánh', () => {
+    const lk = (id: number, branch: number, zone: string, status: Locker['status']): Locker =>
+      ({
+        id,
+        branch_id: branch,
+        branch_name: branch === 1 ? 'Cầu Giấy' : undefined,
+        code: 'A-01',
+        zone,
+        size: 'STANDARD',
+        monthly_fee: 0,
+        status,
+        note: '',
+      }) as Locker;
+    const groups = groupLockersByBranch(
+      [
+        lk(1, 1, 'Khu Nam', 'AVAILABLE'),
+        lk(2, 2, 'Khu Nam', 'RENTED'),
+        lk(3, 1, 'Khu Nữ', 'BROKEN'),
+        lk(4, 1, 'Khu Nam', 'OCCUPIED'),
+      ],
+      (id) => (id === 2 ? 'Hai Bà Trưng' : undefined),
+    );
+    assert.deepEqual(
+      groups.map((g) => [
+        g.branchId,
+        g.branchName,
+        g.zones.map((z) => [z.zone, z.lockers.map((l) => l.id)]),
+      ]),
+      [
+        [
+          1,
+          'Cầu Giấy',
+          [
+            ['Khu Nam', [1, 4]],
+            ['Khu Nữ', [3]],
+          ],
+        ],
+        [2, 'Hai Bà Trưng', [['Khu Nam', [2]]]],
+      ],
+    );
+    assert.deepEqual(groups[0].summary, {
+      total: 3,
+      available: 1,
+      occupied: 1,
+      rented: 0,
+      broken: 1,
+    });
+    assert.deepEqual(summarizeLockers([]), {
+      total: 0,
+      available: 0,
+      occupied: 0,
+      rented: 0,
+      broken: 0,
+    });
   });
 });

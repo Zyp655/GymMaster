@@ -120,7 +120,7 @@ type SaveTrainerAvailabilityReq struct {
 type SaveTrainerAvailabilityRes = []*TrainerAvailabilityItem
 
 type ListLeaveRequestsReq struct {
-	g.Meta   `path:"/leave-requests" method:"get" tags:"Lịch rảnh & Nghỉ lễ" summary:"Danh sách đơn xin nghỉ phép của nhân viên/HLV" perm:"leave.manage,pt.view,shift.view"`
+	g.Meta `path:"/leave-requests" method:"get" tags:"Lịch rảnh & Nghỉ lễ" summary:"Danh sách đơn xin nghỉ phép của nhân viên/HLV" perm:"leave.manage,pt.view,shift.view"`
 	dto.PageReq
 	StaffID  uint   `json:"staff_id"  in:"query"`
 	BranchID uint   `json:"branch_id" in:"query"`
@@ -181,7 +181,7 @@ type ReassignPTSessionReq struct {
 type ReassignPTSessionRes = ImpactedPTSession
 
 type ListBranchHolidaysReq struct {
-	g.Meta   `path:"/branch-holidays" method:"get" tags:"Lịch rảnh & Nghỉ lễ" summary:"Danh sách lịch nghỉ lễ của phòng tập" perm:"holiday.manage,branch.view"`
+	g.Meta `path:"/branch-holidays" method:"get" tags:"Lịch rảnh & Nghỉ lễ" summary:"Danh sách lịch nghỉ lễ của phòng tập" perm:"holiday.manage,branch.view"`
 	dto.PageReq
 	BranchID uint `json:"branch_id" in:"query"`
 	Year     int  `json:"year"      in:"query"`

@@ -39,3 +39,31 @@ func TestCheckUserActive(t *testing.T) {
 	SetUserStatusLookup(nil)
 	assert.NoError(t, checkUserActive(ctx, 2), "chưa cấu hình lookup → bỏ qua kiểm tra")
 }
+
+func TestCheckSessionActive(t *testing.T) {
+	t.Cleanup(func() { SetSessionRevokedLookup(nil) })
+	revoked := map[uint]bool{1: false, 2: true}
+	SetSessionRevokedLookup(func(_ context.Context, id uint) (bool, error) {
+		if v, ok := revoked[id]; ok {
+			return v, nil
+		}
+		if id == 99 {
+			return false, errors.New("db down")
+		}
+		return false, gorm.ErrRecordNotFound
+	})
+	ctx := context.Background()
+
+	assert.NoError(t, checkSessionActive(ctx, 1), "phiên còn hiệu lực")
+	assert.Equal(t, rescode.Unauthorized.Code(), gerror.Code(checkSessionActive(ctx, 2)).Code(), "phiên đã đăng xuất → 401")
+	assert.Equal(t, rescode.Unauthorized.Code(), gerror.Code(checkSessionActive(ctx, 3)).Code(), "phiên không còn tồn tại → 401")
+	assert.NoError(t, checkSessionActive(ctx, 0), "token cũ không có sid → bỏ qua")
+	assert.NoError(t, checkSessionActive(ctx, 99), "lỗi DB tạm thời không chặn request")
+
+	// Thu hồi có hiệu lực ngay (không cache).
+	revoked[1] = true
+	assert.Error(t, checkSessionActive(ctx, 1))
+
+	SetSessionRevokedLookup(nil)
+	assert.NoError(t, checkSessionActive(ctx, 2), "chưa cấu hình lookup → bỏ qua kiểm tra")
+}

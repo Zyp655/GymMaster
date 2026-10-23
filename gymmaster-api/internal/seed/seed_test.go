@@ -249,4 +249,3 @@ func TestSeedHelpers_BulkAndEventData(t *testing.T) {
 		b.add(2) // thiếu cột
 	})
 }
-

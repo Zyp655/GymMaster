@@ -216,6 +216,13 @@ func (s *stockService) applyStockChange(ctx context.Context, productID, branchID
 		if ref.UnitCost != nil {
 			cost = *ref.UnitCost
 		}
+		// Hàng khách trả nhập lại kho theo giá vốn lúc bán → tính lại giá vốn bình quân gia quyền như một lần nhập
+		// (trước đây giữ nguyên giá vốn hiện tại dù hàng trả có giá vốn khác).
+		if typ == entity.StockSaleReturn && qty > 0 && ref.UnitCost != nil {
+			if err := s.reweightCostOnReturn(ctx, productID, qty, stockRoundCost(*ref.UnitCost)); err != nil {
+				return err
+			}
+		}
 		t := &entity.StockTransaction{
 			ProductID: productID, BranchID: branchID, Type: typ, Quantity: qty, BalanceAfter: newQty,
 			UnitCost: stockRoundCost(cost), ReferenceType: ref.RefType, ReferenceID: ref.RefID, SupplierID: ref.SupplierID,
@@ -235,6 +242,27 @@ func (s *stockService) applyStockChange(ctx context.Context, productID, branchID
 		return nil
 	})
 	return out, err
+}
+
+// reweightCostOnReturn: khóa sản phẩm (FOR UPDATE – đọc giá vốn mới nhất, tuần tự với phiếu nhập đồng thời) rồi
+// cập nhật giá vốn bình quân sau khi nhập lại qty đơn vị giá unitCost. Gọi SAU khi đã cộng tồn (SetLevel).
+func (s *stockService) reweightCostOnReturn(ctx context.Context, productID uint, qty int, unitCost float64) error {
+	p, err := s.products.FindProduct(ctx, productID, true)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil // sản phẩm đã ngừng kinh doanh (xóa mềm): vẫn nhận trả hàng, không còn giá vốn để tính lại
+		}
+		return err
+	}
+	total, err := s.products.TotalStock(ctx, productID)
+	if err != nil {
+		return err
+	}
+	newCost := stockWeightedCost(total-qty, p.CostPrice, qty, unitCost)
+	if newCost == p.CostPrice {
+		return nil
+	}
+	return s.repo.UpdateProductCost(ctx, productID, newCost)
 }
 
 func (s *stockService) notifyLowStock(ctx context.Context, p *entity.Product, branchID uint, qty int) {
@@ -389,6 +417,18 @@ func (s *stockService) lockProducts(ctx context.Context, ids []uint) (map[uint]*
 		out[id] = p
 	}
 	return out, nil
+}
+
+// lockExistingProducts giống lockProducts nhưng bỏ qua sản phẩm đã bị xóa mềm (dùng cho trả hàng của đơn cũ).
+func (s *stockService) lockExistingProducts(ctx context.Context, ids []uint) error {
+	uniq := append([]uint(nil), ids...)
+	sort.Slice(uniq, func(i, j int) bool { return uniq[i] < uniq[j] })
+	for _, id := range uniq {
+		if _, err := s.products.FindProduct(ctx, id, true); err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	}
+	return nil
 }
 
 // stockMergeQty gộp các dòng trùng sản phẩm (cộng số lượng), giữ thứ tự xuất hiện đầu tiên.

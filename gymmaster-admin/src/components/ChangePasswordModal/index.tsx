@@ -6,6 +6,7 @@ import { logout } from '@/store/authSlice';
 import { useAppDispatch } from '@/store';
 import { ErrorCode, isApiError } from '@/utils/api';
 import { getErrorMessage, showError } from '@/utils/errors';
+import { checkNewPassword, passwordErrorField } from './passwordPolicy';
 
 interface FormValues {
   old_password: string;
@@ -43,7 +44,7 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
           error.code as never,
         )
       ) {
-        const field = /mới|new/i.test(error.message) ? 'new_password' : 'old_password';
+        const field = passwordErrorField(error.code, error.message, ErrorCode.INVALID_CREDENTIALS);
         form.setFields([{ name: field, errors: [getErrorMessage(error)] }]);
         return;
       }
@@ -83,7 +84,12 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
           dependencies={['old_password']}
           rules={[
             { required: true, message: 'Vui lòng nhập mật khẩu mới' },
-            { min: 8, message: 'Mật khẩu mới tối thiểu 8 ký tự' },
+            {
+              validator: (_, value: string) => {
+                const msg = value ? checkNewPassword(value) : null;
+                return msg ? Promise.reject(new Error(msg)) : Promise.resolve();
+              },
+            },
             ({ getFieldValue }) => ({
               validator: (_, value) =>
                 !value || value !== getFieldValue('old_password')

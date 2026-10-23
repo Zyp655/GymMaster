@@ -11,3 +11,20 @@ export function pickDefaultExerciseId(
   }
   return latest?.exercise_id ?? exercises[0]?.id;
 }
+
+/** Mức tạ tối đa hợp lý cho một hiệp (kg) – chặn nhập nhầm kiểu 1000 kg (FD-05). */
+export const MAX_WORKOUT_WEIGHT_KG = 500;
+
+/** Ngày hiện tại theo giờ máy người dùng, dạng YYYY-MM-DD (khớp giá trị của <input type="date">). */
+export function localDateISO(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** true khi ngày tập (YYYY-MM-DD) hợp lệ và không nằm sau hôm nay. */
+export function isNotFutureDate(value: string, now: Date = new Date()): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  return value <= localDateISO(now);
+}

@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { LoadResult, PublicPlan } from '../types';
-import { bestValuePlanId, splitDuration } from '../utils';
+import { bestValuePlanId, formatAccessHours, guestPassesPerMonth, splitDuration } from '../utils';
 import { SectionHeading } from './SectionHeading';
 
 export async function PricingSection({ result }: { result: LoadResult<PublicPlan[]> }) {
@@ -18,6 +18,7 @@ export async function PricingSection({ result }: { result: LoadResult<PublicPlan
   const plans = result.ok ? result.data : [];
   const bestId = bestValuePlanId(plans);
 
+  const dayLabel = (day: number) => t(`pricing.dow.${day}` as 'pricing.dow.1');
   const duration = (days: number) => {
     const { unit, count } = splitDuration(days);
     return t(`duration.${unit}`, { count });
@@ -68,6 +69,18 @@ export async function PricingSection({ result }: { result: LoadResult<PublicPlan
                       : t('pricing.singleBranch'),
                 },
               ];
+              // Gói giới hạn khung giờ (Off-Peak) & vé khách mời – chỉ hiện khi API có trả.
+              const hours = formatAccessHours(plan.access_hours, dayLabel, t('pricing.everyDay'));
+              if (hours.length > 0) {
+                features.push({
+                  ok: true,
+                  text: t('pricing.accessHours', { hours: hours.join('; ') }),
+                });
+              }
+              const guests = guestPassesPerMonth(plan);
+              if (guests > 0) {
+                features.push({ ok: true, text: t('pricing.guestPasses', { count: guests }) });
+              }
               const unitPrice =
                 plan.type === 'SESSION' && plan.session_count
                   ? t('pricing.perSession', {

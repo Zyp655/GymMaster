@@ -233,6 +233,8 @@ func (g *demoGen) seedCatalog(ctx context.Context, tx *gorm.DB) error {
 				TransferFee:     def.TransferFee,
 				Status:          consts.StatusActive,
 				SortOrder:       def.Sort,
+
+				GuestPassesPerMonth: def.GuestPasses,
 			}
 			plan.CreatedBy = ptrUint(g.ownerID)
 			if err := tx.WithContext(ctx).Create(&plan).Error; err != nil {
@@ -438,7 +440,7 @@ func (g *demoGen) addShowcaseMember() {
 
 func (g *demoGen) assignMemberUsers() {
 	for i, m := range g.members {
-		if !m.demo && (m.email == "" || i%10 != 0) {
+		if !m.demo && (m.email == "" || i%3 != 0) {
 			continue
 		}
 		ll := g.now.Add(-time.Duration(g.r.between(30, 60*48)) * time.Minute)

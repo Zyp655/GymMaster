@@ -38,6 +38,11 @@ func (m *middleware) Authentication() ghttp.HandlerFunc {
 			r.SetError(err)
 			return
 		}
+		// Phiên (refresh token) đã bị đăng xuất/thu hồi → access token gắn phiên đó hết hiệu lực ngay.
+		if err := checkSessionActive(r.Context(), payload.SessionID); err != nil {
+			r.SetError(err)
+			return
+		}
 		r.SetCtxVar(consts.CtxAuthKey, payload)
 		r.Middleware.Next()
 	}
@@ -98,6 +103,48 @@ func checkUserActive(ctx context.Context, userID uint) error {
 	default:
 		return rescode.New(rescode.Unauthorized, "Tài khoản đã bị khóa, vui lòng liên hệ quản trị viên")
 	}
+}
+
+// SessionRevokedLookup trả true nếu phiên (refresh token, claim "sid") đã bị thu hồi chủ động: đăng xuất,
+// xóa phiên, đăng xuất thiết bị khác, đổi/đặt lại mật khẩu, khóa tài khoản. Phiên chỉ được xoay vòng khi
+// refresh KHÔNG tính là thu hồi (access token cũ còn hiệu lực tới hạn để tránh race giữa các request song song).
+type SessionRevokedLookup func(ctx context.Context, sessionID uint) (bool, error)
+
+var sessionRevokedLookup atomic.Pointer[SessionRevokedLookup]
+
+// SetSessionRevokedLookup đăng ký hàm tra phiên đã thu hồi (module auth gọi lúc khởi động). nil = tắt kiểm tra.
+func SetSessionRevokedLookup(fn SessionRevokedLookup) {
+	if fn == nil {
+		sessionRevokedLookup.Store(nil)
+		return
+	}
+	sessionRevokedLookup.Store(&fn)
+}
+
+// CheckSessionActive dùng cho các handler tự xác thực token ngoài middleware (vd. SSE).
+func CheckSessionActive(ctx context.Context, sessionID uint) error {
+	return checkSessionActive(ctx, sessionID)
+}
+
+// checkSessionActive: token không có sid (cấp trước khi có claim này) thì bỏ qua; lỗi DB không chặn request
+// (đã có kiểm tra trạng thái tài khoản), chỉ ghi log.
+func checkSessionActive(ctx context.Context, sessionID uint) error {
+	fnPtr := sessionRevokedLookup.Load()
+	if fnPtr == nil || sessionID == 0 {
+		return nil
+	}
+	revoked, err := (*fnPtr)(ctx, sessionID)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			g.Log().Errorf(ctx, "kiểm tra phiên %d: %v", sessionID, err)
+			return nil
+		}
+		revoked = true
+	}
+	if revoked {
+		return rescode.New(rescode.Unauthorized, "Phiên đăng nhập đã bị đăng xuất, vui lòng đăng nhập lại")
+	}
+	return nil
 }
 
 // Authorization đọc yêu cầu truy cập từ g.Meta của Req đang được phục vụ:

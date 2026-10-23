@@ -148,7 +148,7 @@ function AuditDetailDrawer({ logId, onClose }: { logId: number | null; onClose: 
               {
                 label: 'Địa chỉ IP',
                 children: <span className="code-text">{d.ip || '—'}</span>,
-                span: 2,
+                span: 'filled',
               },
             ]}
           />
@@ -165,7 +165,8 @@ function AuditDetailDrawer({ logId, onClose }: { logId: number | null; onClose: 
           ) : (
             <Table<AuditChange>
               size="small"
-              rowKey={(r, i) => r.field || String(i)}
+              // field là duy nhất trong một bản ghi ("" = so sánh toàn bộ) – không dùng index (antd đã bỏ).
+              rowKey={(r) => r.field || '__all__'}
               pagination={false}
               dataSource={d.changes}
               scroll={{ x: 'max-content' }}

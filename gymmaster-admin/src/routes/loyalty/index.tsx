@@ -727,18 +727,19 @@ function BadgesTab({ canManage }: { canManage: boolean }) {
   const columns = useMemo<ColumnsType<BadgeItem>>(
     () => [
       {
-        title: 'Mã huy hiệu',
-        dataIndex: 'code',
-        width: 150,
-        render: (c: string) => <Tag className="code-text">{c}</Tag>,
-      },
-      {
-        title: 'Tên huy hiệu',
+        // Tên tiếng Việt là chính; mã kỹ thuật (STREAK_7...) chỉ là dòng phụ.
+        title: 'Huy hiệu',
         dataIndex: 'name',
         render: (name: string, r) => (
           <Space>
             {renderBadgeIcon(r.icon)}
-            <Typography.Text strong>{name}</Typography.Text>
+            <div style={{ lineHeight: 1.3 }}>
+              <Typography.Text strong>{name}</Typography.Text>
+              <br />
+              <Typography.Text type="secondary" className="code-text" style={{ fontSize: 11 }}>
+                Mã: {r.code}
+              </Typography.Text>
+            </div>
           </Space>
         ),
       },

@@ -61,6 +61,7 @@ import StatCard from '@/components/StatCard';
 import StatusTag from '@/components/StatusTag';
 import { PERM } from '@/constants/permissions';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { usePermission } from '@/hooks/usePermission';
 import { useTableQuery } from '@/hooks/useTableQuery';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
@@ -74,6 +75,7 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
   const { message } = App.useApp();
   const qc = useQueryClient();
   const [subView, setSubView] = useState<'plans' | 'foods'>('plans');
+  const isMobile = useIsMobile();
 
   const [planModal, setPlanModal] = useState<{ open: boolean; record: MealPlan | null }>({
     open: false,
@@ -258,9 +260,13 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
         title: 'Hội viên áp dụng',
         key: 'member',
         render: (_, r) => (
-          <Space>
+          <Space direction="vertical" size={0}>
             <Typography.Text strong>{r.member_name || `Hội viên #${r.member_id}`}</Typography.Text>
-            {r.member_code && <Tag className="code-text">{r.member_code}</Tag>}
+            {r.member_code && (
+              <Typography.Text type="secondary" className="code-text" style={{ fontSize: 12 }}>
+                {r.member_code}
+              </Typography.Text>
+            )}
           </Space>
         ),
       },
@@ -268,7 +274,7 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
         title: 'Calo mục tiêu / ngày',
         dataIndex: 'target_calories',
         align: 'right',
-        render: (v: number) => <Tag color="volcano">{formatNumber(v)} kcal/ngày</Tag>,
+        render: (v: number) => <Tag color="volcano">{formatNumber(v)} kcal</Tag>,
       },
       {
         title: 'Thời gian áp dụng',
@@ -386,9 +392,10 @@ function NutritionAndFoodsTab({ canManage }: { canManage: boolean }) {
           <Segmented
             value={subView}
             onChange={(v) => setSubView(v as 'plans' | 'foods')}
+            // Nhãn ngắn trên điện thoại để không tràn ngang 390px.
             options={[
-              { label: 'Thực đơn dinh dưỡng hội viên', value: 'plans' },
-              { label: 'Thư viện món ăn & Macro', value: 'foods' },
+              { label: isMobile ? 'Thực đơn' : 'Thực đơn dinh dưỡng hội viên', value: 'plans' },
+              { label: isMobile ? 'Món ăn & Macro' : 'Thư viện món ăn & Macro', value: 'foods' },
             ]}
           />
         </Col>

@@ -74,7 +74,7 @@ type CreateLockerReq struct {
 	BranchID   uint     `json:"branch_id"   v:"required|min:1"`
 	Code       string   `json:"code"        v:"required"`
 	Zone       string   `json:"zone"        d:"Khu A"`
-	Size       string   `json:"size"        d:"STANDARD" v:"in:SMALL,STANDARD,LARGE"`
+	Size       string   `json:"size"        d:"STANDARD" v:"in:SMALL,STANDARD,LARGE#Kích cỡ tủ không hợp lệ (chỉ nhận SMALL, STANDARD hoặc LARGE)"`
 	MonthlyFee *float64 `json:"monthly_fee" v:"min:0" dc:"Bỏ trống = 150.000đ; 0 = tủ miễn phí"`
 	Status     string   `json:"status"      d:"AVAILABLE" v:"in:AVAILABLE,OCCUPIED,RENTED,BROKEN"`
 	Note       string   `json:"note"`

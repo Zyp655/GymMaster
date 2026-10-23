@@ -179,7 +179,13 @@ function SuppliersDesktop() {
           <Button
             type="link"
             size="small"
-            style={{ padding: 0, whiteSpace: 'normal', textAlign: 'left', height: 'auto' }}
+            style={{
+              padding: 0,
+              whiteSpace: 'normal',
+              textAlign: 'left',
+              height: 'auto',
+              maxWidth: 260,
+            }}
             onClick={() => openForm(r)}
           >
             {v}
@@ -187,18 +193,27 @@ function SuppliersDesktop() {
         ),
       },
       {
-        title: 'Điện thoại',
+        // Gộp điện thoại + email để bảng vừa khung 1440 (D8).
+        title: 'Liên hệ',
         dataIndex: 'phone',
         className: 'text-nowrap',
-        render: (v: string) => (v ? <a href={`tel:${v}`}>{formatPhone(v)}</a> : '—'),
+        render: (v: string, r) => (
+          <Space direction="vertical" size={0}>
+            {v ? <a href={`tel:${v}`}>{formatPhone(v)}</a> : '—'}
+            {r.email && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {r.email}
+              </Typography.Text>
+            )}
+          </Space>
+        ),
       },
-      { title: 'Email', dataIndex: 'email', render: (v: string) => v || '—' },
       {
         title: 'Địa chỉ',
         dataIndex: 'address',
         render: (v: string) =>
           v ? (
-            <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth: 240 }}>
+            <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth: 220 }}>
               {v}
             </Typography.Text>
           ) : (
@@ -210,7 +225,7 @@ function SuppliersDesktop() {
         dataIndex: 'note',
         render: (v: string) =>
           v ? (
-            <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth: 200 }}>
+            <Typography.Text ellipsis={{ tooltip: v }} style={{ maxWidth: 160 }}>
               {v}
             </Typography.Text>
           ) : (

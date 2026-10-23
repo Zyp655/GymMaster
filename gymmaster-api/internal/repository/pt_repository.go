@@ -151,7 +151,7 @@ type (
 		TrainerClassOverlap(ctx context.Context, trainerID uint, start, end time.Time) (bool, error)
 		MemberPTOverlap(ctx context.Context, memberID uint, start, end time.Time, excludeID uint) (bool, error)
 		MemberClassOverlap(ctx context.Context, memberID uint, start, end time.Time) (bool, error)
-		// TrainerClasses: buổi lớp nhóm (chưa hủy) của HLV có start_at trong [from, to).
+		// TrainerClasses: buổi lớp nhóm (chưa hủy) HLV thực dạy (chính hoặc dạy thay) có start_at trong [from, to).
 		TrainerClasses(ctx context.Context, trainerID uint, from, to time.Time) ([]PTClassSlot, error)
 
 		// ---- Hoa hồng ----
@@ -468,14 +468,16 @@ func (r *ptRepository) MemberClassOverlap(ctx context.Context, memberID uint, st
 func (r *ptRepository) TrainerClasses(ctx context.Context, trainerID uint, from, to time.Time) ([]PTClassSlot, error) {
 	var rows []PTClassSlot
 	err := postgres.Conn(ctx, r.db).Table("class_schedules cs").
-		Select(`cs.id, cs.branch_id, b.name AS branch_name, cs.trainer_id, COALESCE(u.full_name, '') AS trainer_name,
+		Select(`cs.id, cs.branch_id, b.name AS branch_name,
+			COALESCE(cs.substitute_trainer_id, cs.trainer_id) AS trainer_id, COALESCE(u.full_name, '') AS trainer_name,
 			ct.name AS class_type_name, ct.color, COALESCE(rm.name, '') AS room_name, cs.status,
 			cs.start_at, cs.end_at, cs.booked_count, cs.capacity`).
 		Joins("JOIN class_types ct ON ct.id = cs.class_type_id").
 		Joins("JOIN branches b ON b.id = cs.branch_id").
 		Joins("LEFT JOIN rooms rm ON rm.id = cs.room_id").
-		Joins("LEFT JOIN users u ON u.id = cs.trainer_id").
-		Where("cs.trainer_id = ? AND cs.status <> 'CANCELLED' AND cs.start_at >= ? AND cs.start_at < ?", trainerID, from, to).
+		Joins("LEFT JOIN users u ON u.id = COALESCE(cs.substitute_trainer_id, cs.trainer_id)").
+		// Lịch dạy theo HLV thực dạy: lớp HLV đang dạy thay hiện ở lịch người dạy thay, không hiện ở HLV chính.
+		Where("COALESCE(cs.substitute_trainer_id, cs.trainer_id) = ? AND cs.status <> 'CANCELLED' AND cs.start_at >= ? AND cs.start_at < ?", trainerID, from, to).
 		Order("cs.start_at, cs.id").Scan(&rows).Error
 	return rows, err
 }
@@ -550,7 +552,9 @@ func (r *ptRepository) PayCommissions(ctx context.Context, trainerID uint, perio
 	var rows []entity.TrainerCommission
 	tx := postgres.Conn(ctx, r.db).Model(&rows).
 		Clauses(clause.Returning{Columns: []clause.Column{{Name: "id"}, {Name: "amount"}}}).
-		Where("trainer_id = ? AND period = ? AND status = ?", trainerID, period, entity.CommissionPending)
+		Where("trainer_id = ? AND period = ? AND status = ?", trainerID, period, entity.CommissionPending).
+		// Khoản đã gắn vào bảng lương (payroll_id) sẽ được chi cùng lương – chi riêng ở đây sẽ làm bảng lương lệch.
+		Where("payroll_id IS NULL")
 	if branchIDs != nil {
 		tx = tx.Where("branch_id IN ?", branchIDs)
 	}

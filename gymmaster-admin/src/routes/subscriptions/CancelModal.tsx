@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Alert, App, Checkbox, Form, Input, Modal } from 'antd';
 import type { SubscriptionDetail } from '@/api/subscription';
-import { showError } from '@/utils/errors';
+import { showError, validateForm } from '@/utils/errors';
 import { formatMoney } from '@/utils/format';
 import PaymentFields from './PaymentFields';
 import { DEFAULT_PAYMENT } from './payment';
@@ -40,7 +40,8 @@ export default function CancelModal({ open, sub, onClose }: CancelModalProps) {
 
   const submit = async () => {
     if (!sub) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     const refund =
       v.withRefund && v.refund?.amount
         ? { amount: v.refund.amount, method: v.refund.method ?? 'CASH' }

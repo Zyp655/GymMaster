@@ -80,7 +80,7 @@ type WorkoutItemInput struct {
 	ExerciseID uint    `json:"exercise_id" v:"required|min:1#Vui lòng chọn bài tập|Bài tập không hợp lệ"`
 	Sets       int     `json:"sets"        d:"3"  v:"min:1#Số hiệp phải >= 1"`
 	Reps       int     `json:"reps"        d:"10" v:"min:1#Số lần lặp phải >= 1"`
-	Weight     float64 `json:"weight"      v:"min:0#Mức tạ không được âm"`
+	Weight     float64 `json:"weight"      v:"min:0|max:500#Mức tạ không được âm|Mức tạ tối đa 500 kg"`
 	RestSec    int     `json:"rest_sec"    d:"60" v:"min:0#Thời gian nghỉ không được âm"`
 	Note       string  `json:"note"        v:"max-length:255#Ghi chú tối đa 255 ký tự"`
 	Sort       int     `json:"sort"`
@@ -134,7 +134,7 @@ type WorkoutProgressPoint struct {
 // ---- Admin / HLV (/v1/admin) ----------------------------------------------------
 
 type ListExercisesReq struct {
-	g.Meta      `path:"/exercises" method:"get" tags:"Giáo án & Tập luyện" summary:"Danh sách bài tập" perm:"workout.view,workout.manage"`
+	g.Meta `path:"/exercises" method:"get" tags:"Giáo án & Tập luyện" summary:"Danh sách bài tập" perm:"workout.view,workout.manage"`
 	dto.PageReq
 	MuscleGroup string `json:"muscle_group" in:"query" v:"in:CHEST,BACK,SHOULDERS,LEGS,ARMS,CORE,CARDIO,FULL_BODY#Nhóm cơ không hợp lệ"`
 	Search      string `json:"search"       in:"query"`
@@ -161,7 +161,7 @@ type DeleteExerciseReq struct {
 type DeleteRes struct{}
 
 type ListWorkoutPlansReq struct {
-	g.Meta    `path:"/workout-plans" method:"get" tags:"Giáo án & Tập luyện" summary:"Danh sách giáo án tập luyện" perm:"workout.view,workout.manage"`
+	g.Meta `path:"/workout-plans" method:"get" tags:"Giáo án & Tập luyện" summary:"Danh sách giáo án tập luyện" perm:"workout.view,workout.manage"`
 	dto.PageReq
 	MemberID  uint   `json:"member_id"  in:"query"`
 	TrainerID uint   `json:"trainer_id" in:"query"`
@@ -225,7 +225,7 @@ type CreateWorkoutLogReq struct {
 	ExerciseID  uint    `json:"exercise_id"  v:"required|min:1#Vui lòng chọn bài tập"`
 	Sets        int     `json:"sets"         v:"required|min:1#Số hiệp phải >= 1"`
 	Reps        int     `json:"reps"         v:"required|min:1#Số lần lặp phải >= 1"`
-	Weight      float64 `json:"weight"       v:"min:0#Mức tạ không được âm"`
+	Weight      float64 `json:"weight"       v:"min:0|max:500#Mức tạ không được âm|Mức tạ tối đa 500 kg"`
 	Note        string  `json:"note"         v:"max-length:255"`
 	PerformedAt string  `json:"performed_at"`
 }

@@ -43,7 +43,7 @@ type MemberReviewsRes []*ReviewItem
 // ---- Admin (/v1/admin) ----------------------------------------------------------
 
 type ListReviewsReq struct {
-	g.Meta     `path:"/reviews" method:"get" tags:"Đánh giá" summary:"Danh sách đánh giá HLV & lớp học" perm:"review.view"`
+	g.Meta `path:"/reviews" method:"get" tags:"Đánh giá" summary:"Danh sách đánh giá HLV & lớp học" perm:"review.view"`
 	dto.PageReq
 	TrainerID  uint   `json:"trainer_id"  in:"query"`
 	TargetType string `json:"target_type" in:"query" v:"in:PT_SESSION,CLASS_SCHEDULE#Loại đánh giá không hợp lệ"`

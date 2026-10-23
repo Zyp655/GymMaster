@@ -408,6 +408,10 @@ func (s *lockerService) AssignLocker(ctx context.Context, req *v1.AssignLockerRe
 			}
 			return err
 		}
+		// Chỉ gán tủ cho hội viên đang hoạt động (LK-07).
+		if m.Status != entity.MemberStatusActive {
+			return rescode.New(rescode.BadRequest, "Hội viên đang không hoạt động, không thể gán tủ đồ")
+		}
 
 		now := s.now()
 		var (

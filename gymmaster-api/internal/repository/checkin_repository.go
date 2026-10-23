@@ -82,9 +82,10 @@ type (
 		// Checkout ghi giờ ra; trả false nếu đã checkout trước đó.
 		Checkout(ctx context.Context, id uint, at time.Time) (bool, error)
 		List(ctx context.Context, q dto.Query, f CheckinListFilter) ([]CheckinRow, int64, error)
-		// Present: hội viên đang trong phòng tập (ALLOWED, chưa checkout, vào từ since).
+		// Present: hội viên đang trong phòng tập (ALLOWED, chưa checkout, vào từ since = PresentSince(now)).
 		Present(ctx context.Context, branchIDs []uint, since time.Time) ([]CheckinRow, error)
-		Stats(ctx context.Context, branchIDs []uint, from, to time.Time) (*CheckinStatsRows, error)
+		// Stats: thống kê trong [from, to); presentSince != nil → đếm "đang trong phòng tập" (PresentSince(now)).
+		Stats(ctx context.Context, branchIDs []uint, from, to time.Time, presentSince *time.Time) (*CheckinStatsRows, error)
 	}
 
 	checkinRepository struct {
@@ -281,7 +282,7 @@ func (r *checkinRepository) Present(ctx context.Context, branchIDs []uint, since
 	return rows, err
 }
 
-func (r *checkinRepository) Stats(ctx context.Context, branchIDs []uint, from, to time.Time) (*CheckinStatsRows, error) {
+func (r *checkinRepository) Stats(ctx context.Context, branchIDs []uint, from, to time.Time, presentSince *time.Time) (*CheckinStatsRows, error) {
 	scope := func(db *gorm.DB) *gorm.DB {
 		db = db.Where("c.checked_in_at >= ? AND c.checked_in_at < ?", from, to)
 		if branchIDs != nil {
@@ -310,9 +311,15 @@ func (r *checkinRepository) Stats(ctx context.Context, branchIDs []uint, from, t
 	if err != nil {
 		return nil, err
 	}
-	err = conn.Table("checkins c").Scopes(scope).
-		Where("c.result = ? AND c.checked_out_at IS NULL", entity.CheckinAllowed).
-		Count(&out.Present).Error
+	if presentSince == nil {
+		return out, nil
+	}
+	// Đang trong phòng tập: định nghĩa chung (presence.go) – đếm theo người, không giới hạn trong khung ngày.
+	pq := conn.Table("checkins c").Where(presentCond("c"), *presentSince)
+	if branchIDs != nil {
+		pq = pq.Where("c.branch_id IN ?", branchIDs)
+	}
+	err = pq.Select("count(DISTINCT " + presentPersonKey("c") + ")").Scan(&out.Present).Error
 	return out, err
 }
 

@@ -231,6 +231,8 @@ type (
 
 	ReportRepository interface {
 		BranchNames(ctx context.Context) (map[uint]string, error)
+		// BranchExists: chi nhánh tồn tại và chưa bị xóa mềm.
+		BranchExists(ctx context.Context, id uint) (bool, error)
 		RevenueFlows(ctx context.Context, s ReportScope, unit string) ([]ReportRevenueRow, error)
 		Overview(ctx context.Context, p ReportOverviewParams) (*ReportOverviewRow, error)
 		LowStock(ctx context.Context, branchIDs []uint, limit int) ([]ReportLowStockRow, error)
@@ -314,6 +316,12 @@ func (r *reportRepository) BranchNames(ctx context.Context) (map[uint]string, er
 	return out, nil
 }
 
+func (r *reportRepository) BranchExists(ctx context.Context, id uint) (bool, error) {
+	var n int64
+	err := postgres.Conn(ctx, r.db).Table("branches").Where("id = ? AND deleted_at IS NULL", id).Count(&n).Error
+	return n > 0, err
+}
+
 // reportFlowsCTE: dòng tiền thực thu trong [start,end) – thanh toán (dương) và hoàn tiền (âm) – kèm tỷ lệ phân bổ
 // theo từng dòng hóa đơn (amount dòng / tổng amount các dòng; hóa đơn toàn dòng 0đ chia đều).
 const reportFlowsCTE = `
@@ -378,7 +386,8 @@ SELECT rev.*,
 	  AND NOT EXISTS (SELECT 1 FROM subscriptions n WHERE n.member_id = s.member_id AND n.id <> s.id
 	      AND n.status IN ('PENDING','ACTIVE','FROZEN') AND n.end_date > s.end_date)) AS expiring_7d,
 	(SELECT count(*) FROM checkins c WHERE c.result = 'ALLOWED' AND c.checked_in_at >= @today_start AND c.checked_in_at < @tomorrow` + reportBranch("c.branch_id", b) + `) AS checkins_today,
-	(SELECT count(*) FROM checkins c WHERE c.result = 'ALLOWED' AND c.checked_out_at IS NULL AND c.checked_in_at >= @today_start` + reportBranch("c.branch_id", b) + `) AS present_now,
+	(SELECT count(DISTINCT ` + presentPersonKey("c") + `) FROM checkins c
+	  WHERE c.result = 'ALLOWED' AND c.checked_out_at IS NULL AND c.checked_in_at >= @present_since` + reportBranch("c.branch_id", b) + `) AS present_now,
 	(SELECT count(*) FROM class_schedules cs WHERE cs.status <> 'CANCELLED' AND cs.start_at >= @today_start AND cs.start_at < @tomorrow` + reportBranch("cs.branch_id", b) + `) AS classes_today,
 	(SELECT COALESCE(SUM(cs.capacity), 0) FROM class_schedules cs WHERE cs.status <> 'CANCELLED' AND cs.start_at >= @today_start AND cs.start_at < @tomorrow` + reportBranch("cs.branch_id", b) + `) AS class_capacity_today,
 	(SELECT COALESCE(SUM(cs.booked_count), 0) FROM class_schedules cs WHERE cs.status <> 'CANCELLED' AND cs.start_at >= @today_start AND cs.start_at < @tomorrow` + reportBranch("cs.branch_id", b) + `) AS class_booked_today,
@@ -391,6 +400,7 @@ FROM rev`
 	args := ReportScope{BranchIDs: b}.args(map[string]any{
 		"today_start": p.TodayStart, "tomorrow": p.TomorrowStart, "month_start": p.MonthStart,
 		"prev_month_start": p.PrevMonthStart, "prev_month_same": p.PrevMonthSame, "today": p.Today, "today7": p.Today7,
+		"present_since": PresentSince(p.Now),
 	})
 	var row ReportOverviewRow
 	if err := r.raw(ctx, &row, q, args); err != nil {
@@ -541,7 +551,9 @@ func (r *reportRepository) CheckinTotals(ctx context.Context, s ReportScope) (*R
 	q := `
 SELECT count(*) FILTER (WHERE c.result = 'ALLOWED') AS allowed,
 	count(*) FILTER (WHERE c.result = 'DENIED') AS denied,
-	count(DISTINCT c.member_id) FILTER (WHERE c.result = 'ALLOWED') AS unique_members
+	-- Khách duy nhất: hội viên + mỗi vé ngày / vé tập thử là một khách (cùng công thức với /checkins/stats).
+	count(DISTINCT COALESCE('m' || c.member_id::text, 'd' || c.day_pass_id::text, 't' || c.trial_pass_id::text))
+		FILTER (WHERE c.result = 'ALLOWED') AS unique_members
 FROM checkins c
 WHERE c.checked_in_at >= @start AND c.checked_in_at < @end` + reportBranch("c.branch_id", s.BranchIDs)
 	var row ReportCheckinTotalsRow
@@ -554,7 +566,7 @@ WHERE c.checked_in_at >= @start AND c.checked_in_at < @end` + reportBranch("c.br
 func (r *reportRepository) ClassScheduleStats(ctx context.Context, s ReportScope) ([]ReportClassRow, error) {
 	q := `
 SELECT cs.id AS schedule_id, cs.class_type_id, ct.name AS class_type_name, ct.color,
-	cs.trainer_id, u.full_name AS trainer_name,
+	COALESCE(cs.substitute_trainer_id, cs.trainer_id) AS trainer_id, u.full_name AS trainer_name,
 	EXTRACT(HOUR FROM cs.start_at AT TIME ZONE {tz})::int AS hour,
 	EXTRACT(ISODOW FROM cs.start_at AT TIME ZONE {tz})::int AS dow,
 	cs.capacity,
@@ -565,7 +577,8 @@ SELECT cs.id AS schedule_id, cs.class_type_id, ct.name AS class_type_name, ct.co
 	count(b.id) FILTER (WHERE b.status = 'WAITLIST') AS waitlist
 FROM class_schedules cs
 JOIN class_types ct ON ct.id = cs.class_type_id
-JOIN users u ON u.id = cs.trainer_id
+-- HLV thực dạy: người dạy thay (nếu có) thay cho HLV được phân công.
+JOIN users u ON u.id = COALESCE(cs.substitute_trainer_id, cs.trainer_id)
 LEFT JOIN class_bookings b ON b.schedule_id = cs.id
 WHERE cs.status <> 'CANCELLED' AND cs.start_at >= @start AND cs.start_at < @end` + reportBranch("cs.branch_id", s.BranchIDs) + `
 GROUP BY cs.id, ct.name, ct.color, u.full_name
@@ -592,7 +605,8 @@ WITH pt AS (
 	WHERE ps.start_at >= @start AND ps.start_at < @end` + reportBranch("ps.branch_id", b) + `
 	GROUP BY 1
 ), cls AS (
-	SELECT cs.trainer_id, count(DISTINCT cs.id) AS classes_taught,
+	-- Số lớp đã dạy tính cho HLV thực dạy (dạy thay → người dạy thay), không phải HLV được phân công.
+	SELECT COALESCE(cs.substitute_trainer_id, cs.trainer_id) AS trainer_id, count(DISTINCT cs.id) AS classes_taught,
 		count(bk.id) FILTER (WHERE bk.status = 'ATTENDED') AS class_attendees
 	FROM class_schedules cs
 	LEFT JOIN class_bookings bk ON bk.schedule_id = cs.id

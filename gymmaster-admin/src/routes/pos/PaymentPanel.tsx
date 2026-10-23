@@ -1,6 +1,6 @@
 import { Button, Input, Select, Space, Tooltip, Typography } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
+import { COUNTER_PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
 import type { PaymentMethod } from '@/api/invoice';
 import MoneyInput from '@/components/Money/MoneyInput';
 import { formatMoney, formatNumber } from '@/utils/format';
@@ -55,7 +55,7 @@ export default function PaymentPanel({ total, payments, onChange, disabled }: Pa
         <div key={p.key} className="pos-pay__row">
           <Select<PaymentMethod>
             value={p.method}
-            options={PAYMENT_METHOD_OPTIONS}
+            options={COUNTER_PAYMENT_METHOD_OPTIONS}
             onChange={(method) => update(p.key, { method })}
             disabled={disabled}
             style={{ width: 130 }}

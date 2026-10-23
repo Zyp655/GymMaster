@@ -30,7 +30,7 @@ type fakeLeadRepo struct {
 func newFakeLeadRepo() *fakeLeadRepo {
 	return &fakeLeadRepo{
 		branches: map[uint]*entity.Branch{
-			1: {Code: "HN01", Name: "GymMaster Cầu Giấy"},
+			1: {Code: "HN01", Name: "GymMaster Cầu Giấy", Status: "ACTIVE"},
 		},
 		leads:      make(map[uint]*repository.LeadRow),
 		activities: make(map[uint][]repository.LeadActivityRow),
@@ -209,7 +209,7 @@ func TestLeadService_PublicCreateRateLimitAndFlow(t *testing.T) {
 		Phone:    "0988776655",
 	}, "203.0.113.10")
 	require.Error(t, err)
-	assert.Equal(t, rescode.TooManyAttempts.Code(), codeOf(err))
+	assert.Equal(t, rescode.TooManyRequests.Code(), codeOf(err))
 
 	// 2. Ghi nhận hoạt động chăm sóc tự chuyển trạng thái NEW -> CONTACTED
 	act, err := svc.AddActivity(ctx, &v1.AddLeadActivityReq{

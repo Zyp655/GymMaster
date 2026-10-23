@@ -365,7 +365,8 @@ func productValidImageURL(raw string) bool {
 		return false
 	}
 	if strings.HasPrefix(raw, "/uploads/") {
-		return !strings.Contains(raw, "..")
+		_, ok := safeUploadPath(raw)
+		return ok
 	}
 	u, err := url.Parse(raw)
 	if err != nil {

@@ -44,7 +44,7 @@ func RegisterPT(d *Deps, admin *ghttp.RouterGroup) {
 	cron.Register(cron.Job{
 		Name:        "expire_pt_contracts",
 		Spec:        "15 0 * * *",
-		Description: "Chuyển hợp đồng PT quá hạn sang EXPIRED, hủy các buổi đã đặt sau hạn",
+		Description: "Chuyển hợp đồng PT quá hạn sang Hết hạn, hủy các buổi đã đặt sau hạn",
 		Run:         func(ctx context.Context) (int, error) { return pt.ExpireContracts(ctx, time.Now()) },
 	})
 	cron.Register(cron.Job{

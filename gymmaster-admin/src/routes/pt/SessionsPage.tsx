@@ -103,7 +103,7 @@ function fromSession(s: PtSession): Ev {
   };
 }
 
-function fromScheduleItem(it: TrainerScheduleItem): Ev {
+function fromScheduleItem(it: TrainerScheduleItem, viewedTrainerId?: number): Ev {
   if (it.type === 'PT') {
     return {
       key: `pt-${it.id}`,
@@ -129,19 +129,22 @@ function fromScheduleItem(it: TrainerScheduleItem): Ev {
   }
   const slots =
     it.booked_count !== null && it.capacity !== null ? `${it.booked_count}/${it.capacity} chỗ` : '';
+  // Lớp dạy thay: API đưa vào lịch của người dạy thay, trainer_id vẫn là HLV chính.
+  const substitute = !!viewedTrainerId && !!it.trainer_id && it.trainer_id !== viewedTrainerId;
   return {
     key: `class-${it.id}`,
     sessionId: null,
     statusKey: 'CLASS',
     start_at: it.start_at,
     end_at: it.end_at,
-    title: `Lớp: ${it.title}`,
-    lines: [it.room_name, slots].filter(Boolean),
+    title: substitute ? `Dạy thay: ${it.title}` : `Lớp: ${it.title}`,
+    lines: [substitute ? `Thay ${it.trainer_name}` : '', it.room_name, slots].filter(Boolean),
     color: it.color || '#F97316',
     readOnly: true,
     tooltip: (
       <div style={{ fontSize: 12 }}>
         <b>Lớp nhóm – {it.title}</b>
+        {substitute && <div>Dạy thay cho HLV {it.trainer_name}</div>}
         <div>
           {dayjs(it.start_at).format('HH:mm')}–{dayjs(it.end_at).format('HH:mm')} · {it.room_name}
         </div>
@@ -285,8 +288,9 @@ export default function PtSessionsPage() {
       return (sessions.data ?? [])
         .filter((s) => showCancelled || status === 'CANCELLED' || s.status !== 'CANCELLED')
         .map(fromSession);
-    return (schedule.data ?? []).map(fromScheduleItem);
-  }, [mode, sessions.data, schedule.data, showCancelled, status]);
+    const viewed = trainerId ?? user?.id;
+    return (schedule.data ?? []).map((it) => fromScheduleItem(it, viewed));
+  }, [mode, sessions.data, schedule.data, showCancelled, status, trainerId, user?.id]);
 
   const stats = useMemo(() => {
     const map = new Map<string, number>();

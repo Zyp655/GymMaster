@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -86,6 +87,8 @@ type invoiceFakeRepo struct {
 	pendingTxns map[uint]*entity.OnlinePaymentTxn
 	// pendingLookup (tùy chọn) thay pendingTxns – nối với fake repo giao dịch VNPay trong test thanh toán trực tuyến.
 	pendingLookup func(ctx context.Context, invoiceID uint, since time.Time) (*entity.OnlinePaymentTxn, error)
+	// consumedLookup (tùy chọn): gói tập của hóa đơn đã nâng cấp/chuyển nhượng – nối với subFakeRepo trong fixture.
+	consumedLookup func(invoiceID uint) []repository.InvoiceConsumedSub
 }
 
 func newInvoiceFakeRepo(promos *invoiceFakePromoRepo) *invoiceFakeRepo {
@@ -235,6 +238,13 @@ func (f *invoiceFakeRepo) PendingOnlineTxn(ctx context.Context, invoiceID uint, 
 	return nil, nil
 }
 
+func (f *invoiceFakeRepo) ConsumedSubscriptions(_ context.Context, invoiceID uint) ([]repository.InvoiceConsumedSub, error) {
+	if f.consumedLookup != nil {
+		return f.consumedLookup(invoiceID), nil
+	}
+	return nil, nil
+}
+
 // ---- Subscription repo ------------------------------------------------------------
 
 type subFakeRepo struct {
@@ -361,6 +371,28 @@ func (f *subFakeRepo) ListEvents(_ context.Context, subID uint) ([]repository.Su
 		}
 	}
 	return out, nil
+}
+
+// consumedByInvoice mô phỏng invoiceRepository.ConsumedSubscriptions trên dữ liệu fake.
+func (f *subFakeRepo) consumedByInvoice(invoiceID uint) []repository.InvoiceConsumedSub {
+	var out []repository.InvoiceConsumedSub
+	for _, sub := range f.sorted() {
+		if sub.InvoiceID == nil || *sub.InvoiceID != invoiceID || sub.CarriedPaidBase != nil ||
+			(sub.Status != entity.SubStatusCancelled && sub.Status != entity.SubStatusTransferred) {
+			continue
+		}
+		ev, _ := f.LastEvent(context.Background(), sub.ID, entity.SubEventUpgraded, entity.SubEventTransferred,
+			entity.SubEventActivated, entity.SubEventExpired, entity.SubEventCancelled)
+		if ev == nil || (ev.EventType != entity.SubEventUpgraded && ev.EventType != entity.SubEventTransferred) {
+			continue
+		}
+		var d struct {
+			To uint `json:"to_subscription_id"`
+		}
+		_ = json.Unmarshal(ev.Data, &d)
+		out = append(out, repository.InvoiceConsumedSub{SubscriptionID: sub.ID, Status: sub.Status, EventType: ev.EventType, ToSubscriptionID: d.To})
+	}
+	return out
 }
 func (f *subFakeRepo) eventTypes(subID uint) []string {
 	var out []string
@@ -582,6 +614,7 @@ func newSubFixture() *subTestFixture {
 		inv: fx.invRep,
 	}
 	fx.repo.now = func() time.Time { return fx.clock }
+	fx.invRep.consumedLookup = fx.repo.consumedByInvoice
 	fx.inv = NewInvoiceService(fx.invRep, NewPromotionService(fx.promos, nil), subNoTx{}, nil).(*invoiceService)
 	fx.inv.now = func() time.Time { return fx.clock }
 	fx.svc = NewSubscriptionService(fx.repo, fx.inv, subNoTx{}, nil, nil).(*subscriptionService)

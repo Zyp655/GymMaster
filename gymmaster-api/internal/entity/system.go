@@ -30,10 +30,10 @@ type Notification struct {
 func (Notification) TableName() string { return "notifications" }
 
 type AuditLog struct {
-	ID        uint   `gorm:"primaryKey"`
+	ID        uint `gorm:"primaryKey"`
 	ActorID   *uint
-	Action    string         `gorm:"type:varchar(50);not null"`
-	Entity    string         `gorm:"type:varchar(50);not null"`
+	Action    string `gorm:"type:varchar(50);not null"`
+	Entity    string `gorm:"type:varchar(50);not null"`
 	EntityID  *uint
 	Before    datatypes.JSON `gorm:"type:jsonb"`
 	After     datatypes.JSON `gorm:"type:jsonb"`

@@ -104,6 +104,13 @@ describe('gymmaster-admin: dashboard – chi nhánh trong phạm vi', () => {
     assert.deepEqual(summarizeBranches(branches, [3, 99]), { total: 1, active: 0, inactive: 1 });
     assert.deepEqual(summarizeBranches([], [1]), { total: 0, active: 0, inactive: 0 });
   });
+  it('UIA-067: chi nhánh không có status (danh sách public) không bị tính là ngừng hoạt động', () => {
+    assert.deepEqual(summarizeBranches([{ id: 1 }, { id: 2 }], [1]), {
+      total: 1,
+      active: 1,
+      inactive: 0,
+    });
+  });
 });
 
 describe('gymmaster-admin: CMS – quyền gửi tin nhắn PT', () => {
@@ -115,7 +122,7 @@ describe('gymmaster-admin: CMS – quyền gửi tin nhắn PT', () => {
     assert.match(supervisor.reason ?? '', /chỉ đọc/);
     const expired = chatSendState({ trainer_id: 10, contract_status: 'EXPIRED' }, 10);
     assert.equal(expired.canSend, false);
-    assert.match(expired.reason ?? '', /ACTIVE/);
+    assert.match(expired.reason ?? '', /không còn hiệu lực/);
     assert.equal(chatSendState(null, 10).canSend, false);
     assert.equal(chatSendState(conv, undefined).canSend, false);
   });

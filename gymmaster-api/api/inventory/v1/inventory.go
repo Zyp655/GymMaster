@@ -12,7 +12,7 @@ import (
 
 type ImportItem struct {
 	ProductID uint    `json:"product_id" v:"required|min:1#Vui lòng chọn sản phẩm|Sản phẩm không hợp lệ"`
-	Quantity  int     `json:"quantity"   v:"required|min:1|max:1000000#Vui lòng nhập số lượng|Số lượng phải lớn hơn 0|Số lượng mỗi dòng tối đa 1.000.000"`
+	Quantity  int     `json:"quantity"   v:"required|integer|min:1|max:1000000#Vui lòng nhập số lượng|Số lượng phải là số nguyên|Số lượng phải lớn hơn 0|Số lượng mỗi dòng tối đa 1.000.000"`
 	UnitCost  float64 `json:"unit_cost"  v:"min:0|max:999999999999#Đơn giá nhập không được âm|Đơn giá nhập vượt quá giới hạn cho phép (tối đa 999.999.999.999đ)"`
 }
 
@@ -27,7 +27,7 @@ type ImportRes = Voucher
 
 type TransferItem struct {
 	ProductID uint `json:"product_id" v:"required|min:1#Vui lòng chọn sản phẩm|Sản phẩm không hợp lệ"`
-	Quantity  int  `json:"quantity"   v:"required|min:1|max:1000000#Vui lòng nhập số lượng|Số lượng phải lớn hơn 0|Số lượng mỗi dòng tối đa 1.000.000"`
+	Quantity  int  `json:"quantity"   v:"required|integer|min:1|max:1000000#Vui lòng nhập số lượng|Số lượng phải là số nguyên|Số lượng phải lớn hơn 0|Số lượng mỗi dòng tối đa 1.000.000"`
 }
 
 type TransferReq struct {
@@ -41,7 +41,7 @@ type TransferRes = Voucher
 
 type AdjustItem struct {
 	ProductID      uint `json:"product_id"      v:"required|min:1#Vui lòng chọn sản phẩm|Sản phẩm không hợp lệ"`
-	ActualQuantity *int `json:"actual_quantity" v:"min:0|max:100000000#Số lượng thực tế không được âm|Số lượng thực tế vượt quá giới hạn cho phép (tối đa 100.000.000)" dc:"Bắt buộc"`
+	ActualQuantity *int `json:"actual_quantity" v:"integer|min:0|max:100000000#Số lượng thực tế phải là số nguyên|Số lượng thực tế không được âm|Số lượng thực tế vượt quá giới hạn cho phép (tối đa 100.000.000)" dc:"Bắt buộc"`
 }
 
 type AdjustReq struct {

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Column } from '@ant-design/charts';
+import { Column } from '@/components/Charts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Card, Col, Empty, Row, Space, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';

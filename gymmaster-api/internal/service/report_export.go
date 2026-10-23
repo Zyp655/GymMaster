@@ -309,11 +309,15 @@ func (s *reportService) exportRevenue(ctx context.Context, x *reportXLSX, ids []
 	if err := x.sheet(det, title, subtitle); err != nil {
 		return err
 	}
+	// Các cột theo loại là THỰC THU (đã trừ hoàn tiền) → đặt sau cột "Thực thu" và ghi rõ trong tiêu đề, tránh
+	// đọc nhầm là phân rã của "Tổng thu" (gộp, chưa trừ hoàn). Σ các cột theo loại = cột "Thực thu".
+	_ = x.f.SetCellValue(det, "A3", "Ghi chú: các cột \"Thực thu – …\" là thực thu theo loại (đã trừ hoàn tiền); cộng lại bằng cột \"Thực thu\".")
 	cols := []reportCol{
-		{Title: "Kỳ", Width: 14}, {Title: "Gói tập", Width: 16, Kind: reportColMoney}, {Title: "PT", Width: 16, Kind: reportColMoney},
-		{Title: "Sản phẩm", Width: 16, Kind: reportColMoney}, {Title: "Phí", Width: 14, Kind: reportColMoney},
-		{Title: "Khác", Width: 14, Kind: reportColMoney}, {Title: "Tổng thu", Width: 18, Kind: reportColMoney},
+		{Title: "Kỳ", Width: 14}, {Title: "Tổng thu", Width: 18, Kind: reportColMoney},
 		{Title: "Hoàn tiền", Width: 16, Kind: reportColMoney}, {Title: "Thực thu", Width: 18, Kind: reportColMoney},
+		{Title: "Thực thu – Gói tập", Width: 20, Kind: reportColMoney}, {Title: "Thực thu – PT", Width: 18, Kind: reportColMoney},
+		{Title: "Thực thu – Sản phẩm", Width: 20, Kind: reportColMoney}, {Title: "Thực thu – Phí", Width: 18, Kind: reportColMoney},
+		{Title: "Thực thu – Khác", Width: 18, Kind: reportColMoney},
 	}
 	var rows [][]any
 	var t v1.RevenuePoint
@@ -322,7 +326,7 @@ func (s *reportService) exportRevenue(ctx context.Context, x *reportXLSX, ids []
 		if groupBy == "month" {
 			label = p.Label
 		}
-		rows = append(rows, []any{label, p.Membership, p.PT, p.Product, p.Fee, p.Other, p.Payments, p.Refunds, p.Total})
+		rows = append(rows, []any{label, p.Payments, p.Refunds, p.Total, p.Membership, p.PT, p.Product, p.Fee, p.Other})
 		t.Membership += p.Membership
 		t.PT += p.PT
 		t.Product += p.Product
@@ -332,7 +336,7 @@ func (s *reportService) exportRevenue(ctx context.Context, x *reportXLSX, ids []
 		t.Refunds += p.Refunds
 		t.Total += p.Total
 	}
-	x.table(det, 4, cols, rows, []any{"Tổng", t.Membership, t.PT, t.Product, t.Fee, t.Other, t.Payments, t.Refunds, t.Total}, true)
+	x.table(det, 4, cols, rows, []any{"Tổng", t.Payments, t.Refunds, t.Total, t.Membership, t.PT, t.Product, t.Fee, t.Other}, true)
 	return nil
 }
 
@@ -411,12 +415,6 @@ func (s *reportService) exportMembers(ctx context.Context, x *reportXLSX, ids []
 	return nil
 }
 
-var reportDenyLabel = map[string]string{
-	"MEMBER_INACTIVE": "Hội viên không hoạt động", "NO_ACTIVE_SUBSCRIPTION": "Không có gói hợp lệ", "WRONG_BRANCH": "Sai chi nhánh",
-	"NO_SESSIONS_LEFT": "Hết buổi", "SUBSCRIPTION_FROZEN": "Gói đang bảo lưu", "DUPLICATE": "Check-in trùng",
-	"QR_EXPIRED": "QR hết hạn", "QR_INVALID": "QR không hợp lệ", "BRANCH_CLOSED": "Ngoài giờ mở cửa",
-}
-
 func (s *reportService) exportCheckins(ctx context.Context, x *reportXLSX, ids []uint, r reportRange, subtitle string) error {
 	sc := r.scope(ids)
 	heat, err := s.repo.CheckinHeatmap(ctx, sc)
@@ -446,7 +444,7 @@ func (s *reportService) exportCheckins(ctx context.Context, x *reportXLSX, ids [
 	row := x.table(sum, 4, kv, [][]any{
 		{"Lượt vào hợp lệ", totals.Allowed},
 		{"Lượt bị từ chối", totals.Denied},
-		{"Số hội viên khác nhau", totals.UniqueMembers},
+		{"Số khách khác nhau (hội viên + vé ngày/tập thử)", totals.UniqueMembers},
 		{"Trung bình lượt / ngày", hm.AvgPerDay},
 		{"Khung giờ đông nhất", peak},
 	}, nil, false)
@@ -485,7 +483,8 @@ func (s *reportService) exportCheckins(ctx context.Context, x *reportXLSX, ids [
 		if c.Result == "DENIED" {
 			result = "Từ chối"
 		}
-		deny := reportDenyLabel[c.DenyReason]
+		// Nhãn tiếng Việt dùng chung với màn hình check-in (đủ mọi lý do: vé ngày, tập thử, giờ thấp điểm…).
+		deny := CheckinDenyMessage(c.DenyReason)
 		if deny == "" {
 			deny = c.DenyReason
 		}

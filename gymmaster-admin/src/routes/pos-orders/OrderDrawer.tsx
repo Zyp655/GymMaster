@@ -19,7 +19,7 @@ import {
 } from 'antd';
 import { PrinterOutlined, RollbackOutlined, StopOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
-import invoiceApi, { PAYMENT_METHOD_LABEL, PAYMENT_METHOD_OPTIONS } from '@/api/invoice';
+import invoiceApi, { COUNTER_PAYMENT_METHOD_OPTIONS, PAYMENT_METHOD_LABEL } from '@/api/invoice';
 import type { PaymentMethod } from '@/api/invoice';
 import inventoryApi from '@/api/inventory';
 import posApi from '@/api/pos';
@@ -33,7 +33,7 @@ import { usePermission } from '@/hooks/usePermission';
 import { VoidModal } from '@/routes/invoices/InvoiceActionModals';
 import { canVoid } from '@/routes/invoices/utils';
 import { printReceipt80 } from '@/routes/pos/cart';
-import { getErrorMessage, showError } from '@/utils/errors';
+import { getErrorMessage, showError, validateForm } from '@/utils/errors';
 import { formatDateTime, formatMoney, formatNumber } from '@/utils/format';
 
 export interface OrderDrawerProps {
@@ -105,7 +105,9 @@ export default function OrderDrawer({ invoiceId, onClose }: OrderDrawerProps) {
 
   const submitReturn = async () => {
     if (!inv || selected.length === 0) return;
-    const { reason } = await reasonForm.validateFields();
+    const parsed = await validateForm(reasonForm);
+    if (!parsed) return;
+    const { reason } = parsed;
     modal.confirm({
       title: `Trả ${selected.length} sản phẩm của hóa đơn ${inv.invoice_no}?`,
       content: (
@@ -127,7 +129,10 @@ export default function OrderDrawer({ invoiceId, onClose }: OrderDrawerProps) {
       onOk: () =>
         ret
           .mutateAsync({
-            items: selected.map((l) => ({ product_id: l.product_id, quantity: qty[l.product_id]! })),
+            items: selected.map((l) => ({
+              product_id: l.product_id,
+              quantity: qty[l.product_id]!,
+            })),
             refund_method: method,
             reason: reason.trim(),
           })
@@ -214,9 +219,17 @@ export default function OrderDrawer({ invoiceId, onClose }: OrderDrawerProps) {
                   </span>
                 ),
               },
-              ...(inv.note ? [{ label: 'Ghi chú', children: inv.note, span: 2 }] : []),
+              ...(inv.note
+                ? [{ label: 'Ghi chú', children: inv.note, span: 'filled' as const }]
+                : []),
               ...(inv.status === 'VOID'
-                ? [{ label: 'Lý do hủy', children: inv.void_reason || '—', span: 2 }]
+                ? [
+                    {
+                      label: 'Lý do hủy',
+                      children: inv.void_reason || '—',
+                      span: 'filled' as const,
+                    },
+                  ]
                 : []),
             ]}
           />
@@ -286,10 +299,15 @@ export default function OrderDrawer({ invoiceId, onClose }: OrderDrawerProps) {
 
           {canReturn && (
             <div style={{ marginTop: 16 }}>
-              <Form form={reasonForm} layout="vertical" preserve={false} key={`${invoiceId}-${formKey}`}>
+              <Form
+                form={reasonForm}
+                layout="vertical"
+                preserve={false}
+                key={`${invoiceId}-${formKey}`}
+              >
                 <Form.Item label="Phương thức hoàn tiền" required>
                   <Segmented<PaymentMethod>
-                    options={PAYMENT_METHOD_OPTIONS}
+                    options={COUNTER_PAYMENT_METHOD_OPTIONS}
                     value={method}
                     onChange={setMethod}
                   />

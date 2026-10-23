@@ -158,10 +158,11 @@ func (r *CMSRepository) EnsureConversation(ctx context.Context, contractID, memb
 	err := r.db.WithContext(ctx).Where("pt_contract_id = ?", contractID).First(&conv).Error
 	if err == nil {
 		if conv.TrainerID != trainerID || conv.MemberID != memberID {
-			if err := r.SyncConversationParticipants(ctx, conv.ID, memberID, trainerID); err != nil {
+			joinedAt, err := r.SyncConversationParticipants(ctx, &conv, memberID, trainerID)
+			if err != nil {
 				return nil, err
 			}
-			conv.TrainerID, conv.MemberID = trainerID, memberID
+			conv.TrainerID, conv.MemberID, conv.TrainerJoinedAt = trainerID, memberID, joinedAt
 		}
 		return &conv, nil
 	}
@@ -183,9 +184,18 @@ func (r *CMSRepository) EnsureConversation(ctx context.Context, contractID, memb
 }
 
 // SyncConversationParticipants ghi lại member_id/trainer_id của hội thoại theo hợp đồng PT (sau khi đổi HLV).
-func (r *CMSRepository) SyncConversationParticipants(ctx context.Context, convID, memberID, trainerID uint) error {
-	return r.db.WithContext(ctx).Model(&entity.Conversation{}).Where("id = ?", convID).
-		Updates(map[string]any{"member_id": memberID, "trainer_id": trainerID}).Error
+// Đổi HLV → trainer_joined_at = thời điểm đồng bộ (luôn trước mọi tin gửi HLV mới vì gửi/đọc tin đều đồng bộ trước).
+// Trả về trainer_joined_at sau cập nhật.
+func (r *CMSRepository) SyncConversationParticipants(ctx context.Context, conv *entity.Conversation, memberID, trainerID uint) (*time.Time, error) {
+	joinedAt := conv.TrainerJoinedAt
+	updates := map[string]any{"member_id": memberID, "trainer_id": trainerID}
+	if conv.TrainerID != trainerID {
+		now := time.Now()
+		joinedAt = &now
+		updates["trainer_joined_at"] = now
+	}
+	err := r.db.WithContext(ctx).Model(&entity.Conversation{}).Where("id = ?", conv.ID).Updates(updates).Error
+	return joinedAt, err
 }
 
 // ConversationListFilter: phạm vi danh sách hội thoại (đã chuẩn hóa theo vai trò ở service).
@@ -261,12 +271,17 @@ func (r *CMSRepository) MarkMessagesRead(ctx context.Context, conversationID, re
 	return q.Update("read_at", now).Error
 }
 
-func (r *CMSRepository) CountUnreadMessages(ctx context.Context, conversationID, readerUserID uint, readerRole string) int64 {
+// CountUnreadMessages đếm tin người xem chưa đọc. since != nil (HLV nhận bàn giao hội thoại): chỉ tính tin gửi từ
+// thời điểm người xem tham gia – tin cũ gửi HLV trước không hiện "chưa đọc" với HLV mới (C11).
+func (r *CMSRepository) CountUnreadMessages(ctx context.Context, conversationID, readerUserID uint, readerRole string, since *time.Time) int64 {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&entity.Message{}).
 		Where("conversation_id = ? AND sender_user_id <> ? AND read_at IS NULL", conversationID, readerUserID)
 	if readerRole != "" {
 		q = q.Where("sender_role <> ?", readerRole)
+	}
+	if since != nil {
+		q = q.Where("created_at >= ?", *since)
 	}
 	_ = q.Count(&count).Error
 	return count

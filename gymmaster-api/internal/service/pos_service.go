@@ -491,8 +491,15 @@ func (s *posService) Return(ctx context.Context, req *v1.ReturnReq) (*v1.ReturnR
 			return err
 		}
 		keys := make([]stockKey, 0, len(lines))
+		ids := make([]uint, 0, len(lines))
 		for _, l := range lines {
 			keys = append(keys, stockKey{l.ProductID, inv.BranchID})
+			ids = append(ids, l.ProductID)
+		}
+		// Khóa sản phẩm trước rồi mới tới dòng tồn – cùng thứ tự với phiếu nhập (tránh deadlock khi
+		// nhập và trả cùng sản phẩm đồng thời; reweightCostOnReturn cần khóa sản phẩm).
+		if err := s.stock.lockExistingProducts(ctx, ids); err != nil {
+			return err
 		}
 		if _, err := s.stock.lockLevels(ctx, keys); err != nil {
 			return err

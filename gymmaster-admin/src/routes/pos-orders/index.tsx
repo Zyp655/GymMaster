@@ -5,6 +5,7 @@ import {
   Card,
   Col,
   DatePicker,
+  Divider,
   Empty,
   Row,
   Space,
@@ -137,7 +138,13 @@ function PosDailySummary({
 
       <Row gutter={[12, 12]}>
         <Col xs={24} md={10}>
-          <Card size="small" title="Thu theo phương thức" loading={loading}>
+          <Card
+            size="small"
+            title={
+              <HelpLabel help={REVENUE_HELP.posByMethod}>Thu theo phương thức (gộp)</HelpLabel>
+            }
+            loading={loading}
+          >
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               {(s?.by_method ?? []).map((m) => (
                 <Row key={m.method} justify="space-between" align="middle">
@@ -150,6 +157,21 @@ function PosDailySummary({
                   </Col>
                 </Row>
               ))}
+              <Divider style={{ margin: '4px 0' }} />
+              <Row justify="space-between" align="middle">
+                <Col>
+                  <Typography.Text strong>Tổng thu (chưa trừ hoàn trả)</Typography.Text>
+                </Col>
+                <Col>
+                  <MoneyText
+                    value={(s?.by_method ?? []).reduce((t, m) => t + m.amount, 0)}
+                    strong
+                  />
+                </Col>
+              </Row>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Hoàn trả trong ngày: {formatMoney(s?.refund_amount ?? 0)} – xem thẻ Doanh thu thuần.
+              </Typography.Text>
             </Space>
           </Card>
         </Col>

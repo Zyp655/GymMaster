@@ -65,21 +65,24 @@ export const authOptions: NextAuthOptions = {
         email: { type: 'email' },
         password: { type: 'password' },
         mfa_code: { type: 'text' },
+        /** Refresh token API vừa cấp (đăng ký / xác thực OTP) → nhận phiên đó, không tạo phiên mới. */
+        refresh_token: { type: 'text' },
       },
       async authorize(credentials, req): Promise<User> {
-        if (!credentials?.email || !credentials.password) {
+        const issuedRefresh = credentials?.refresh_token?.trim();
+        if (!issuedRefresh && (!credentials?.email || !credentials.password)) {
           throw new Error(String(ApiCode.INVALID_CREDENTIALS));
         }
         try {
-          const mfaCode = credentials.mfa_code?.trim() || undefined;
+          const mfaCode = credentials?.mfa_code?.trim() || undefined;
           // Đăng nhập chạy trên server Next → chuyển tiếp UA/IP thật của trình duyệt cho API
           // (danh sách phiên hiển thị đúng thiết bị thay vì "node" / ::1).
-          const data = await loginRequest(
-            credentials.email,
-            credentials.password,
-            mfaCode,
-            clientInfoHeaders(req?.headers),
-          );
+          const headers = clientInfoHeaders(req?.headers);
+          // Có refresh token vừa cấp → xoay vòng chính token đó (phiên cũ bị thu hồi ngay),
+          // tránh mỗi lần đăng ký sinh thêm một phiên "ma" (FB-03).
+          const data = issuedRefresh
+            ? await refreshRequest(issuedRefresh, headers)
+            : await loginRequest(credentials!.email, credentials!.password, mfaCode, headers);
           const token = tokenFromLogin(data);
           return {
             id: String(data.user.id),

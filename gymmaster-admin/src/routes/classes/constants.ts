@@ -100,3 +100,29 @@ export function withAlpha(hex: string, alpha: number): string {
   const n = parseInt(m[1], 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
+
+/**
+ * HLV thực dạy buổi lớp: có HLV dạy thay → tên HLV thay, kèm HLV gốc để ghi chú.
+ * An toàn khi API chưa trả `substitute_*`.
+ */
+export function scheduleTrainer(
+  s: Pick<ClassSchedule, 'trainer_name' | 'substitute_trainer_id' | 'substitute_trainer_name'>,
+): { name: string; substituted: boolean; original: string } {
+  const subName = s.substitute_trainer_name?.trim();
+  if (s.substitute_trainer_id || subName) {
+    return {
+      name: subName || `HLV #${s.substitute_trainer_id}`,
+      substituted: true,
+      original: s.trainer_name,
+    };
+  }
+  return { name: s.trainer_name, substituted: false, original: s.trainer_name };
+}
+
+/** Chuỗi ngắn cho lịch tuần / danh sách mobile: "HLV B (dạy thay HLV A)". */
+export function scheduleTrainerText(
+  s: Pick<ClassSchedule, 'trainer_name' | 'substitute_trainer_id' | 'substitute_trainer_name'>,
+): string {
+  const t = scheduleTrainer(s);
+  return t.substituted ? `${t.name} (dạy thay ${t.original})` : t.name;
+}

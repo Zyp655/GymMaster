@@ -109,11 +109,11 @@ function StockTab({ onHistory }: { onHistory: (productId: number) => void }) {
       title: 'Sản phẩm',
       dataIndex: 'name',
       sorter: true,
-      width: isMobile ? 260 : 300,
+      width: isMobile ? 260 : 270,
       render: (_, r) => (
         <Space align="start">
           <ProductThumb src={r.image_url} size={36} />
-          <div style={{ maxWidth: isMobile ? 200 : 240, minWidth: 0 }}>
+          <div style={{ maxWidth: isMobile ? 200 : 210, minWidth: 0 }}>
             <Typography.Text ellipsis={{ tooltip: r.product_name }} style={{ display: 'block' }}>
               {r.product_name}
             </Typography.Text>
@@ -139,8 +139,8 @@ function StockTab({ onHistory }: { onHistory: (productId: number) => void }) {
     },
     ...(branchId
       ? []
-      : [{ title: 'Chi nhánh', dataIndex: 'branch_name', key: 'branch_id', sorter: true, width: 170 }]),
-    { title: 'Danh mục', dataIndex: 'category_name', width: 140, render: (v: string) => v || '—' },
+      : [{ title: 'Chi nhánh', dataIndex: 'branch_name', key: 'branch_id', sorter: true, width: 150 }]),
+    { title: 'Danh mục', dataIndex: 'category_name', width: 130, render: (v: string) => v || '—' },
     {
       title: 'Tồn',
       dataIndex: 'quantity',

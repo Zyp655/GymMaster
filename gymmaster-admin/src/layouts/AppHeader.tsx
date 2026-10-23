@@ -1,16 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   Button,
   Drawer,
   Grid,
   Input,
   Layout,
-  List,
   Modal,
   Space,
+  Spin,
   Tag,
   Tooltip,
   Typography,
+  theme,
 } from 'antd';
 import {
   BulbOutlined,
@@ -30,7 +32,12 @@ import AppDrawer from './AppDrawer';
 import BranchSwitcher from './BranchSwitcher';
 import NotificationBell from './NotificationBell';
 import UserMenu from './UserMenu';
-import { globalSearch, GLOBAL_SEARCH_DEBOUNCE_MS, searchTerm } from './globalSearch';
+import {
+  globalSearch,
+  GLOBAL_SEARCH_DEBOUNCE_MS,
+  nextActiveIndex,
+  searchTerm,
+} from './globalSearch';
 import QuickSellButton from '@/routes/subscriptions/QuickSellButton';
 
 /** Nhãn tiếng Việt cho loại kết quả tìm kiếm nhanh. */
@@ -105,6 +112,42 @@ export function AppHeader({ collapsed, onToggle }: AppHeaderProps) {
     staleTime: 30_000,
     retry: false,
   });
+  const searchHits = !term || searchQuery.isError ? [] : (searchQuery.data?.items ?? []);
+
+  // Điều hướng bàn phím trong kết quả (combobox/listbox WAI-ARIA): ↑/↓ chọn (vòng tròn), Enter mở,
+  // Esc đóng (Modal tự xử lý). Focus luôn ở ô nhập, mục đang chọn báo qua aria-activedescendant.
+  const { token } = theme.useToken();
+  const listboxId = useId();
+  const optionId = (i: number) => `${listboxId}-opt-${i}`;
+  const [activeIndex, setActiveIndex] = useState(-1);
+  useEffect(() => {
+    // Kết quả mới → chọn sẵn mục đầu để Enter mở ngay.
+    setActiveIndex(searchHits.length ? 0 : -1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery.data, term]);
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: 'nearest' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex]);
+  const openHit = (hit: (typeof searchHits)[number]) => {
+    setSearchOpen(false);
+    navigate(hit.link);
+  };
+  const onSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex((i) => nextActiveIndex(i, e.key, searchHits.length));
+      return;
+    }
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+      const hit = searchHits[activeIndex];
+      if (hit) {
+        e.preventDefault();
+        openHit(hit);
+      }
+    }
+  };
 
   return (
     <Layout.Header className="app-header">
@@ -173,48 +216,79 @@ export function AppHeader({ collapsed, onToggle }: AppHeaderProps) {
           placeholder="Nhập tên hội viên, SĐT, mã GMxxxxxx, số hóa đơn HD..., hoặc tên sản phẩm..."
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
+          onKeyDown={onSearchKeyDown}
           allowClear
+          role="combobox"
+          aria-label="Từ khóa tìm kiếm nhanh"
+          aria-autocomplete="list"
+          aria-expanded={searchHits.length > 0}
+          aria-controls={listboxId}
+          aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
         />
-        <List
-          style={{ marginTop: 12, maxHeight: 360, overflowY: 'auto' }}
-          loading={!!term && (searchQuery.isFetching || typingPending)}
-          dataSource={!term || searchQuery.isError ? [] : (searchQuery.data?.items ?? [])}
-          locale={{
-            emptyText: searchQuery.isError ? (
-              <Space direction="vertical" size={4}>
-                <Typography.Text type="danger">
-                  Không thể tìm kiếm lúc này. Vui lòng thử lại.
-                </Typography.Text>
-                <Button size="small" onClick={() => searchQuery.refetch()}>
-                  Thử lại
-                </Button>
-              </Space>
-            ) : term ? (
-              'Không tìm thấy kết quả phù hợp'
-            ) : (
-              'Nhập từ khóa để tra cứu'
-            ),
-          }}
-          renderItem={(hit) => (
-            <List.Item
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                setSearchOpen(false);
-                navigate(hit.link);
-              }}
+        <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6, fontSize: 12 }}>
+          ↑/↓ chọn kết quả · Enter mở · Esc đóng
+        </Typography.Text>
+        <Spin spinning={!!term && (searchQuery.isFetching || typingPending)}>
+          {searchHits.length ? (
+            <div
+              id={listboxId}
+              role="listbox"
+              aria-label="Kết quả tìm kiếm nhanh"
+              style={{ marginTop: 8, maxHeight: 360, overflowY: 'auto' }}
             >
-              <List.Item.Meta
-                title={
+              {searchHits.map((hit, i) => (
+                <div
+                  key={`${hit.category}-${hit.id}`}
+                  id={optionId(i)}
+                  role="option"
+                  aria-selected={i === activeIndex}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '10px 8px',
+                    borderRadius: token.borderRadius,
+                    borderBottom: `1px solid ${token.colorSplit}`,
+                    background: i === activeIndex ? token.colorPrimaryBg : undefined,
+                    boxShadow:
+                      i === activeIndex ? `inset 3px 0 0 ${token.colorPrimary}` : undefined,
+                  }}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  onClick={() => openHit(hit)}
+                >
                   <Space>
                     <Tag color="blue">{SEARCH_CATEGORY_LABEL[hit.category] ?? hit.category}</Tag>
                     <Typography.Text strong>{hit.title}</Typography.Text>
                   </Space>
-                }
-                description={hit.subtitle}
-              />
-            </List.Item>
+                  {hit.subtitle ? (
+                    <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4 }}>
+                      {hit.subtitle}
+                    </Typography.Text>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div
+              id={listboxId}
+              role="status"
+              style={{ marginTop: 8, padding: '24px 0', textAlign: 'center' }}
+            >
+              {searchQuery.isError ? (
+                <Space direction="vertical" size={4}>
+                  <Typography.Text type="danger">
+                    Không thể tìm kiếm lúc này. Vui lòng thử lại.
+                  </Typography.Text>
+                  <Button size="small" onClick={() => searchQuery.refetch()}>
+                    Thử lại
+                  </Button>
+                </Space>
+              ) : (
+                <Typography.Text type="secondary">
+                  {term ? 'Không tìm thấy kết quả phù hợp' : 'Nhập từ khóa để tra cứu'}
+                </Typography.Text>
+              )}
+            </div>
           )}
-        />
+        </Spin>
       </Modal>
 
       <Drawer

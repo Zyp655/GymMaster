@@ -158,8 +158,10 @@ func (d DbCfg) DSN() string {
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", d.User, d.Password, d.Host, d.Port, d.Name, d.SSLMode)
 }
 
+// IsProduction: APP_ENV "production"/"prod" không phân biệt hoa thường, bỏ khoảng trắng thừa (SWAG-02).
 func (c *Config) IsProduction() bool {
-	return c.Env == "production"
+	env := strings.ToLower(strings.TrimSpace(c.Env))
+	return env == "production" || env == "prod"
 }
 
 func getEnv(key, def string) string {

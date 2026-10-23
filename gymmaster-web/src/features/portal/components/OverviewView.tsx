@@ -237,7 +237,7 @@ function BranchOccupancyCard({
   const list = query.data ?? [];
   const occ = (branchId ? list.find(b => b.branch_id === branchId) : undefined) ?? list[0];
 
-  const present = occ ? (occ.present ?? occ.current_count ?? occ.active_count ?? 0) : 0;
+  const present = occ?.present_count ?? 0;
   const capacity = occ ? Math.max(occ.capacity || 100, 1) : 100;
   const percent = occ
     ? Math.min(

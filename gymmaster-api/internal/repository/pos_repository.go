@@ -100,11 +100,15 @@ func (r *posRepository) FindMember(ctx context.Context, id uint) (*entity.Member
 	return &m, nil
 }
 
-// posInvoices: hóa đơn POS (không tính hóa đơn hủy) lập trong khoảng thời gian.
+// posProductInvoiceCond: hóa đơn POS có ít nhất một dòng sản phẩm. Hóa đơn source POS không có dòng sản phẩm
+// (vd vé tập theo ngày lập trước khi chuyển sang COUNTER) không phải đơn bán hàng → không tính vào tổng kết POS.
+const posProductInvoiceCond = "i.source = ? AND EXISTS (SELECT 1 FROM invoice_items pit WHERE pit.invoice_id = i.id AND pit.item_type = ?)"
+
+// posInvoices: hóa đơn bán hàng POS (có dòng sản phẩm, không tính hóa đơn hủy) lập trong khoảng thời gian.
 func (r *posRepository) posInvoices(ctx context.Context, f PosSummaryFilter) *gorm.DB {
 	tx := postgres.Conn(ctx, r.db).Table("invoices i").
-		Where("i.source = ? AND i.status <> ? AND i.issued_at >= ? AND i.issued_at < ?",
-			entity.InvoiceSourcePOS, entity.InvoiceStatusVoid, f.From, f.To)
+		Where(posProductInvoiceCond, entity.InvoiceSourcePOS, entity.InvoiceItemProduct).
+		Where("i.status <> ? AND i.issued_at >= ? AND i.issued_at < ?", entity.InvoiceStatusVoid, f.From, f.To)
 	if f.BranchIDs != nil {
 		tx = tx.Where("i.branch_id IN ?", f.BranchIDs)
 	}
@@ -170,7 +174,8 @@ func (r *posRepository) RefundTotal(ctx context.Context, f PosSummaryFilter) (fl
 	var v float64
 	tx := postgres.Conn(ctx, r.db).Table("refunds rf").
 		Joins("JOIN invoices i ON i.id = rf.invoice_id").
-		Where("i.source = ? AND rf.created_at >= ? AND rf.created_at < ?", entity.InvoiceSourcePOS, f.From, f.To)
+		Where(posProductInvoiceCond, entity.InvoiceSourcePOS, entity.InvoiceItemProduct).
+		Where("rf.created_at >= ? AND rf.created_at < ?", f.From, f.To)
 	if f.BranchIDs != nil {
 		tx = tx.Where("i.branch_id IN ?", f.BranchIDs)
 	}
@@ -181,7 +186,8 @@ func (r *posRepository) RefundTotal(ctx context.Context, f PosSummaryFilter) (fl
 func (r *posRepository) PaymentsByMethod(ctx context.Context, f PosSummaryFilter) ([]PaymentMethodTotal, error) {
 	tx := postgres.Conn(ctx, r.db).Table("payments pm").
 		Joins("JOIN invoices i ON i.id = pm.invoice_id").
-		Where("i.source = ? AND pm.paid_at >= ? AND pm.paid_at < ?", entity.InvoiceSourcePOS, f.From, f.To)
+		Where(posProductInvoiceCond, entity.InvoiceSourcePOS, entity.InvoiceItemProduct).
+		Where("pm.paid_at >= ? AND pm.paid_at < ?", f.From, f.To)
 	if f.BranchIDs != nil {
 		tx = tx.Where("i.branch_id IN ?", f.BranchIDs)
 	}

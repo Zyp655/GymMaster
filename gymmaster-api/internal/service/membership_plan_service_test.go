@@ -38,3 +38,31 @@ func TestNormalizePlanInput_AccessHours(t *testing.T) {
 		assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), bad)
 	}
 }
+
+// B9 (FIN-PL-06/07): khung giờ chồng nhau trong cùng ngày và dow trùng → 400; khung liền nhau / khác ngày hợp lệ.
+func TestNormalizePlanInput_AccessHoursOverlapAndDupDow(t *testing.T) {
+	base := v1.PlanInput{Code: "off", Name: "Off-peak", Type: entity.PlanTypeTime, DurationDays: 30, Price: 100000}
+	bad := [][]v1.AccessHoursSlot{
+		{{Dow: []int{1, 1, 1}, From: "06:00", To: "09:00"}},
+		{{Dow: []int{0, 7}, From: "06:00", To: "09:00"}}, // 0 và 7 cùng là CN
+		{{From: "06:00", To: "10:00"}, {From: "09:00", To: "12:00"}},
+		{{Dow: []int{1, 2}, From: "06:00", To: "10:00"}, {Dow: []int{2, 3}, From: "08:00", To: "09:00"}},
+		{{From: "06:00", To: "10:00"}, {Dow: []int{6}, From: "07:00", To: "08:00"}}, // dow rỗng = mọi ngày
+	}
+	for _, slots := range bad {
+		in := base
+		in.AccessHours = slots
+		_, err := normalizePlanInput(in)
+		assert.Equal(t, rescode.BadRequest.Code(), codeOf(err), slots)
+	}
+	ok := [][]v1.AccessHoursSlot{
+		{{From: "06:00", To: "09:00"}, {From: "09:00", To: "12:00"}},                                     // liền nhau
+		{{Dow: []int{1, 2}, From: "06:00", To: "10:00"}, {Dow: []int{6, 0}, From: "06:00", To: "10:00"}}, // khác ngày
+	}
+	for _, slots := range ok {
+		in := base
+		in.AccessHours = slots
+		_, err := normalizePlanInput(in)
+		assert.NoError(t, err, slots)
+	}
+}

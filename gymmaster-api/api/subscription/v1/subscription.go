@@ -117,14 +117,14 @@ type SubscriptionDetail struct {
 // PaymentInput: thu tiền ngay khi bán (tùy chọn).
 type PaymentInput struct {
 	Amount    float64 `json:"amount"    dc:"Số tiền thu (> 0, ≤ tổng hóa đơn)"`
-	Method    string  `json:"method"    dc:"CASH | TRANSFER | CARD"`
+	Method    string  `json:"method"    v:"in:CASH,TRANSFER,CARD#Phương thức thanh toán không hợp lệ (tại quầy chỉ nhận Tiền mặt, Chuyển khoản, Thẻ)" dc:"CASH | TRANSFER | CARD (VNPAY không được ghi tại quầy)"`
 	Reference string  `json:"reference" dc:"Mã giao dịch"`
 	Note      string  `json:"note"`
 }
 
 type RefundInput struct {
 	Amount float64 `json:"amount"`
-	Method string  `json:"method" dc:"CASH | TRANSFER | CARD"`
+	Method string  `json:"method" v:"in:CASH,TRANSFER,CARD#Phương thức hoàn tiền không hợp lệ (tại quầy chỉ hoàn Tiền mặt, Chuyển khoản, Thẻ)" dc:"CASH | TRANSFER | CARD"`
 }
 
 type SellInput struct {

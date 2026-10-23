@@ -3,7 +3,7 @@ import { Alert, App, DatePicker, Form, Input, Modal, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import type { SubscriptionDetail } from '@/api/subscription';
-import { setFormError, showError } from '@/utils/errors';
+import { setFormError, showError, validateForm } from '@/utils/errors';
 import { DATE_FORMAT, formatDate, toApiDate } from '@/utils/format';
 import { useRequestFreeze } from './queries';
 import { freezeQuota } from './utils';
@@ -35,7 +35,8 @@ export default function FreezeModal({ open, sub, onClose }: FreezeModalProps) {
   const days = range?.[0] && range?.[1] ? range[1].diff(range[0], 'day') + 1 : 0;
 
   const submit = async () => {
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     request.mutate(
       {
         id: sub.id,

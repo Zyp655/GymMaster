@@ -107,10 +107,45 @@ func resolveScheduleBranchScope(ctx context.Context, requested uint) (uint, erro
 
 // ---- Trainer Availability -------------------------------------------------------
 
+// GetTrainerAvailability: HLV xem lịch của chính mình; người khác chỉ xem lịch rảnh tại chi nhánh trong phạm vi được
+// phân công (HLV ngoài phạm vi → 403, lịch ở chi nhánh khác của HLV bị lọc bỏ).
 func (s *scheduleExtService) GetTrainerAvailability(ctx context.Context, req *v1.GetTrainerAvailabilityReq) (v1.GetTrainerAvailabilityRes, error) {
+	self := false
+	if uid := reqctx.UserID(ctx); uid != nil && *uid == req.ID {
+		self = true
+	}
+	allowed := reqctx.AllowedBranches(ctx)
+	if !self && req.BranchID > 0 && !reqctx.CanAccessBranch(ctx, req.BranchID) {
+		return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền xem lịch rảnh HLV của chi nhánh này")
+	}
+	if !self && req.BranchID == 0 && len(allowed) > 0 {
+		inScope := false
+		for _, b := range allowed {
+			ok, err := s.repo.TrainerEligible(ctx, req.ID, b)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				inScope = true
+				break
+			}
+		}
+		if !inScope {
+			return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền xem lịch rảnh của HLV chi nhánh khác")
+		}
+	}
 	rows, err := s.repo.ListTrainerAvailability(ctx, req.ID, req.BranchID)
 	if err != nil {
 		return nil, err
+	}
+	if !self && len(allowed) > 0 {
+		kept := rows[:0]
+		for _, r := range rows {
+			if reqctx.CanAccessBranch(ctx, r.BranchID) {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
 	}
 	return dto.Map(rows, toTrainerAvailabilityItem), nil
 }
@@ -181,6 +216,12 @@ func (s *scheduleExtService) SaveTrainerAvailability(ctx context.Context, req *v
 		if effFrom != nil && effTo != nil && effTo.Before(*effFrom) {
 			return nil, rescode.New(rescode.BadRequest, "Ngày hết hiệu lực phải sau ngày bắt đầu hiệu lực")
 		}
+		for _, o := range slots {
+			if o.DOW == sl.DOW && o.StartTime < et && st < o.EndTime && scheduleEffOverlap(o.EffectiveFrom, o.EffectiveTo, effFrom, effTo) {
+				return nil, rescode.New(rescode.BadRequest, fmt.Sprintf("Khung giờ rảnh %s %s-%s bị chồng với khung %s-%s",
+					scheduleDOWLabel(sl.DOW), st, et, o.StartTime, o.EndTime))
+			}
+		}
 		slots = append(slots, entity.TrainerAvailability{
 			TrainerID:     req.ID,
 			BranchID:      req.BranchID,
@@ -204,6 +245,24 @@ func (s *scheduleExtService) SaveTrainerAvailability(ctx context.Context, req *v
 			map[string]any{"branch_id": req.BranchID, "slots": slots})
 	}
 	return s.GetTrainerAvailability(ctx, &v1.GetTrainerAvailabilityReq{ID: req.ID, BranchID: req.BranchID})
+}
+
+// scheduleEffOverlap: hai khoảng hiệu lực (nil = không giới hạn) có giao nhau.
+func scheduleEffOverlap(aFrom, aTo, bFrom, bTo *time.Time) bool {
+	if aTo != nil && bFrom != nil && aTo.Before(*bFrom) {
+		return false
+	}
+	if bTo != nil && aFrom != nil && bTo.Before(*aFrom) {
+		return false
+	}
+	return true
+}
+
+func scheduleDOWLabel(dow int) string {
+	if dow == 0 {
+		return "Chủ nhật"
+	}
+	return fmt.Sprintf("Thứ %d", dow+1)
 }
 
 // ---- Leave Requests -------------------------------------------------------------
@@ -232,6 +291,24 @@ func (s *scheduleExtService) ListLeaveRequests(ctx context.Context, req *v1.List
 	return dto.NewPageRes(dto.Map(rows, toLeaveRequestItem), total, q), nil
 }
 
+// scheduleParseLeaveTime đọc thời điểm nghỉ phép (RFC3339, YYYY-MM-DDTHH:mm[:ss], YYYY-MM-DD giờ VN); rỗng = def.
+// Không dùng workoutParsePerformedAt vì hàm đó chặn thời điểm tương lai (đơn nghỉ phép luôn ở tương lai).
+func scheduleParseLeaveTime(raw string, def time.Time) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def, nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, nil
+	}
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02 15:04", consts.DateLayout} {
+		if t, err := time.ParseInLocation(layout, raw, subVNLoc); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, rescode.New(rescode.BadRequest, "Thời gian không hợp lệ")
+}
+
 func (s *scheduleExtService) CreateLeaveRequest(ctx context.Context, req *v1.CreateLeaveRequestReq) (*v1.LeaveRequestItem, error) {
 	if req.BranchID != nil && *req.BranchID > 0 && !reqctx.CanAccessBranch(ctx, *req.BranchID) {
 		return nil, rescode.New(rescode.PermissionDenied, "Bạn không có quyền tạo đơn nghỉ phép tại chi nhánh này")
@@ -248,11 +325,11 @@ func (s *scheduleExtService) CreateLeaveRequest(ctx context.Context, req *v1.Cre
 	if err := scheduleCheckSelf(ctx, staffID, "Bạn chỉ được tạo đơn nghỉ phép cho chính mình"); err != nil {
 		return nil, err
 	}
-	fromAt, err := workoutParsePerformedAt(req.FromAt, s.now())
+	fromAt, err := scheduleParseLeaveTime(req.FromAt, s.now())
 	if err != nil {
 		return nil, rescode.New(rescode.BadRequest, "Thời gian bắt đầu nghỉ không hợp lệ")
 	}
-	toAt, err := workoutParsePerformedAt(req.ToAt, fromAt)
+	toAt, err := scheduleParseLeaveTime(req.ToAt, fromAt)
 	if err != nil {
 		return nil, rescode.New(rescode.BadRequest, "Thời gian kết thúc nghỉ không hợp lệ")
 	}
@@ -425,8 +502,14 @@ func (s *scheduleExtService) SubstituteClassTrainer(ctx context.Context, req *v1
 		newSub = &subID
 	} else if cls.SubstituteTrainerID == nil {
 		return nil, rescode.New(rescode.BadRequest, "HLV dạy thay phải khác HLV phụ trách lớp")
+	} else if err := s.checkNewTrainer(ctx, subID, cls.BranchID, cls.StartAt, cls.EndAt, cls.ID, 0, false); err != nil {
+		// Trả lớp về HLV chính cũng phải kiểm tra như HLV mới: HLV chính có thể đã nghỉ phép / nhận PT / dạy lớp khác.
+		return nil, err
 	}
 	if err := s.repo.SetClassSubstituteTrainer(ctx, req.ID, newSub, strings.TrimSpace(req.Note), reqctx.UserID(ctx)); err != nil {
+		if isExclusionViolation(err) {
+			return nil, rescode.New(rescode.Conflict, "HLV vừa được xếp lớp khác trùng giờ, vui lòng thử lại")
+		}
 		return nil, err
 	}
 	updated, err := s.repo.FindClassScheduleByID(ctx, req.ID)
@@ -522,8 +605,7 @@ func checkHolidayScope(ctx context.Context, branchID *uint) error {
 
 // buildBranchHoliday kiểm tra & chuẩn hóa dữ liệu ngày lễ (dùng chung thêm/sửa):
 //   - closed=true (mặc định): đóng cửa cả ngày, bỏ giờ đặc biệt.
-//   - closed=false + open_time/close_time: mở cửa theo giờ đặc biệt (HH:mm, mở < đóng; nhập cả hai hoặc bỏ trống cả hai).
-//   - closed=false không có giờ: ngày lễ vẫn mở theo giờ thường (chỉ để hiển thị).
+//   - closed=false: bắt buộc open_time/close_time – mở cửa theo giờ đặc biệt (HH:mm, mở < đóng).
 func buildBranchHoliday(branchID *uint, dateStr, nameStr string, closedIn *bool, openIn, closeIn *string) (*entity.BranchHoliday, error) {
 	name := strings.TrimSpace(nameStr)
 	if name == "" {
@@ -549,9 +631,6 @@ func buildBranchHoliday(branchID *uint, dateStr, nameStr string, closedIn *bool,
 	}
 	if closeIn != nil {
 		closeRaw = strings.TrimSpace(*closeIn)
-	}
-	if openRaw == "" && closeRaw == "" {
-		return h, nil
 	}
 	if openRaw == "" || closeRaw == "" {
 		return nil, rescode.New(rescode.BadRequest, "Vui lòng nhập đủ giờ mở cửa và giờ đóng cửa đặc biệt")
@@ -610,6 +689,23 @@ func (s *scheduleExtService) holidayResult(ctx context.Context, h *entity.Branch
 	return res, nil
 }
 
+const holidayDuplicateMsg = "Chi nhánh đã có lịch nghỉ lễ trong ngày này, vui lòng sửa lịch hiện có"
+
+// checkHolidayDate: ngày lễ không được ở quá khứ (giờ VN) và không trùng lịch khác cùng phạm vi/cùng ngày.
+func (s *scheduleExtService) checkHolidayDate(ctx context.Context, h *entity.BranchHoliday, excludeID uint) error {
+	if h.Date.Format(consts.DateLayout) < s.now().In(subVNLoc).Format(consts.DateLayout) {
+		return rescode.New(rescode.BadRequest, "Không thể tạo/chuyển lịch nghỉ lễ về ngày đã qua")
+	}
+	dup, err := s.repo.BranchHolidayExists(ctx, h.BranchID, h.Date, excludeID)
+	if err != nil {
+		return err
+	}
+	if dup {
+		return rescode.New(rescode.Conflict, holidayDuplicateMsg)
+	}
+	return nil
+}
+
 func (s *scheduleExtService) CreateBranchHoliday(ctx context.Context, req *v1.CreateBranchHolidayReq) (*v1.BranchHolidayItem, error) {
 	if err := checkHolidayScope(ctx, req.BranchID); err != nil {
 		return nil, err
@@ -618,14 +714,17 @@ func (s *scheduleExtService) CreateBranchHoliday(ctx context.Context, req *v1.Cr
 	if err != nil {
 		return nil, err
 	}
+	if err := s.checkHolidayDate(ctx, h, 0); err != nil {
+		return nil, err
+	}
 	h.ExtendSubs = req.ExtendSubs && h.Closed
 	var extendedCount int64
 	err = s.runTx(ctx, func(txCtx context.Context) error {
 		if err := s.repo.CreateBranchHoliday(txCtx, h); err != nil {
-			return err
+			return mapDuplicate(err, holidayDuplicateMsg)
 		}
 		if h.ExtendSubs {
-			cnt, err := s.repo.ExtendActiveTimeSubscriptions(txCtx, h.BranchID, h.Date)
+			cnt, err := s.repo.ExtendActiveTimeSubscriptions(txCtx, h.ID, h.BranchID, h.Date)
 			if err != nil {
 				return err
 			}
@@ -645,6 +744,13 @@ func (s *scheduleExtService) CreateBranchHoliday(ctx context.Context, req *v1.Cr
 		s.audit.Log(ctx, AuditCreate, auditEntityBranchHoliday, h.ID, nil, res)
 	}
 	return res, nil
+}
+
+func holidayBranchKey(b *uint) uint {
+	if b == nil {
+		return 0
+	}
+	return *b
 }
 
 // UpdateBranchHoliday sửa ngày/tên/trạng thái đóng cửa/giờ đặc biệt. Việc cộng bù gói tập (extend_subs) chỉ chạy một lần
@@ -675,8 +781,20 @@ func (s *scheduleExtService) UpdateBranchHoliday(ctx context.Context, req *v1.Up
 	h.ExtendSubs = existing.ExtendSubs
 	h.CreatedAt = existing.CreatedAt
 	h.UpdatedAt = s.now()
+	sameDay := h.Date.Format(consts.DateLayout) == existing.Date.Format(consts.DateLayout)
+	sameScope := holidayBranchKey(h.BranchID) == holidayBranchKey(existing.BranchID)
+	// Đã cộng bù gói theo ngày/chi nhánh cũ → không đổi ngày, chi nhánh hay mở cửa lại (xóa rồi tạo lại để hoàn tác).
+	if existing.ExtendSubs && (!sameDay || !sameScope || !h.Closed) {
+		return nil, rescode.New(rescode.BadRequest,
+			"Ngày lễ đã cộng bù gói tập: không thể đổi ngày, chi nhánh hoặc chuyển sang mở cửa. Hãy xóa (hoàn tác cộng bù) rồi tạo lại")
+	}
+	if !sameDay || !sameScope {
+		if err := s.checkHolidayDate(ctx, h, h.ID); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.repo.UpdateBranchHoliday(ctx, h); err != nil {
-		return nil, err
+		return nil, mapDuplicate(err, holidayDuplicateMsg)
 	}
 	res, err := s.holidayResult(ctx, h)
 	if err != nil {
@@ -703,11 +821,24 @@ func (s *scheduleExtService) DeleteBranchHoliday(ctx context.Context, id uint) e
 	} else if allowed := reqctx.AllowedBranches(ctx); len(allowed) > 0 {
 		return rescode.New(rescode.PermissionDenied, "Bạn không có quyền xóa ngày nghỉ lễ cấp toàn hệ thống")
 	}
-	if err := s.repo.DeleteBranchHoliday(ctx, id); err != nil {
+	// Hoàn tác phần cộng bù gói (nếu có) cùng transaction với xóa → tạo/xóa lặp lại không cộng dồn.
+	var reverted int64
+	err = s.runTx(ctx, func(txCtx context.Context) error {
+		if existing.ExtendSubs {
+			n, err := s.repo.RevertHolidayExtensions(txCtx, id)
+			if err != nil {
+				return err
+			}
+			reverted = n
+		}
+		return s.repo.DeleteBranchHoliday(txCtx, id)
+	})
+	if err != nil {
 		return err
 	}
 	if s.audit != nil {
-		s.audit.Log(ctx, AuditDelete, auditEntityBranchHoliday, id, toBranchHolidayItem(*existing), nil)
+		s.audit.Log(ctx, AuditDelete, auditEntityBranchHoliday, id, toBranchHolidayItem(*existing),
+			map[string]any{"reverted_subscriptions": reverted})
 	}
 	return nil
 }

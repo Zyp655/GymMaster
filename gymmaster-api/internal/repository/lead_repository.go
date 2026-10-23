@@ -82,6 +82,8 @@ type (
 		ListLeads(ctx context.Context, q dto.Query, f LeadFilter) ([]LeadRow, int64, error)
 		FindLeadByID(ctx context.Context, id uint) (*LeadRow, error)
 		CreateLead(ctx context.Context, l *entity.Lead) error
+		// FindOpenLeadByPhone: lead đang mở (NEW/CONTACTED/TRIAL) cùng chi nhánh & SĐT, mới nhất; nil nếu không có.
+		FindOpenLeadByPhone(ctx context.Context, branchID uint, phone string) (*entity.Lead, error)
 		UpdateLead(ctx context.Context, l *entity.Lead) error
 		DeleteLead(ctx context.Context, id uint, deletedBy *uint) error
 
@@ -183,6 +185,17 @@ func (r *leadRepository) CreateLead(ctx context.Context, l *entity.Lead) error {
 	return postgres.Conn(ctx, r.db).Create(l).Error
 }
 
+func (r *leadRepository) FindOpenLeadByPhone(ctx context.Context, branchID uint, phone string) (*entity.Lead, error) {
+	var list []entity.Lead
+	err := postgres.Conn(ctx, r.db).Where("branch_id = ? AND phone = ? AND status IN ?", branchID, phone,
+		[]string{entity.LeadStatusNew, entity.LeadStatusContacted, entity.LeadStatusTrial}).
+		Order("id DESC").Limit(1).Find(&list).Error
+	if err != nil || len(list) == 0 {
+		return nil, err
+	}
+	return &list[0], nil
+}
+
 func (r *leadRepository) UpdateLead(ctx context.Context, l *entity.Lead) error {
 	return postgres.Conn(ctx, r.db).Save(l).Error
 }
@@ -238,11 +251,13 @@ func (r *leadRepository) CreateMember(ctx context.Context, m *entity.Member) err
 func (r *leadRepository) ListPublicSchedules(ctx context.Context, branchID uint, from, to time.Time) ([]PublicScheduleRow, error) {
 	tx := postgres.Conn(ctx, r.db).Table("class_schedules cs").
 		Select(`cs.*, ct.code AS class_type_code, ct.name AS class_type_name, ct.color AS class_type_color,
-			ct.level AS level, b.name AS branch_name, rm.name AS room_name, u.full_name AS trainer_name`).
+			ct.level AS level, b.name AS branch_name, rm.name AS room_name, u.full_name AS trainer_name,
+			COALESCE(cs.substitute_trainer_id, cs.trainer_id) AS trainer_id`).
 		Joins("JOIN class_types ct ON ct.id = cs.class_type_id AND ct.deleted_at IS NULL").
 		Joins("JOIN branches b ON b.id = cs.branch_id AND b.deleted_at IS NULL").
 		Joins("JOIN rooms rm ON rm.id = cs.room_id AND rm.deleted_at IS NULL").
-		Joins("JOIN users u ON u.id = cs.trainer_id").
+		// HLV hiển thị là người thực dạy (HLV dạy thay nếu có).
+		Joins("JOIN users u ON u.id = COALESCE(cs.substitute_trainer_id, cs.trainer_id)").
 		Where("cs.status = ? AND cs.start_at >= ? AND cs.start_at < ?", entity.ClassScheduleScheduled, from, to)
 	if branchID > 0 {
 		tx = tx.Where("cs.branch_id = ?", branchID)

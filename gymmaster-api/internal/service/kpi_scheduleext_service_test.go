@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -132,10 +133,15 @@ type mockScheduleExtRepo struct {
 	extendedCount  int64
 	// ineligible: trainer id → không đủ điều kiện (không tồn tại / khóa / không phải HLV / khác chi nhánh).
 	ineligible map[uint]bool
+	// eligibleIn: trainer id → các chi nhánh HLV được phân công (không khai báo = mọi chi nhánh).
+	eligibleIn map[uint][]uint
 	// busy: trainer id → "PT" | "CLASS" (HLV đang bận).
 	busy map[uint]string
 	// lastReplaceBranch: branch truyền vào ReplaceTrainerAvailability gần nhất.
 	lastReplaceBranch uint
+	// extensions: holiday id → số gói đã cộng bù; reverted: tổng số gói đã hoàn tác khi xóa ngày lễ.
+	extensions map[uint]int64
+	reverted   int64
 }
 
 func newMockScheduleExtRepo() *mockScheduleExtRepo {
@@ -280,7 +286,10 @@ func (m *mockScheduleExtRepo) ReassignPTSessionTrainer(_ context.Context, sessio
 	return nil
 }
 
-func (m *mockScheduleExtRepo) TrainerEligible(_ context.Context, trainerID, _ uint) (bool, error) {
+func (m *mockScheduleExtRepo) TrainerEligible(_ context.Context, trainerID, branchID uint) (bool, error) {
+	if branches, ok := m.eligibleIn[trainerID]; ok && !slices.Contains(branches, branchID) {
+		return false, nil
+	}
 	return !m.ineligible[trainerID], nil
 }
 
@@ -359,8 +368,29 @@ func (m *mockScheduleExtRepo) DeleteBranchHoliday(_ context.Context, id uint) er
 	return nil
 }
 
-func (m *mockScheduleExtRepo) ExtendActiveTimeSubscriptions(_ context.Context, _ *uint, _ time.Time) (int64, error) {
+func (m *mockScheduleExtRepo) ExtendActiveTimeSubscriptions(_ context.Context, holidayID uint, _ *uint, _ time.Time) (int64, error) {
+	if m.extensions == nil {
+		m.extensions = map[uint]int64{}
+	}
+	m.extensions[holidayID] = m.extendedCount
 	return m.extendedCount, nil
+}
+
+func (m *mockScheduleExtRepo) RevertHolidayExtensions(_ context.Context, holidayID uint) (int64, error) {
+	n := m.extensions[holidayID]
+	delete(m.extensions, holidayID)
+	m.reverted += n
+	return n, nil
+}
+
+func (m *mockScheduleExtRepo) BranchHolidayExists(_ context.Context, branchID *uint, date time.Time, excludeID uint) (bool, error) {
+	for _, h := range m.holidays {
+		if h.ID != excludeID && holidayBranchKey(h.BranchID) == holidayBranchKey(branchID) &&
+			h.Date.Format("2006-01-02") == date.Format("2006-01-02") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // =================================================================================
@@ -537,7 +567,7 @@ func TestScheduleExtService_AvailabilityLeaveSubstitutionAndHoliday(t *testing.T
 	// 4. CreateBranchHoliday with ExtendSubs = true
 	holiday, err := svc.CreateBranchHoliday(ownerCtx, &schedulev1.CreateBranchHolidayReq{
 		BranchID:   &b1,
-		Date:       "2026-09-02",
+		Date:       "2099-09-02",
 		Name:       "Quốc khánh 2/9",
 		ExtendSubs: true,
 	})

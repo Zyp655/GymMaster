@@ -102,7 +102,7 @@ func classifyOccupancyLevel(pct float64) string {
 }
 
 func (s *kpiService) BranchOccupancy(ctx context.Context) ([]*v1.BranchOccupancyItem, error) {
-	since := s.now().Add(-3 * time.Hour)
+	since := repository.PresentSince(s.now()) // định nghĩa chung "đang trong phòng tập"
 	rows, err := s.repo.ListBranchOccupancy(ctx, since)
 	if err != nil {
 		return nil, err
@@ -177,6 +177,12 @@ func (s *kpiService) CreateSalesTarget(ctx context.Context, req *v1.CreateSalesT
 		return nil, err
 	} else if !ok {
 		return nil, rescode.New(rescode.BadRequest, "Chi nhánh không tồn tại hoặc đã bị xóa")
+	}
+	// Không đặt chỉ tiêu cho chi nhánh ngừng hoạt động.
+	if ok, err := s.repo.BranchActive(ctx, req.BranchID); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, rescode.New(rescode.BadRequest, "Chi nhánh đang ngừng hoạt động, không thể đặt chỉ tiêu")
 	}
 	if staffID != nil {
 		exists, inBranch, err := s.repo.StaffBranchStatus(ctx, *staffID, req.BranchID)

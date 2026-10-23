@@ -355,7 +355,7 @@ func TestEngagementService_NutritionBMRAndNPS(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	overview, err := svc.MemberNutritionOverview(m1Ctx)
+	overview, err := svc.MemberNutritionOverview(m1Ctx, &v1.MemberNutritionOverviewReq{})
 	require.NoError(t, err)
 	assert.Equal(t, 2556, overview.RecommendedCalories)
 

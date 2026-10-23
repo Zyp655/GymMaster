@@ -27,6 +27,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import {
   AppstoreOutlined,
+  BankOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
@@ -51,6 +52,7 @@ import {
 import type {
   Locker,
   LockerAssignInput,
+  LockerBoardZone,
   LockerInput,
   LockerListParams,
   LockerRentalType,
@@ -72,7 +74,7 @@ import { PERM } from '@/constants/permissions';
 import {
   LOCKER_STATUS_MAP,
   LOCKER_STATUS_OPTIONS,
-  PAYMENT_METHOD_STATUS_OPTIONS,
+  COUNTER_PAYMENT_METHOD_OPTIONS,
 } from '@/constants/status';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { usePermission } from '@/hooks/usePermission';
@@ -80,6 +82,7 @@ import { useTableQuery } from '@/hooks/useTableQuery';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
 import { showError } from '@/utils/errors';
 import { DATE_FORMAT, formatDate, formatDateTime, formatMoney, toApiDate } from '@/utils/format';
+import { groupLockersByBranch } from './board';
 import './lockers.css';
 
 const LOCKER_VISUAL_STYLES: Record<
@@ -330,7 +333,7 @@ function AssignLockerModal({
   return (
     <Modal
       open={open}
-      title={`Gán tủ theo lượt / Cho thuê tủ tháng – Tủ ${locker?.code ?? ''} (${locker?.zone ?? ''})`}
+      title={`Gán tủ theo lượt / Cho thuê tủ tháng – Tủ ${locker?.code ?? ''} (${[locker?.zone, locker?.branch_name].filter(Boolean).join(' · ')})`}
       okText={rentalType === 'MONTHLY' ? 'Xác nhận cho thuê tháng' : 'Gán tủ theo lượt'}
       cancelText="Hủy"
       onOk={() => form.submit()}
@@ -380,7 +383,7 @@ function AssignLockerModal({
             </Col>
             <Col xs={12}>
               <Form.Item name="payment_method" label="Phương thức thu tiền">
-                <Select options={PAYMENT_METHOD_STATUS_OPTIONS} />
+                <Select options={COUNTER_PAYMENT_METHOD_OPTIONS} />
               </Form.Item>
             </Col>
           </Row>
@@ -467,6 +470,7 @@ function OccupiedLockerModal({
       <Descriptions bordered size="small" column={1} style={{ marginTop: 12 }}>
         <Descriptions.Item label="Mã tủ & Khu vực">
           <strong>{locker.code}</strong> · {locker.zone}
+          {locker.branch_name ? ` · ${locker.branch_name}` : ''}
         </Descriptions.Item>
         <Descriptions.Item label="Kích cỡ & Phí thuê tháng">
           {LOCKER_SIZE_LABELS[locker.size] ?? locker.size} · {formatMoney(locker.monthly_fee)}/tháng
@@ -525,12 +529,109 @@ function LockerBoardTab({
   const data = boardQuery.data;
   const summary = data?.summary ?? { total: 0, available: 0, occupied: 0, rented: 0, broken: 0 };
 
+  // "Tất cả chi nhánh": mỗi chi nhánh đều có tủ A-01, khu "Khu Nam – Tầng 2"... → nhóm chi nhánh → khu vực,
+  // thống kê riêng từng chi nhánh để không trộn tủ cùng mã.
+  const branchGroups = useMemo(
+    () =>
+      groupLockersByBranch(data?.lockers ?? [], (id) => branches.find((b) => b.id === id)?.name),
+    [data, branches],
+  );
+  const multiBranch = branchGroups.length > 1;
+
   const handleTileClick = (locker: Locker) => {
     if (locker.status === 'AVAILABLE' && canManage) {
       setAssignTarget(locker);
     } else {
       setDetailTarget(locker);
     }
+  };
+
+  // Ô tủ của một khu vực (lọc theo trạng thái); null khi khu không còn tủ nào sau lọc.
+  const renderZone = (z: LockerBoardZone, keyPrefix: string) => {
+    const visibleLockers =
+      statusFilter === 'ALL' ? z.lockers : z.lockers.filter((l) => l.status === statusFilter);
+    if (visibleLockers.length === 0) return null;
+    return (
+      <Card
+        key={`${keyPrefix}-${z.zone}`}
+        size="small"
+        title={
+          <Space>
+            <Typography.Text strong style={{ fontSize: 15 }}>
+              {z.zone}
+            </Typography.Text>
+            <Badge count={visibleLockers.length} color="#0A3150" />
+          </Space>
+        }
+      >
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))',
+            gap: 12,
+          }}
+        >
+          {visibleLockers.map((lk) => {
+            const st = LOCKER_VISUAL_STYLES[lk.status] ?? LOCKER_VISUAL_STYLES.AVAILABLE;
+            const rental = lk.active_rental ?? lk.current_rental;
+            const memberLabel =
+              rental?.member_name ?? lk.member_name ?? rental?.member_code ?? lk.member_code;
+
+            return (
+              <div
+                key={lk.id}
+                onClick={() => handleTileClick(lk)}
+                className="locker-tile"
+                style={{ background: st.bg, border: `1.5px solid ${st.border}` }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Typography.Text
+                    strong
+                    className="code-text"
+                    style={{ fontSize: 16, color: st.text, whiteSpace: 'nowrap' }}
+                  >
+                    {lk.code}
+                  </Typography.Text>
+                  <StatusTag status={lk.status} map={LOCKER_STATUS_MAP} />
+                </div>
+
+                <div className="locker-tile__meta">
+                  {memberLabel ? (
+                    <div className="locker-tile__member">
+                      <UserOutlined /> {memberLabel}
+                    </div>
+                  ) : (
+                    <div>Cỡ: {LOCKER_SIZE_LABELS[lk.size] ?? lk.size}</div>
+                  )}
+                  {lk.status === 'RENTED' && (rental?.end_at || lk.end_at) && (
+                    <div
+                      className="locker-tile__note"
+                      style={{ color: LOCKER_VISUAL_STYLES.RENTED.text }}
+                    >
+                      Hạn: {formatDate(rental?.end_at ?? lk.end_at)}
+                    </div>
+                  )}
+                  {lk.status === 'AVAILABLE' && (
+                    <div
+                      className="locker-tile__note"
+                      style={{ color: LOCKER_VISUAL_STYLES.AVAILABLE.text }}
+                    >
+                      {formatMoney(lk.monthly_fee)}/tháng
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    );
   };
 
   return (
@@ -540,6 +641,7 @@ function LockerBoardTab({
           <StatCard
             label="Tổng số tủ"
             value={summary.total}
+            caption={multiBranch ? `Cộng ${branchGroups.length} chi nhánh` : undefined}
             icon={<InboxOutlined />}
             loading={boardQuery.isLoading}
           />
@@ -655,98 +757,37 @@ function LockerBoardTab({
         </Card>
       ) : (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          {data.zones.map((z) => {
-            const visibleLockers =
-              statusFilter === 'ALL'
-                ? z.lockers
-                : z.lockers.filter((l) => l.status === statusFilter);
-            if (visibleLockers.length === 0) return null;
-
-            return (
-              <Card
-                key={z.zone}
-                size="small"
-                title={
-                  <Space>
-                    <Typography.Text strong style={{ fontSize: 15 }}>
-                      {z.zone}
-                    </Typography.Text>
-                    <Badge count={visibleLockers.length} color="#0A3150" />
-                  </Space>
-                }
-              >
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))',
-                    gap: 12,
-                  }}
-                >
-                  {visibleLockers.map((lk) => {
-                    const st = LOCKER_VISUAL_STYLES[lk.status] ?? LOCKER_VISUAL_STYLES.AVAILABLE;
-                    const rental = lk.active_rental ?? lk.current_rental;
-                    const memberLabel =
-                      rental?.member_name ??
-                      lk.member_name ??
-                      rental?.member_code ??
-                      lk.member_code;
-
-                    return (
-                      <div
-                        key={lk.id}
-                        onClick={() => handleTileClick(lk)}
-                        className="locker-tile"
-                        style={{ background: st.bg, border: `1.5px solid ${st.border}` }}
-                      >
-                        <div
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                          }}
-                        >
-                          <Typography.Text
-                            strong
-                            className="code-text"
-                            style={{ fontSize: 16, color: st.text }}
-                          >
-                            {lk.code}
-                          </Typography.Text>
-                          <StatusTag status={lk.status} map={LOCKER_STATUS_MAP} />
-                        </div>
-
-                        <div className="locker-tile__meta">
-                          {memberLabel ? (
-                            <div className="locker-tile__member">
-                              <UserOutlined /> {memberLabel}
-                            </div>
-                          ) : (
-                            <div>Cỡ: {LOCKER_SIZE_LABELS[lk.size] ?? lk.size}</div>
-                          )}
-                          {lk.status === 'RENTED' && (rental?.end_at || lk.end_at) && (
-                            <div
-                              className="locker-tile__note"
-                              style={{ color: LOCKER_VISUAL_STYLES.RENTED.text }}
-                            >
-                              Hạn: {formatDate(rental?.end_at ?? lk.end_at)}
-                            </div>
-                          )}
-                          {lk.status === 'AVAILABLE' && (
-                            <div
-                              className="locker-tile__note"
-                              style={{ color: LOCKER_VISUAL_STYLES.AVAILABLE.text }}
-                            >
-                              {formatMoney(lk.monthly_fee)}/tháng
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Card>
-            );
-          })}
+          {multiBranch
+            ? branchGroups.map((g) => {
+                const zones = g.zones.map((z) => renderZone(z, `b${g.branchId}`)).filter(Boolean);
+                if (zones.length === 0) return null;
+                return (
+                  <section key={g.branchId} aria-label={`Tủ đồ ${g.branchName}`}>
+                    <Space wrap size={[8, 4]} align="center" style={{ marginBottom: 8 }}>
+                      <Typography.Title level={5} style={{ margin: 0 }}>
+                        <BankOutlined /> {g.branchName}
+                      </Typography.Title>
+                      <Tag bordered={false}>Tổng {g.summary.total}</Tag>
+                      <Tag bordered={false} color="success">
+                        Trống {g.summary.available}
+                      </Tag>
+                      <Tag bordered={false} color="warning">
+                        Theo lượt {g.summary.occupied}
+                      </Tag>
+                      <Tag bordered={false} color="processing">
+                        Thuê tháng {g.summary.rented}
+                      </Tag>
+                      <Tag bordered={false} color="error">
+                        Hỏng {g.summary.broken}
+                      </Tag>
+                    </Space>
+                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      {zones}
+                    </Space>
+                  </section>
+                );
+              })
+            : data.zones.map((z) => renderZone(z, 'z'))}
         </Space>
       )}
 

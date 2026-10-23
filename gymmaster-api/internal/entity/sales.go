@@ -234,4 +234,3 @@ type OnlinePaymentTxn struct {
 }
 
 func (OnlinePaymentTxn) TableName() string { return "online_payment_txns" }
-

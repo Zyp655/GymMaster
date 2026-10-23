@@ -28,9 +28,11 @@ import { deviceCheckin, deviceHeartbeat } from '@/features/portal/api';
 import type { DeviceCheckinRes } from '@/features/portal/types';
 import { ApiError } from '@/types/api';
 import {
+  classifyHeartbeatError,
   DEFAULT_DEMO_KEY,
   DEV_QUICK_CODES,
   DEVICE_KEY_STORAGE,
+  type HeartbeatFailure,
   maskDeviceKey,
   readStoredDeviceKey,
 } from './kiosk-utils';
@@ -61,9 +63,15 @@ export function KioskView() {
   const [configOpen, setConfigOpen] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState<{ name?: string; branchName?: string } | null>(null);
   // Kết quả heartbeat gần nhất gắn với khóa thiết bị đã gửi → đổi khóa thì tự về trạng thái "đang kiểm tra".
-  const [heartbeat, setHeartbeat] = useState<{ key: string; ok: boolean } | null>(null);
+  const [heartbeat, setHeartbeat] = useState<{
+    key: string;
+    ok: boolean;
+    failure?: HeartbeatFailure;
+  } | null>(null);
   const heartbeatStatus: 'checking' | 'ok' | 'error' =
     heartbeat && heartbeat.key === deviceKey ? (heartbeat.ok ? 'ok' : 'error') : 'checking';
+  // Khóa sai (401/40106) khác mất kết nối: không để badge báo "Mất kết nối máy chủ" gây hiểu nhầm.
+  const heartbeatFailure = heartbeatStatus === 'error' ? heartbeat?.failure : undefined;
 
   const [codeInput, setCodeInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -120,8 +128,8 @@ export function KioskView() {
             branchName: res.device.branch_name,
           });
         }
-      } catch {
-        setHeartbeat({ key: deviceKey, ok: false });
+      } catch (err) {
+        setHeartbeat({ key: deviceKey, ok: false, failure: classifyHeartbeatError(err) });
       }
     };
 
@@ -166,29 +174,24 @@ export function KioskView() {
         const allowed = Boolean(res.allow ?? res.allowed ?? res.result === 'ALLOWED');
         setScanResult({
           allowed,
-          memberName: res.member_name || res.full_name || 'Hội viên / Khách tập',
+          memberName: res.member_name || res.full_name || t('memberLabel'),
           memberCode: res.member_code,
           planName: res.plan_name,
           lockerCode: res.locker_code,
           message:
             res.message ||
             res.deny_message ||
-            (allowed
-              ? 'Check-in hợp lệ. Chúc bạn buổi tập hiệu quả!'
-              : 'Không đủ điều kiện vào cửa.'),
+            (allowed ? t('allowedDefaultMsg') : t('deniedDefaultMsg')),
         });
       } catch (err) {
-        const errMsg =
-          err instanceof ApiError
-            ? err.message
-            : 'Mã QR không hợp lệ hoặc thiết bị chưa được xác thực.';
+        const errMsg = err instanceof ApiError ? err.message : t('checkinErrorFallback');
         setScanResult({
           allowed: false,
-          memberName: 'Không xác định',
+          memberName: t('unknownMember'),
           planName: token.startsWith('TP-')
-            ? 'Vé tập thử (Trial Pass)'
+            ? t('trialPassPlan')
             : token.startsWith('DP-')
-              ? 'Vé ngày / Khách mời (Day Pass)'
+              ? t('dayPassPlan')
               : undefined,
           message: errMsg,
         });
@@ -199,7 +202,7 @@ export function KioskView() {
         scheduleAutoReset();
       }
     },
-    [deviceKey, scheduleAutoReset],
+    [deviceKey, scheduleAutoReset, t],
   );
 
   // Tích hợp quét camera QR nếu bật (tạm dừng khi đang hiển thị kết quả quét vì #kiosk-qr-reader bị ẩn)
@@ -233,9 +236,7 @@ export function KioskView() {
         );
       } catch {
         if (!mounted) return;
-        toast.error(
-          'Không thể truy cập camera trên thiết bị này. Vui lòng dùng máy quét USB hoặc nhập mã.',
-        );
+        toast.error(t('cameraError'));
         setCameraActive(false);
       }
     };
@@ -247,7 +248,7 @@ export function KioskView() {
         void scannerCleanup();
       }
     };
-  }, [cameraActive, scanResult, handleCheckinToken]);
+  }, [cameraActive, scanResult, handleCheckinToken, t]);
 
   const handleSaveDeviceKey = () => {
     const clean = draftKey.trim();
@@ -259,7 +260,7 @@ export function KioskView() {
       // ignore storage errors
     }
     setConfigOpen(false);
-    toast.success('Đã lưu cấu hình Device Key cho Kiosk');
+    toast.success(t('deviceKeySaved'));
   };
 
   return (
@@ -275,7 +276,7 @@ export function KioskView() {
           </div>
           <div>
             <div className="flex items-center gap-2.5">
-              <span className="text-h4 font-bold tracking-tight text-white">GYMMASTER KIOSK</span>
+              <span className="text-h4 font-bold tracking-tight text-white">{t('brand')}</span>
               <span
                 className={`inline-flex items-center gap-1.5 rounded-full px-3 py-0.5 text-caption font-semibold ${
                   keyLoaded && !deviceKey
@@ -295,7 +296,9 @@ export function KioskView() {
                 {keyLoaded && !deviceKey
                   ? t('deviceUnconfigured')
                   : heartbeatStatus === 'error'
-                    ? t('deviceOffline')
+                    ? heartbeatFailure === 'invalid_key'
+                      ? t('deviceInvalidKey')
+                      : t('deviceOffline')
                     : heartbeatStatus === 'checking'
                       ? t('deviceChecking')
                       : deviceInfo?.name
@@ -304,15 +307,15 @@ export function KioskView() {
               </span>
             </div>
             <p className="text-caption text-slate-400">
-              Device Key:{' '}
-              <code className="text-slate-300" title="Khóa thiết bị được che một phần">
+              {t('deviceKeyLabel')}:{' '}
+              <code className="text-slate-300" title={t('deviceKeyMaskedHint')}>
                 {keyLoaded ? maskDeviceKey(deviceKey) || '—' : '…'}
               </code>
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center gap-2" onClick={e => e.stopPropagation()}>
           <Button
             variant="outline"
             size="sm"
@@ -449,7 +452,7 @@ export function KioskView() {
               </div>
               {SHOW_DEV_QUICK_CODES ? (
                 <div className="flex flex-wrap items-center justify-center gap-2 pt-1 text-caption text-slate-400">
-                  <span>Mã thử nhanh (chỉ môi trường dev):</span>
+                  <span>{t('devQuickCodes')}</span>
                   {DEV_QUICK_CODES.map(code => (
                     <button
                       key={code}
@@ -469,9 +472,9 @@ export function KioskView() {
 
       {/* Footer */}
       <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-900 pt-4 text-caption text-slate-500">
-        <span>GymMaster Smart Access Control · Kiosk Mode</span>
+        <span>{t('footerTagline')}</span>
         <Link href="/" className="text-slate-400 hover:text-white">
-          Về trang chủ
+          {t('backHome')}
         </Link>
       </footer>
 
@@ -489,17 +492,19 @@ export function KioskView() {
               placeholder={t('deviceKeyPlaceholder')}
               className="font-mono"
             />
-            <div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setDraftKey(DEFAULT_DEMO_KEY)}
-              >
-                <KeyIcon className="size-4" />
-                {t('useDemoKeyBtn')}
-              </Button>
-            </div>
+            {SHOW_DEV_QUICK_CODES && DEFAULT_DEMO_KEY ? (
+              <div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDraftKey(DEFAULT_DEMO_KEY)}
+                >
+                  <KeyIcon className="size-4" />
+                  {t('useDemoKeyBtn', { key: DEFAULT_DEMO_KEY })}
+                </Button>
+              </div>
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfigOpen(false)}>

@@ -1,6 +1,6 @@
-import { api, http } from '@/utils/api';
+import { http } from '@/utils/api';
 import type { ListParams, Page } from './types';
-import { parseFilename, saveFile } from './report';
+import { downloadFile, saveFile } from './report';
 
 function normalizePage<T>(res: Page<T> | T[] | null | undefined): Page<T> {
   if (!res) {
@@ -73,6 +73,10 @@ export interface PayrollItem {
   branch_name?: string;
   status?: PayrollStatus;
   base_salary: number;
+  /** Lương cơ bản thực nhận theo ngày công = base_salary × work_days / standard_work_days. */
+  base_pay?: number;
+  /** Công chuẩn của kỳ (mặc định 26). */
+  standard_work_days?: number;
   work_days: number;
   ot_hours: number;
   pt_commission: number;
@@ -110,6 +114,11 @@ export interface PayrollItemUpdateInput {
   ot_hours?: number;
   work_days?: number;
   note?: string;
+}
+
+/** Lương theo ngày công (API cũ chưa có `base_pay` → dùng lương cơ bản). */
+export function payrollBasePay(it: Pick<PayrollItem, 'base_pay' | 'base_salary'>): number {
+  return Number(it.base_pay ?? it.base_salary) || 0;
 }
 
 class PayrollApi {
@@ -151,22 +160,23 @@ class PayrollApi {
   }
 
   async exportCsv(payroll: Payroll): Promise<void> {
+    const fallbackName = `bang-luong-${payroll.period}-CN${payroll.branch_id}.csv`;
     try {
-      const res = await api.get(`/admin/payrolls/${payroll.id}/export`, {
-        responseType: 'arraybuffer',
+      // API trả JSON `{ csv, ... }` (hoặc file CSV trực tiếp) – xử lý cả hai trong downloadFile.
+      const file = await downloadFile(`/admin/payrolls/${payroll.id}/export`, {
+        fallbackName,
+        errorMessage: 'Không thể xuất bảng lương',
+        fromJson: (data) => {
+          const csv = (data as { csv?: unknown } | null)?.csv;
+          if (typeof csv !== 'string' || !csv) return null;
+          // BOM để Excel đọc đúng tiếng Việt.
+          return new Blob([csv.startsWith('\uFEFF') ? csv : '\uFEFF' + csv], {
+            type: 'text/csv;charset=utf-8;',
+          });
+        },
       });
-      const contentType = String(res.headers?.['content-type'] ?? '');
-      if (!contentType.includes('application/json')) {
-        const blob = new Blob([res.data as ArrayBuffer], {
-          type: contentType || 'text/csv;charset=utf-8;',
-        });
-        const filename = parseFilename(
-          String(res.headers?.['content-disposition'] ?? ''),
-          `bang-luong-${payroll.period}-CN${payroll.branch_id}.csv`,
-        );
-        saveFile({ blob, filename });
-        return;
-      }
+      saveFile(file);
+      return;
     } catch {
       // Fallback: xuất CSV trực tiếp từ dữ liệu bảng lương trên trình duyệt
     }
@@ -202,7 +212,7 @@ class PayrollApi {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     saveFile({
       blob,
-      filename: `bang-luong-${payroll.period}-CN${payroll.branch_id}.csv`,
+      filename: fallbackName,
     });
   }
 

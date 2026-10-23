@@ -282,6 +282,7 @@ function ProfitLossTab() {
               size="small"
               rowKey="key"
               pagination={false}
+              scroll={{ x: 'max-content' }}
               loading={pnlQuery.isLoading}
               dataSource={breakdownRows}
               columns={[
@@ -292,7 +293,10 @@ function ProfitLossTab() {
                     <span
                       style={{
                         fontWeight: r.isHeader ? 600 : 400,
-                        whiteSpace: 'pre',
+                        // pre-wrap: giữ thụt lề nhưng cho xuống dòng ở màn hẹp (D8 – 390px).
+                        whiteSpace: 'pre-wrap',
+                        display: 'inline-block',
+                        maxWidth: 'min(420px, 44vw)',
                         color: r.color,
                       }}
                     >
@@ -301,7 +305,7 @@ function ProfitLossTab() {
                   ),
                 },
                 {
-                  title: 'Số tiền (VND)',
+                  title: 'Số tiền',
                   dataIndex: 'amount',
                   align: 'right',
                   render: (v: number, r) => (
@@ -332,13 +336,14 @@ function ProfitLossTab() {
                 size="small"
                 rowKey="category_id"
                 pagination={false}
+                scroll={{ x: 'max-content' }}
                 dataSource={pnl.expenses_by_category}
                 columns={[
                   {
                     title: 'Danh mục chi phí',
                     dataIndex: 'category_name',
                     render: (v: string, r) => (
-                      <Space size={4} wrap>
+                      <Space size={4} wrap style={{ maxWidth: 'min(200px, 48vw)' }}>
                         <span>{v || `Danh mục #${r.category_id}`}</span>
                         {r.category_type && (
                           <Tag color={r.category_type === 'FIXED' ? 'geekblue' : 'cyan'}>
@@ -352,7 +357,6 @@ function ProfitLossTab() {
                     title: 'Tổng chi',
                     dataIndex: 'amount',
                     align: 'right',
-                    width: 140,
                     render: (v: number) => <MoneyText value={v} strong />,
                   },
                   {
@@ -360,6 +364,8 @@ function ProfitLossTab() {
                     key: 'share',
                     align: 'right',
                     width: 80,
+                    // Ẩn trên điện thoại để bảng vừa 390px.
+                    responsive: ['sm'],
                     render: (_, r) =>
                       pnl.operating_expenses > 0
                         ? `${Math.round((r.amount / pnl.operating_expenses) * 1000) / 10}%`
@@ -576,16 +582,19 @@ function OperatingExpensesTab({ canManage }: { canManage: boolean }) {
                 />
               </>
             )}
-            <ConfirmButton
-              perm={PERM.EXPENSE_MANAGE}
-              type="text"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              confirmTitle="Xóa phiếu chi này?"
-              onConfirm={() => deleteMut.mutateAsync(r.id)}
-              aria-label="Xóa"
-            />
+            {/* Khoản đã duyệt đã vào P&L → API chặn xóa (409); chỉ xóa khi Chờ duyệt / Từ chối. */}
+            {r.status !== 'APPROVED' && (
+              <ConfirmButton
+                perm={PERM.EXPENSE_MANAGE}
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                confirmTitle="Xóa phiếu chi này?"
+                onConfirm={() => deleteMut.mutateAsync(r.id)}
+                aria-label="Xóa"
+              />
+            )}
           </Space>
         ),
       },
@@ -1067,8 +1076,12 @@ function CashSessionsTab() {
           >
             <MoneyInput />
           </Form.Item>
-          <Form.Item name="note" label="Ghi chú đầu ca">
-            <Input placeholder="VD: Bàn giao ca sáng..." />
+          <Form.Item
+            name="note"
+            label="Ghi chú đầu ca"
+            rules={[{ max: 500, message: 'Ghi chú tối đa 500 ký tự' }]}
+          >
+            <Input placeholder="VD: Bàn giao ca sáng..." maxLength={500} />
           </Form.Item>
         </Form>
       </Modal>
@@ -1104,8 +1117,17 @@ function CashSessionsTab() {
               >
                 <MoneyInput />
               </Form.Item>
-              <Form.Item name="note" label="Ghi chú bàn giao / Giải trình chênh lệch">
-                <Input.TextArea rows={2} placeholder="Nhập ghi chú đối soát..." />
+              <Form.Item
+                name="note"
+                label="Ghi chú bàn giao / Giải trình chênh lệch"
+                rules={[{ max: 500, message: 'Ghi chú tối đa 500 ký tự' }]}
+              >
+                <Input.TextArea
+                  rows={2}
+                  placeholder="Nhập ghi chú đối soát..."
+                  maxLength={500}
+                  showCount
+                />
               </Form.Item>
             </Form>
           </Space>

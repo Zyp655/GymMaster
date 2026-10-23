@@ -71,6 +71,9 @@ type ScheduleItem struct {
 	MyBooking      *classv1.ClassBooking `json:"my_booking"      dc:"Lượt đặt còn hiệu lực của hội viên (BOOKED/WAITLIST/ATTENDED/NO_SHOW) hoặc null"`
 	CancelDeadline time.Time             `json:"cancel_deadline" dc:"Hội viên tự hủy được trước thời điểm này"`
 	Bookable       bool                  `json:"bookable"        dc:"Trong khoảng được đặt trước (booking.advance_days), chưa bắt đầu và hội viên không bị khóa đặt lớp"`
+	// NotBookableReason: "" khi bookable=true; ngược lại một trong STARTED, BLOCKED, OUT_OF_RANGE, HOLIDAY,
+	// TRAINER_LEAVE, NO_SUBSCRIPTION, FULL. Lớp hết chỗ vẫn bookable (vào danh sách chờ) nên FULL hiện không phát sinh.
+	NotBookableReason string `json:"not_bookable_reason" dc:"Lý do không đặt được (rỗng khi bookable=true)"`
 }
 
 // Booking: lượt đặt lớp của hội viên kèm hạn tự hủy.

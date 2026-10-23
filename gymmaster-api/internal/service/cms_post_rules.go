@@ -2,10 +2,12 @@ package service
 
 import (
 	"regexp"
+	"strings"
 	"time"
 	"unicode/utf8"
 
 	"gymmaster-api/internal/entity"
+	"gymmaster-api/internal/pkg/htmlsafe"
 	"gymmaster-api/internal/pkg/rescode"
 )
 
@@ -35,6 +37,27 @@ func validatePostSlug(slug string) error {
 		return rescode.New(rescode.BadRequest, "Đường dẫn bài viết chỉ gồm chữ thường không dấu (a-z), số và dấu gạch ngang '-'")
 	}
 	return nil
+}
+
+// validatePostTitle: tiêu đề (đã trim) bắt buộc, tối đa 255 ký tự.
+func validatePostTitle(title string) error {
+	if title == "" {
+		return rescode.New(rescode.BadRequest, "Vui lòng nhập tiêu đề bài viết")
+	}
+	if utf8.RuneCountInString(title) > 255 {
+		return rescode.New(rescode.BadRequest, "Tiêu đề tối đa 255 ký tự")
+	}
+	return nil
+}
+
+// sanitizePostContent lọc HTML nội dung bài viết theo allowlist (bỏ script, on*, javascript:...)
+// trước khi lưu; nội dung chỉ còn rỗng sau khi lọc → 400.
+func sanitizePostContent(raw string) (string, error) {
+	content := strings.TrimSpace(htmlsafe.Sanitize(raw))
+	if content == "" {
+		return "", rescode.New(rescode.BadRequest, "Vui lòng nhập nội dung bài viết")
+	}
+	return content, nil
 }
 
 func validatePostCategory(category string) error {

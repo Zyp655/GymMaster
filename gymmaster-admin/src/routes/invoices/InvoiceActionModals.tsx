@@ -8,7 +8,7 @@ import {
   useRefundInvoice,
   useVoidInvoice,
 } from '@/routes/subscriptions/queries';
-import { setFormError, showError } from '@/utils/errors';
+import { setFormError, showError, validateForm } from '@/utils/errors';
 import { formatMoney } from '@/utils/format';
 import type { InvoiceLike } from './utils';
 
@@ -31,7 +31,8 @@ export function CollectModal({ open, invoice, onClose }: InvoiceModalProps) {
 
   const submit = async () => {
     if (!invoice) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     const data = toPaymentInput(v);
     if (!data) return;
     collect.mutate(
@@ -90,7 +91,8 @@ export function RefundModal({ open, invoice, onClose }: InvoiceModalProps) {
 
   const submit = async () => {
     if (!invoice) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     modal.confirm({
       title: `Hoàn ${formatMoney(v.amount)} cho hóa đơn ${invoice.invoice_no}?`,
       content: 'Hoàn tiền không tự hủy gói tập. Muốn hủy gói kèm hoàn tiền, dùng “Hủy gói”.',
@@ -170,7 +172,8 @@ export function VoidModal({ open, invoice, onClose }: InvoiceModalProps) {
 
   const submit = async () => {
     if (!invoice) return;
-    const v = await form.validateFields();
+    const v = await validateForm(form);
+    if (!v) return;
     modal.confirm({
       title: `Hủy hóa đơn ${invoice.invoice_no}?`,
       content:

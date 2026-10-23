@@ -25,7 +25,12 @@ import { PERM } from '@/constants/permissions';
 import { usePermission } from '@/hooks/usePermission';
 import { getErrorMessage, showError } from '@/utils/errors';
 import { API_DATE_FORMAT, DATE_FORMAT } from '@/utils/format';
-import { BOOKING_SOURCE_LABEL, BOOKING_STATUS_MAP, weekdayName } from './constants';
+import {
+  BOOKING_SOURCE_LABEL,
+  BOOKING_STATUS_MAP,
+  scheduleTrainerText,
+  weekdayName,
+} from './constants';
 import { useCancelBooking } from './queries';
 
 export interface MemberBookingsTabProps {
@@ -104,7 +109,7 @@ export default function MemberBookingsTab({ memberId }: MemberBookingsTabProps) 
             </Typography.Text>
             <div>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {b.trainer_name} · {b.room_name}
+                {scheduleTrainerText(b)} · {b.room_name}
               </Typography.Text>
             </div>
           </div>
@@ -136,8 +141,8 @@ export default function MemberBookingsTab({ memberId }: MemberBookingsTabProps) 
       render: (_, b) => (
         <Space size={4} wrap>
           <StatusTag status={b.status} map={BOOKING_STATUS_MAP} />
-          {b.status === 'WAITLIST' && b.waitlist_position && (
-            <Tag bordered={false}>#{b.waitlist_position}</Tag>
+          {b.status === 'WAITLIST' && (b.waitlist_rank ?? b.waitlist_position) && (
+            <Tag bordered={false}>#{b.waitlist_rank ?? b.waitlist_position}</Tag>
           )}
           {b.schedule_status === 'CANCELLED' && (
             <Tag color="red" bordered={false}>

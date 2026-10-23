@@ -14,4 +14,3 @@ type Branch struct {
 }
 
 func (Branch) TableName() string { return "branches" }
-

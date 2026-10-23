@@ -51,7 +51,7 @@ func OnlinePaymentServiceOf(d *Deps) service.OnlinePaymentService {
 		cron.Register(cron.Job{
 			Name:        service.JobExpireOnlineTxns,
 			Spec:        "*/15 * * * *",
-			Description: "Chuyển các giao dịch thanh toán trực tuyến VNPay chờ quá 15 phút sang EXPIRED",
+			Description: "Chuyển các giao dịch thanh toán trực tuyến VNPay chờ quá 15 phút sang Hết hạn",
 			Run: func(ctx context.Context) (int, error) {
 				return s.ExpirePendingTxns(ctx, time.Now())
 			},

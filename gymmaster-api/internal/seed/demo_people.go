@@ -184,6 +184,9 @@ func (g *demoGen) genRooms() {
 }
 
 // genShifts: lịch ca tuần này + tuần sau.
+// demoShiftHistoryWeeks: số tuần ca làm trong quá khứ (làm nguồn cho chấm công & bảng lương mẫu).
+const demoShiftHistoryWeeks = 16
+
 func (g *demoGen) genShifts() {
 	monday := addDays(g.today, -(isoWeekday(g.today) - 1))
 	for _, b := range g.branches {
@@ -191,22 +194,23 @@ func (g *demoGen) genShifts() {
 		if b.idx != 2 {
 			mid = 13*60 + 30
 		}
-		for di := 0; di < 14; di++ {
+		for di := -7 * demoShiftHistoryWeeks; di < 14; di++ {
 			d := addDays(monday, di)
 			wd := isoWeekday(d)
+			k := di + 7*demoShiftHistoryWeeks // chỉ số không âm để xoay vòng lễ tân/HLV
 			if wd <= 6 {
 				g.shifts = append(g.shifts, &dShift{b, b.manager, atMin(d, 8*60), atMin(d, 17*60), "Ca hành chính"})
 			}
 			n := len(b.receps)
-			morning := b.receps[di%n]
-			evening := b.receps[(di+1)%n]
+			morning := b.receps[k%n]
+			evening := b.receps[(k+1)%n]
 			g.shifts = append(g.shifts, &dShift{b, morning, atMin(d, b.open), atMin(d, mid), "Ca sáng"})
 			g.shifts = append(g.shifts, &dShift{b, evening, atMin(d, mid), atMin(d, b.close), "Ca chiều"})
 			for ti, t := range b.trainers {
 				if (wd+ti)%7 == 0 { // mỗi HLV nghỉ một ngày/tuần
 					continue
 				}
-				if (ti+di/7)%2 == 0 {
+				if (ti+k/7)%2 == 0 {
 					g.shifts = append(g.shifts, &dShift{b, t, atMin(d, b.open), atMin(d, mid), "Ca sáng"})
 				} else {
 					g.shifts = append(g.shifts, &dShift{b, t, atMin(d, mid), atMin(d, b.close), "Ca chiều"})

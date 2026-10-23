@@ -207,6 +207,17 @@ func (s *onlinePaymentService) CheckoutSubscription(ctx context.Context, req *v1
 	if branchID == 0 {
 		branchID = member.HomeBranchID
 	}
+	// Gói giá 0đ không bán trực tuyến (tránh tự gia hạn miễn phí không giới hạn) – đăng ký tại quầy.
+	plan, err := s.repo.FindPlanByID(ctx, req.PlanID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, rescode.New(rescode.NotFound, "Không tìm thấy gói tập")
+		}
+		return nil, err
+	}
+	if roundMoneyVND(plan.Price) <= 0 {
+		return nil, rescode.New(rescode.BadRequest, "Gói tập miễn phí không đăng ký trực tuyến được, vui lòng liên hệ quầy lễ tân")
+	}
 
 	// Nâng quyền tạm thời trên context nội bộ để SubscriptionService.Sell lập gói PENDING + hóa đơn UNPAID cho chính hội viên này.
 	sellCtx := reqctx.WithAuth(ctx, &token.Payload{
@@ -369,6 +380,12 @@ func (s *onlinePaymentService) HandleIPN(ctx context.Context, params map[string]
 			// VNPay gọi lại IPN cho giao dịch đã xử lý → 02 (Order already confirmed), không ghi trùng.
 			res = &v1.VNPayIPNRes{RspCode: VNPayRspAlreadyConfirmed, Message: "Order already confirmed"}
 			return nil
+		case entity.OnlineTxnExpired:
+			// Giao dịch hết hạn đã nhận IPN kết quả (thất bại) trước đó → đã chốt, IPN sau (kể cả 00) trả 02 và giữ EXPIRED.
+			if onlineTxnHasIPN(txn) {
+				res = &v1.VNPayIPNRes{RspCode: VNPayRspAlreadyConfirmed, Message: "Order already confirmed"}
+				return nil
+			}
 		}
 
 		now := s.now()
@@ -489,6 +506,12 @@ func (s *onlinePaymentService) HandleIPN(ctx context.Context, params map[string]
 	return res, nil
 }
 
+// onlineTxnHasIPN: giao dịch đã từng nhận IPN (raw_ipn đã ghi).
+func onlineTxnHasIPN(txn *entity.OnlinePaymentTxn) bool {
+	raw := strings.TrimSpace(string(txn.RawIPN))
+	return raw != "" && raw != "null" && raw != "{}"
+}
+
 // onlineIsBusinessErr: lỗi nghiệp vụ có mã 4xxxx (từ chối hợp lệ) – khác lỗi hệ thống/DB.
 func onlineIsBusinessErr(err error) bool {
 	c := gerror.Code(err).Code()
@@ -517,20 +540,28 @@ func (s *onlinePaymentService) VerifyReturn(ctx context.Context, params map[stri
 		out.Message = "Giao dịch thanh toán không thành công"
 	}
 
-	if txn, err := s.repo.FindByTxnRef(ctx, txnRef, false); err == nil && txn != nil {
-		out.InvoiceID = txn.InvoiceID
-		out.Amount = txn.Amount
-		if inv, invErr := s.invoices.FindInvoice(ctx, txn.InvoiceID); invErr == nil && inv != nil {
-			out.InvoiceNo = inv.InvoiceNo
-		}
-		switch txn.Status {
-		case entity.OnlineTxnNeedsRefund:
-			out.Success = false
-			out.Message = "Hóa đơn đã được xử lý trước đó, phòng tập sẽ liên hệ đối soát hoàn tiền"
-		case entity.OnlineTxnFailed, entity.OnlineTxnExpired:
-			out.Success = false
-			out.Message = "Giao dịch thanh toán không thành công hoặc đã hết hạn"
-		}
+	txn, err := s.repo.FindByTxnRef(ctx, txnRef, false)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if txn == nil || err != nil {
+		// Không có giao dịch tương ứng trong hệ thống → không được báo "thành công" dù chữ ký hợp lệ.
+		out.Success = false
+		out.Message = "Không tìm thấy giao dịch thanh toán, vui lòng kiểm tra lại hóa đơn hoặc liên hệ phòng tập"
+		return out, nil
+	}
+	out.InvoiceID = txn.InvoiceID
+	out.Amount = txn.Amount
+	if inv, invErr := s.invoices.FindInvoice(ctx, txn.InvoiceID); invErr == nil && inv != nil {
+		out.InvoiceNo = inv.InvoiceNo
+	}
+	switch txn.Status {
+	case entity.OnlineTxnNeedsRefund:
+		out.Success = false
+		out.Message = "Hóa đơn đã được xử lý trước đó, phòng tập sẽ liên hệ đối soát hoàn tiền"
+	case entity.OnlineTxnFailed, entity.OnlineTxnExpired:
+		out.Success = false
+		out.Message = "Giao dịch thanh toán không thành công hoặc đã hết hạn"
 	}
 	return out, nil
 }

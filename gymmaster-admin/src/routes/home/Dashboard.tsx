@@ -14,7 +14,7 @@ import {
   TeamOutlined,
   UserAddOutlined,
 } from '@ant-design/icons';
-import { Pie } from '@ant-design/charts';
+import { Pie } from '@/components/Charts';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
@@ -34,6 +34,11 @@ import { useWorkingBranch } from '@/hooks/useWorkingBranch';
 import { useThemeMode } from '@/theme';
 import { formatMoney, formatNumber } from '@/utils/format';
 import { summarizeBranches } from './dashboardStats';
+
+/** Cùng định nghĩa với trang Mật độ phòng tập (API `checkins.present`). */
+const PRESENT_HELP =
+  'Số hội viên đang tập: lượt check-in hợp lệ trong 3 giờ gần nhất và chưa check-out ' +
+  '(cùng cách tính với trang Mật độ phòng tập).';
 
 const { Title, Text } = Typography;
 
@@ -116,14 +121,17 @@ export default function Dashboard() {
     },
   });
   // User bị giới hạn chi nhánh → chỉ đếm các chi nhánh được phân công.
-  const branchStats = isGlobalUser
-    ? globalBranchStats
-    : {
-        data: branchOptions.data
-          ? summarizeBranches(branchOptions.data, allowedBranchIds)
-          : undefined,
-        isLoading: branchOptions.isLoading,
-      };
+  // Không có branch.view → không thống kê (danh sách public không đủ dữ liệu trạng thái).
+  const branchStats = !canBranch
+    ? { data: undefined, isLoading: false }
+    : isGlobalUser
+      ? globalBranchStats
+      : {
+          data: branchOptions.data
+            ? summarizeBranches(branchOptions.data, allowedBranchIds)
+            : undefined,
+          isLoading: branchOptions.isLoading,
+        };
 
   const overview = useQuery({
     queryKey: [reportApi.key, 'overview', branchId ?? null],
@@ -227,11 +235,13 @@ export default function Dashboard() {
             value={canReport ? ov?.checkins.today : canCheckin ? checkinFallback.data?.total : '—'}
             loading={canReport ? overview.isLoading : canCheckin && checkinFallback.isLoading}
             caption={
-              canReport && ov
-                ? `${formatNumber(ov.checkins.present)} đang trong phòng tập`
-                : canReport || canCheckin
-                  ? undefined
-                  : NO_PERM_CAPTION
+              canReport && ov ? (
+                <HelpLabel help={PRESENT_HELP}>
+                  {`${formatNumber(ov.checkins.present)} đang tập (3 giờ gần nhất)`}
+                </HelpLabel>
+              ) : canReport || canCheckin ? undefined : (
+                NO_PERM_CAPTION
+              )
             }
             onClick={canCheckin ? () => navigate('/app/checkins') : undefined}
           />

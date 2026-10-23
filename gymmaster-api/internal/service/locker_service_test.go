@@ -33,7 +33,7 @@ func newFakeLockerRepo() *fakeLockerRepo {
 		lockers: map[uint]*entity.Locker{},
 		rentals: map[uint]*entity.LockerRental{},
 		members: map[uint]*entity.Member{
-			10: {BaseEntity: entity.BaseEntity{ID: 10}, UserID: &uid, MemberCode: "HV00010", FullName: "Trần Thị B"},
+			10: {BaseEntity: entity.BaseEntity{ID: 10}, UserID: &uid, MemberCode: "HV00010", FullName: "Trần Thị B", Status: entity.MemberStatusActive},
 		},
 	}
 }
@@ -303,7 +303,9 @@ func TestLockerService_InvoiceVoidEndsRental(t *testing.T) {
 	repo.rentals[5] = &entity.LockerRental{ID: 5, LockerID: 1, MemberID: 10, Type: entity.LockerRentalMonthly, Status: entity.LockerRentalActive}
 	repo.rentals[6] = &entity.LockerRental{ID: 6, LockerID: 2, MemberID: 10, Type: entity.LockerRentalMonthly, Status: entity.LockerRentalActive}
 	inv := &entity.Invoice{}
-	ref := func(id uint) *entity.InvoiceItem { return &entity.InvoiceItem{ItemType: entity.InvoiceItemLocker, RefID: &id} }
+	ref := func(id uint) *entity.InvoiceItem {
+		return &entity.InvoiceItem{ItemType: entity.InvoiceItemLocker, RefID: &id}
+	}
 
 	require.NoError(t, svc.onInvoiceVoid(context.Background(), inv, ref(5)))
 	assert.Equal(t, entity.LockerRentalEnded, repo.rentals[5].Status)

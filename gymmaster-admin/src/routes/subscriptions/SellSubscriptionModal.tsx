@@ -32,7 +32,7 @@ import StatusTag from '@/components/StatusTag';
 import { SUBSCRIPTION_STATUS_MAP } from '@/constants/status';
 import { useBranchOptions } from '@/hooks/useBranchOptions';
 import { useWorkingBranch } from '@/hooks/useWorkingBranch';
-import { getErrorMessage, showError } from '@/utils/errors';
+import { getErrorMessage, showError, validateForm } from '@/utils/errors';
 import { DATE_FORMAT, formatDate, formatMoney, toApiDate } from '@/utils/format';
 import PaymentFields from './PaymentFields';
 import { DEFAULT_PAYMENT, toPaymentInput } from './payment';
@@ -193,7 +193,8 @@ export default function SellSubscriptionModal({
 
   const submit = async () => {
     if (!quoteBody || !quote) return;
-    const values = await form.validateFields();
+    const values = await validateForm(form);
+    if (!values) return;
     sell.mutate(
       { ...quoteBody, note: values.note?.trim() || '', payment: toPaymentInput(values.payment) },
       {

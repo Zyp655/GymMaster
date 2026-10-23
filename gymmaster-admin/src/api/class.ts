@@ -54,6 +54,9 @@ export interface ClassSchedule {
   room_name: string;
   trainer_id: number;
   trainer_name: string;
+  /** HLV dạy thay (null/không có = HLV gốc dạy). */
+  substitute_trainer_id?: number | null;
+  substitute_trainer_name?: string;
   start_at: string;
   end_at: string;
   duration_min: number;
@@ -161,6 +164,8 @@ export interface ClassBooking {
   subscription_id: number;
   status: BookingStatus;
   waitlist_position: number | null;
+  /** Thứ hạng hiện tại trong danh sách chờ (1, 2, …) – ưu tiên hiển thị thay waitlist_position. */
+  waitlist_rank?: number | null;
   source: BookingSource;
   booked_at: string;
   cancelled_at: string | null;
@@ -173,6 +178,8 @@ export interface ClassBooking {
   room_name: string;
   trainer_id: number;
   trainer_name: string;
+  substitute_trainer_id?: number | null;
+  substitute_trainer_name?: string;
   start_at: string;
   end_at: string;
   schedule_status: ClassScheduleStatus;

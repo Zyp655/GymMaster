@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -98,6 +99,11 @@ type (
 		CreateExpense(ctx context.Context, e *entity.Expense) error
 		UpdateExpense(ctx context.Context, e *entity.Expense) error
 		DeleteExpense(ctx context.Context, id uint) error
+		// SetExpenseStatus đổi trạng thái có điều kiện (UPDATE ... WHERE status = from); false = trạng thái đã bị
+		// người khác đổi trước (duyệt/từ chối đồng thời) → không ghi đè.
+		SetExpenseStatus(ctx context.Context, id uint, from, to string, approvedBy *uint, at time.Time) (bool, error)
+		// FindBranchStatus trả trạng thái chi nhánh (ACTIVE/INACTIVE); gorm.ErrRecordNotFound nếu không tồn tại/đã xóa.
+		FindBranchStatus(ctx context.Context, id uint) (string, error)
 
 		FindOpenCashSession(ctx context.Context, branchID uint) (*entity.CashSession, error)
 		FindCashSessionByID(ctx context.Context, id uint) (*CashSessionRow, error)
@@ -224,6 +230,28 @@ func (r *financeRepository) DeleteExpense(ctx context.Context, id uint) error {
 	return postgres.Conn(ctx, r.db).Delete(&entity.Expense{}, id).Error
 }
 
+func (r *financeRepository) SetExpenseStatus(ctx context.Context, id uint, from, to string, approvedBy *uint, at time.Time) (bool, error) {
+	res := postgres.Conn(ctx, r.db).Model(&entity.Expense{}).
+		Where("id = ? AND status = ?", id, from).
+		Updates(map[string]any{"status": to, "approved_by": approvedBy, "updated_at": at})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+func (r *financeRepository) FindBranchStatus(ctx context.Context, id uint) (string, error) {
+	var rows []string
+	if err := postgres.Conn(ctx, r.db).Table("branches").
+		Where("id = ? AND deleted_at IS NULL", id).Limit(1).Pluck("status", &rows).Error; err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", gorm.ErrRecordNotFound
+	}
+	return rows[0], nil
+}
+
 func (r *financeRepository) FindOpenCashSession(ctx context.Context, branchID uint) (*entity.CashSession, error) {
 	var cs entity.CashSession
 	err := postgres.Conn(ctx, r.db).
@@ -328,15 +356,23 @@ func (r *financeRepository) CalcProfitLoss(ctx context.Context, branchIDs []uint
 		ItemType string
 		Amount   float64
 	}
-	iq := db.Table("invoice_items ii").
-		Select("ii.item_type, COALESCE(SUM(ii.amount), 0) AS amount").
+	// Doanh thu theo dòng hóa đơn, KHÔNG gồm phần nợ đã xóa (write_off_amount – khi hủy gói còn nợ): phần này không
+	// bao giờ được thu nên không phải doanh thu. Mỗi dòng nhận phần invoices.total theo tỷ lệ amount / Σ amount của
+	// hóa đơn (= amount − phần write_off phân bổ) → Σ doanh thu dòng = Σ invoices.total (cùng gốc với báo cáo
+	// Doanh thu/KPI: hóa đơn thu 300k rồi xóa nợ 1,05tr chỉ tính 300k; P&L vẫn tính theo ngày lập HĐ).
+	lines := db.Table("invoice_items ii").
+		Select(`ii.item_type, ii.amount, i.total AS invoice_total,
+			SUM(ii.amount) OVER (PARTITION BY ii.invoice_id) AS invoice_items_total`).
 		Joins("JOIN invoices i ON i.id = ii.invoice_id").
 		Where("i.status IN ? AND i.issued_at >= ? AND i.issued_at < ?",
 			[]string{entity.InvoiceStatusPaid, entity.InvoiceStatusPartial, entity.InvoiceStatusRefunded}, from, endExclusive)
 	if branchIDs != nil {
-		iq = iq.Where("i.branch_id IN ?", branchIDs)
+		lines = lines.Where("i.branch_id IN ?", branchIDs)
 	}
-	if err := iq.Group("ii.item_type").Scan(&itemRevs).Error; err != nil {
+	iq := db.Table("(?) x", lines).
+		Select(`x.item_type,
+			COALESCE(SUM(ROUND(COALESCE(x.amount * x.invoice_total / NULLIF(x.invoice_items_total, 0), 0), 2)), 0) AS amount`)
+	if err := iq.Group("x.item_type").Scan(&itemRevs).Error; err != nil {
 		return nil, err
 	}
 	for _, ir := range itemRevs {
@@ -405,22 +441,56 @@ func (r *financeRepository) CalcProfitLoss(ctx context.Context, branchIDs []uint
 		return nil, err
 	}
 
-	// Chi phí lương (payroll_items của payrolls LOCKED/PAID trong khoảng kỳ YYYY-MM)
+	// Chi phí lương (payroll_items của payrolls LOCKED/PAID trong khoảng kỳ YYYY-MM) – phân bổ theo số ngày:
+	// kỳ báo cáo chỉ phủ một phần tháng thì chỉ tính phần quỹ lương tương ứng (vd 1/31 ngày) thay vì cả tháng.
 	fromPeriod := from.Format("2006-01")
 	toPeriod := to.Format("2006-01")
+	var payrollByPeriod []struct {
+		Period string
+		Amount float64
+	}
 	pq := db.Table("payroll_items pi").
-		Select("COALESCE(SUM(pi.total), 0)").
+		Select("p.period, COALESCE(SUM(pi.total), 0) AS amount").
 		Joins("JOIN payrolls p ON p.id = pi.payroll_id").
 		Where("p.status IN ? AND p.period >= ? AND p.period <= ?",
 			[]string{entity.PayrollStatusLocked, entity.PayrollStatusPaid}, fromPeriod, toPeriod)
 	if branchIDs != nil {
 		pq = pq.Where("p.branch_id IN ?", branchIDs)
 	}
-	if err := pq.Scan(&out.PayrollExpenses).Error; err != nil {
+	if err := pq.Group("p.period").Scan(&payrollByPeriod).Error; err != nil {
 		return nil, err
+	}
+	for _, pp := range payrollByPeriod {
+		out.PayrollExpenses += math.Round(pp.Amount * PayrollPeriodShare(pp.Period, from, to))
 	}
 
 	return out, nil
+}
+
+// PayrollPeriodShare: tỷ lệ (0..1) số ngày của kỳ lương `period` (YYYY-MM) nằm trong khoảng ngày [from, to]
+// (tính cả hai đầu). Dùng để phân bổ quỹ lương tháng vào báo cáo kỳ lẻ ngày.
+func PayrollPeriodShare(period string, from, to time.Time) float64 {
+	start, err := time.ParseInLocation("2006-01", period, from.Location())
+	if err != nil {
+		return 0
+	}
+	end := start.AddDate(0, 1, 0) // exclusive
+	day := func(t time.Time) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, from.Location())
+	}
+	lo, hi := day(from), day(to).AddDate(0, 0, 1)
+	if start.After(lo) {
+		lo = start
+	}
+	if end.Before(hi) {
+		hi = end
+	}
+	if !hi.After(lo) {
+		return 0
+	}
+	overlap := math.Round(hi.Sub(lo).Hours() / 24)
+	total := math.Round(end.Sub(start).Hours() / 24)
+	return overlap / total
 }
 
 func (r *financeRepository) FindInvoiceByID(ctx context.Context, id uint) (*entity.Invoice, error) {

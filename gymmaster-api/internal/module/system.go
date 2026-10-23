@@ -44,7 +44,7 @@ func RegisterMemberNotification(d *Deps, member *ghttp.RouterGroup) {
 func registerSystemJobs(t *service.JobTasks) {
 	cron.Register(cron.Job{
 		Name: service.JobExpireSubscriptions, Spec: "5 0 * * *",
-		Description: "Chuyển gói tập quá hạn sang EXPIRED, hủy gói chờ thanh toán quá 3 ngày, báo hội viên",
+		Description: "Chuyển gói tập quá hạn sang Hết hạn, hủy gói chờ thanh toán quá 3 ngày, báo hội viên",
 		Run:         t.ExpireSubscriptions,
 	})
 	cron.Register(cron.Job{
@@ -59,7 +59,7 @@ func registerSystemJobs(t *service.JobTasks) {
 	})
 	cron.Register(cron.Job{
 		Name: service.JobMarkClassNoShows, Spec: "*/15 * * * *",
-		Description: "Đánh dấu NO_SHOW lượt đặt lớp đã kết thúc, khóa đặt lớp khi vắng quá giới hạn",
+		Description: "Đánh dấu Vắng mặt lượt đặt lớp đã kết thúc, khóa đặt lớp khi vắng quá giới hạn",
 		Run:         t.MarkClassNoShows,
 	})
 	cron.Register(cron.Job{

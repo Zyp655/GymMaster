@@ -250,3 +250,22 @@ func TestInvoiceSummarize(t *testing.T) {
 	assert.Equal(t, "TRANSFER", s.ByMethod[1].Method)
 	assert.Equal(t, 0.0, s.ByMethod[1].Amount)
 }
+
+// FIN-INV-20/21, FIN-RPT-06 (B4): sổ thu tiền luôn có VNPAY và tổng = Σ mọi phiếu thu.
+func TestInvoiceLedgerSummarizeIncludesVNPay(t *testing.T) {
+	sums := []repository.PaymentMethodTotal{{Method: "CASH", Amount: 100, Count: 2}, {Method: "VNPAY", Amount: 70, Count: 1}}
+	s := invoiceSummarizeMethods(sums, invoiceLedgerMethods)
+	assert.Equal(t, 170.0, s.TotalAmount)
+	assert.Equal(t, int64(3), s.Count)
+	require.Len(t, s.ByMethod, 4)
+	assert.Equal(t, "VNPAY", s.ByMethod[3].Method)
+	assert.Equal(t, 70.0, s.ByMethod[3].Amount)
+	// Không có VNPay vẫn hiện dòng VNPAY = 0.
+	s = invoiceSummarizeMethods(sums[:1], invoiceLedgerMethods)
+	require.Len(t, s.ByMethod, 4)
+	assert.Equal(t, 0.0, s.ByMethod[3].Amount)
+	// invoiceSummarize (POS) giữ 3 phương thức, nhưng phương thức lạ phát sinh vẫn được cộng vào tổng.
+	s = invoiceSummarize(sums)
+	require.Len(t, s.ByMethod, 4)
+	assert.Equal(t, 170.0, s.TotalAmount)
+}

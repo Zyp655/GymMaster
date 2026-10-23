@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import {
   BellAlertIcon,
@@ -16,6 +17,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { env } from '@/env';
 import { formatDateTime } from '@/lib/format';
+import { hasVisibleText } from '@/lib/text';
 import {
   portalKeys,
   useMemberCalendarTokenQuery,
@@ -28,17 +30,14 @@ import {
 } from '../queries';
 import type { NotificationPrefItem } from '../types';
 
-const PREF_LABELS: Record<string, string> = {
-  PAYMENT_SUCCESS: 'Thanh toán & Hóa đơn thành công (Bắt buộc)',
-  SUBSCRIPTION_EXPIRING: 'Nhắc gia hạn gói tập sắp hết hạn',
-  CLASS_REMINDER: 'Nhắc lịch lớp học nhóm đã đặt',
-  PT_REMINDER: 'Nhắc lịch tập PT 1-1',
-  PROMOTION: 'Chương trình khuyến mãi & Ưu đãi',
-  BIRTHDAY: 'Lời chúc & Quà tặng sinh nhật',
-  SYSTEM: 'Thông báo bảo mật & Hệ thống (Bắt buộc)',
-};
-
 export function MessagesView() {
+  const t = useTranslations('portal.messages');
+  const tPref = useTranslations('portal.messages.prefTypes');
+  const tContract = useTranslations('portal.status.ptContract');
+  /** Nhãn tiếng Việt cho trạng thái hợp đồng PT; mã lạ (chưa có bản dịch) giữ nguyên. */
+  const contractLabel = (status: string) =>
+    tContract.has(status as never) ? tContract(status as never) : status;
+  const prefLabel = (type: string) => (tPref.has(type as never) ? tPref(type as never) : type);
   const [selectedConvId, setSelectedConvId] = useState<number | null>(null);
   const [chatText, setChatText] = useState('');
 
@@ -74,14 +73,17 @@ export function MessagesView() {
   const prefsQuery = useMemberNotificationPreferencesQuery();
   const savePrefsMut = useSaveMemberNotificationPreferencesMutation();
 
+  // Chỉ gồm ký tự vô hình (zero-width…) coi như rỗng – không gửi bong bóng chat trống.
+  const canSend = hasVisibleText(chatText);
+
   const handleSend = () => {
-    if (!activeConvId || !chatText.trim()) return;
+    if (!activeConvId || !canSend) return;
     sendMut.mutate(
       { conversationId: activeConvId, content: chatText.trim() },
       {
         onSuccess: () => setChatText(''),
         onError: err => {
-          toast.error(err instanceof Error ? err.message : 'Không thể gửi tin nhắn');
+          toast.error(err instanceof Error ? err.message : t('sendFailed'));
         },
       },
     );
@@ -96,7 +98,7 @@ export function MessagesView() {
         : item,
     );
     savePrefsMut.mutate(next, {
-      onSuccess: () => toast.success('Đã lưu tùy chọn thông báo'),
+      onSuccess: () => toast.success(t('prefsSaved')),
     });
   };
 
@@ -112,33 +114,26 @@ export function MessagesView() {
   const copyIcsUrl = () => {
     if (!icsUrl) return;
     void navigator.clipboard.writeText(icsUrl);
-    toast.success('Đã sao chép đường dẫn lịch .ics');
+    toast.success(t('icsCopied'));
   };
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-h2 font-bold text-primary">
-          Tin nhắn PT, Đồng bộ Lịch & Tùy chọn Thông báo
-        </h1>
-        <p className="mt-1 text-body text-secondary">
-          Trao đổi trực tiếp với Huấn luyện viên cá nhân, đồng bộ lịch tập .ics sang Google/Apple
-          Calendar và tùy chỉnh thông báo.
-        </p>
+        <h1 className="text-h2 font-bold text-primary">{t('title')}</h1>
+        <p className="mt-1 text-body text-secondary">{t('subtitle')}</p>
       </div>
 
       {/* Khu vực Chat HLV ↔ Hội viên */}
       <Card className="p-5">
         <div className="mb-4 flex items-center gap-2">
           <ChatBubbleLeftRightIcon className="size-5 text-brand-600" />
-          <h2 className="text-h4 font-semibold text-primary">
-            Trò chuyện cùng Huấn luyện viên (PT)
-          </h2>
+          <h2 className="text-h4 font-semibold text-primary">{t('chatTitle')}</h2>
         </div>
 
         {conversations.length === 0 ? (
-          <div className="text-sm rounded-xl border border-dashed border-line p-6 text-center text-secondary">
-            Bạn chưa có hợp đồng PT đang hoạt động để mở hội thoại với Huấn luyện viên.
+          <div className="rounded-xl border border-dashed border-line p-6 text-center text-sm text-secondary">
+            {t('noConversation')}
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-3">
@@ -157,13 +152,18 @@ export function MessagesView() {
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-primary">HLV {conv.trainer_name}</span>
+                      <span className="font-semibold text-primary">
+                        {t('trainerName', { name: conv.trainer_name })}
+                      </span>
                       {conv.unread_count > 0 ? (
-                        <Badge variant="brand">{conv.unread_count} mới</Badge>
+                        <Badge variant="brand">{t('unread', { count: conv.unread_count })}</Badge>
                       ) : null}
                     </div>
                     <div className="mt-1 text-xs text-secondary">
-                      Còn {conv.remaining_sessions} buổi · {conv.contract_status}
+                      {t('remainingSessions', {
+                        count: conv.remaining_sessions,
+                        status: contractLabel(conv.contract_status),
+                      })}
                     </div>
                     {conv.last_message_preview ? (
                       <div className="mt-1 truncate text-xs text-tertiary">
@@ -181,9 +181,7 @@ export function MessagesView() {
                 className="max-h-80 min-h-56 space-y-3 overflow-y-auto rounded-xl bg-subtle/50 p-4"
               >
                 {messages.length === 0 ? (
-                  <p className="text-sm text-center text-secondary">
-                    Chưa có tin nhắn nào. Hãy gửi lời chào tới HLV của bạn!
-                  </p>
+                  <p className="text-center text-sm text-secondary">{t('empty')}</p>
                 ) : (
                   messages.map(m => {
                     const isMine = m.sender_role === 'MEMBER';
@@ -196,13 +194,17 @@ export function MessagesView() {
                           {m.sender_name} · {formatDateTime(m.created_at)}
                         </div>
                         <div
-                          className={`text-sm max-w-[80%] rounded-2xl px-3.5 py-2 ${
+                          className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${
                             isMine
                               ? 'bg-brand-600 text-white'
                               : 'border border-line bg-surface text-primary'
                           }`}
                         >
-                          {m.content}
+                          {hasVisibleText(m.content) ? (
+                            m.content
+                          ) : (
+                            <span className="italic opacity-80">{t('emptyContent')}</span>
+                          )}
                         </div>
                       </div>
                     );
@@ -217,11 +219,11 @@ export function MessagesView() {
                   onKeyDown={e => {
                     if (e.key === 'Enter') handleSend();
                   }}
-                  placeholder="Nhập câu hỏi về lịch tập, bài tập hoặc dinh dưỡng..."
+                  placeholder={t('placeholder')}
                 />
-                <Button onClick={handleSend} disabled={sendMut.isPending || !chatText.trim()}>
+                <Button onClick={handleSend} disabled={sendMut.isPending || !canSend}>
                   <PaperAirplaneIcon className="size-4" />
-                  Gửi
+                  {t('send')}
                 </Button>
               </div>
             </div>
@@ -233,34 +235,29 @@ export function MessagesView() {
       <Card className="p-5">
         <div className="mb-2 flex items-center gap-2">
           <CalendarDaysIcon className="size-5 text-brand-600" />
-          <h2 className="text-h4 font-semibold text-primary">
-            Đồng bộ Lịch tập (.ics) sang Google Calendar / Apple Calendar
-          </h2>
+          <h2 className="text-h4 font-semibold text-primary">{t('icsTitle')}</h2>
         </div>
-        <p className="text-sm mb-4 text-secondary">
-          Sao chép liên kết iCalendar bên dưới để tự động đồng bộ các buổi tập PT và lớp học nhóm
-          sắp tới vào ứng dụng Lịch trên điện thoại của bạn.
-        </p>
+        <p className="mb-4 text-sm text-secondary">{t('icsDescription')}</p>
         <div className="flex flex-wrap items-center gap-2">
           <Input
             readOnly
-            value={icsUrl ?? 'Đang tạo liên kết .ics...'}
+            value={icsUrl ?? t('icsLoading')}
             className="max-w-xl font-mono text-xs"
           />
           <Button variant="outline" onClick={copyIcsUrl}>
             <ClipboardDocumentIcon className="size-4" />
-            Sao chép link .ics
+            {t('icsCopy')}
           </Button>
           <Button
             variant="ghost"
             onClick={() =>
               rotateCalMut.mutate(undefined, {
-                onSuccess: () => toast.success('Đã tạo mới mã token lịch .ics'),
+                onSuccess: () => toast.success(t('icsRotated')),
               })
             }
             disabled={rotateCalMut.isPending}
           >
-            Đổi mã token mới
+            {t('icsRotate')}
           </Button>
         </div>
       </Card>
@@ -269,11 +266,9 @@ export function MessagesView() {
       <Card className="p-5">
         <div className="mb-2 flex items-center gap-2">
           <BellAlertIcon className="size-5 text-brand-600" />
-          <h2 className="text-h4 font-semibold text-primary">Tùy chọn Kênh & Loại Thông báo</h2>
+          <h2 className="text-h4 font-semibold text-primary">{t('prefsTitle')}</h2>
         </div>
-        <p className="text-sm mb-4 text-secondary">
-          Bật hoặc tắt các nhóm thông báo không bắt buộc theo nhu cầu của bạn.
-        </p>
+        <p className="mb-4 text-sm text-secondary">{t('prefsDescription')}</p>
 
         <div className="divide-y divide-line">
           {(prefsQuery.data ?? [])
@@ -284,10 +279,8 @@ export function MessagesView() {
                 className="flex items-center justify-between gap-4 py-3"
               >
                 <div>
-                  <div className="text-sm font-medium text-primary">
-                    {PREF_LABELS[item.type] ?? item.type}
-                  </div>
-                  <div className="text-xs text-tertiary">Kênh: Thông báo trên ứng dụng & Email</div>
+                  <div className="text-sm font-medium text-primary">{prefLabel(item.type)}</div>
+                  <div className="text-xs text-tertiary">{t('prefsChannel')}</div>
                 </div>
                 <Button
                   size="sm"
@@ -295,7 +288,7 @@ export function MessagesView() {
                   disabled={item.mandatory || savePrefsMut.isPending}
                   onClick={() => togglePref(item)}
                 >
-                  {item.enabled ? 'Đang bật' : 'Đang tắt'}
+                  {item.enabled ? t('prefOn') : t('prefOff')}
                 </Button>
               </div>
             ))}

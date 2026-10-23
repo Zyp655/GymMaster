@@ -21,4 +21,3 @@ type IAuthV1 interface {
 	RegisterMember(ctx context.Context, req *v1.RegisterMemberReq) (res *v1.RegisterMemberRes, err error)
 	VerifyMemberOTP(ctx context.Context, req *v1.VerifyMemberOTPReq) (res *v1.VerifyMemberOTPRes, err error)
 }
-

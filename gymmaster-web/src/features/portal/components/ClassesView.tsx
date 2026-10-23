@@ -38,6 +38,7 @@ import {
   useClassesQuery,
   useMemberReviewsQuery,
 } from '../queries';
+import { notBookableReason, waitlistRank } from '../classes';
 import { PortalPageHeader } from './PortalPageHeader';
 import { PaginationControls } from './PaginationControls';
 import { BookingStatusBadge } from './PortalStatusBadge';
@@ -64,6 +65,7 @@ export function ClassesView({
   defaultTab = 'schedule',
 }: { defaultTab?: 'schedule' | 'bookings' } = {}) {
   const t = useTranslations('portal.classes');
+  const tReason = useTranslations('portal.classes.notBookableReasons');
   const toastError = useToastApiError();
 
   const [activeTab, setActiveTab] = useState<'schedule' | 'bookings'>(defaultTab);
@@ -253,9 +255,9 @@ export function ClassesView({
                         {myBooking ? (
                           <div className="flex items-center gap-1.5">
                             <BookingStatusBadge status={myBooking.status} />
-                            {myBooking.status === 'WAITLIST' && myBooking.waitlist_position ? (
+                            {myBooking.status === 'WAITLIST' && waitlistRank(myBooking) ? (
                               <Badge variant="outline">
-                                {t('waitlistPosition', { pos: myBooking.waitlist_position })}
+                                {t('waitlistPosition', { pos: waitlistRank(myBooking) ?? 0 })}
                               </Badge>
                             ) : null}
                           </div>
@@ -336,9 +338,7 @@ export function ClassesView({
                           onClick={() => void handleBook(item.id)}
                         >
                           {!item.bookable
-                            ? classesQuery.data?.booking_blocked_until
-                              ? t('blockedBtn')
-                              : t('notBookable')
+                            ? tReason(notBookableReason(item, classesQuery.data) ?? 'UNAVAILABLE')
                             : isBookingThis
                               ? t('booking')
                               : item.available_slots > 0
@@ -389,9 +389,9 @@ export function ClassesView({
                         {booking.class_type_name}
                       </h3>
                       <BookingStatusBadge status={booking.status} />
-                      {booking.status === 'WAITLIST' && booking.waitlist_position ? (
+                      {booking.status === 'WAITLIST' && waitlistRank(booking) ? (
                         <Badge variant="outline">
-                          {t('waitlistPosition', { pos: booking.waitlist_position })}
+                          {t('waitlistPosition', { pos: waitlistRank(booking) ?? 0 })}
                         </Badge>
                       ) : null}
                     </div>

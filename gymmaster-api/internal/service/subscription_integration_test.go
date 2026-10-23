@@ -280,3 +280,39 @@ func containsUint(s []uint, v uint) bool {
 	}
 	return false
 }
+
+// B1 (FIN-SUB-16): truy vấn ConsumedSubscriptions trên DB thật – hoàn HĐ gốc sau nâng cấp → 409; hủy HĐ nâng cấp
+// (khôi phục gói cũ) → hoàn được.
+func TestSubIT_RefundBlockedAfterUpgrade(t *testing.T) {
+	fx := subITSetup(t)
+	var plan2 uint
+	if err := fx.db.Raw(`INSERT INTO membership_plans (code, name, type, duration_days, price, access_scope, max_freeze_days, max_freeze_times)
+		VALUES (?, 'IT gói 6 tháng', 'TIME', 180, 2500000, 'SINGLE_BRANCH', 15, 1) RETURNING id`, fmt.Sprintf("ITU%d", time.Now().UnixNano()%1_000_000_000)).Scan(&plan2).Error; err != nil {
+		t.Fatalf("seed plan2: %v", err)
+	}
+	t.Cleanup(func() {
+		fx.db.Exec(`UPDATE subscriptions SET previous_id = NULL WHERE member_id = ?`, fx.memberID)
+		fx.db.Exec(`DELETE FROM subscription_events WHERE subscription_id IN (SELECT id FROM subscriptions WHERE plan_id = ?)`, plan2)
+		fx.db.Exec(`DELETE FROM subscriptions WHERE plan_id = ?`, plan2)
+		fx.db.Exec(`DELETE FROM membership_plans WHERE id = ?`, plan2)
+	})
+	sub, err := fx.subs.Sell(fx.ctx, v1.SellInput{MemberID: fx.memberID, PlanID: fx.planID, BranchID: fx.branchID},
+		&v1.PaymentInput{Amount: 1350000, Method: entity.PaymentCash})
+	if err != nil {
+		t.Fatalf("bán gói: %v", err)
+	}
+	up, err := fx.subs.Upgrade(fx.ctx, sub.ID, v1.UpgradeInput{PlanID: plan2})
+	if err != nil {
+		t.Fatalf("nâng cấp: %v", err)
+	}
+	_, err = fx.invoices.Refund(fx.ctx, *sub.InvoiceID, RefundInput{Amount: 1350000, Method: entity.PaymentCash, Reason: "IT"})
+	if codeOf(err) != 40900 {
+		t.Fatalf("hoàn HĐ gốc sau nâng cấp phải 409, có: %v", err)
+	}
+	if err := fx.invoices.Void(fx.ctx, *up.InvoiceID, "IT đổi ý"); err != nil {
+		t.Fatalf("hủy HĐ nâng cấp: %v", err)
+	}
+	if _, err := fx.invoices.Refund(fx.ctx, *sub.InvoiceID, RefundInput{Amount: 100000, Method: entity.PaymentCash, Reason: "IT"}); err != nil {
+		t.Fatalf("gói đã khôi phục phải hoàn được: %v", err)
+	}
+}

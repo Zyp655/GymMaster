@@ -1,4 +1,5 @@
 import { apiClient } from '@/lib/http';
+import { toOccupancyList } from './occupancy';
 import type { PublicBranch, PublicPlansRes } from '@/features/landing/types';
 import type { Paginated } from '@/types/api';
 import type {
@@ -225,22 +226,14 @@ export const getBranchOccupancy = async (): Promise<BranchOccupancy[]> => {
   const res = await apiClient.get<
     BranchOccupancy[] | BranchOccupancy | { items?: BranchOccupancy[] } | null
   >('/member/occupancy');
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if ('items' in res && Array.isArray(res.items)) return res.items;
-  if ('branch_id' in res || 'capacity' in res) return [res as BranchOccupancy];
-  return [];
+  return toOccupancyList(res);
 };
 
 export const getPublicBranchOccupancy = async (): Promise<BranchOccupancy[]> => {
   const res = await apiClient.get<
     BranchOccupancy[] | BranchOccupancy | { items?: BranchOccupancy[] } | null
   >('/public/branches/occupancy', { auth: false });
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if ('items' in res && Array.isArray(res.items)) return res.items;
-  if ('branch_id' in res || 'capacity' in res) return [res as BranchOccupancy];
-  return [];
+  return toOccupancyList(res);
 };
 
 export const getMemberAnnouncements = async (): Promise<AnnouncementItem[]> => {

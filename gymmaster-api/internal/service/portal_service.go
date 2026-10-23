@@ -542,6 +542,15 @@ func (s *portalService) Classes(ctx context.Context, branchID uint, from, to str
 	now := s.now()
 	lastDay := now.In(s.loc).AddDate(0, 0, advance).Format(consts.DateLayout)
 	blocked := m.BookingBlockedUntil != nil && m.BookingBlockedUntil.After(now)
+	// Gói đang hoạt động của hội viên – để báo NO_SUBSCRIPTION (bỏ qua nếu dịch vụ đặt lớp không hỗ trợ).
+	var subs []repository.ClassBookingSubscription
+	subsKnown := false
+	if sc, ok := s.d.Bookings.(portalClassSubscriptions); ok {
+		if subs, err = sc.MemberClassSubscriptions(ctx, m.ID); err != nil {
+			return nil, err
+		}
+		subsKnown = true
+	}
 	if blocked {
 		res.BookingBlockedUntil = m.BookingBlockedUntil
 	}
@@ -550,11 +559,20 @@ func (s *portalService) Classes(ctx context.Context, branchID uint, from, to str
 		if !r.StartAt.After(now) {
 			continue
 		}
-		schGuardErr := bookingCheckScheduleGuard(ctx, &r.ClassSchedule)
+		reason, err := portalNotBookableReason(ctx, r, now, blocked, lastDay, subs, subsKnown, s.loc)
+		if err != nil {
+			return nil, err
+		}
+		cs := classScheduleToRes(r)
+		// Hội viên thấy HLV THỰC DẠY (HLV dạy thay nếu đã phân công).
+		if r.SubstituteTrainerID != nil {
+			cs.TrainerID, cs.TrainerName = *r.SubstituteTrainerID, r.SubstituteTrainerName
+		}
 		item := &v1.ScheduleItem{
-			ClassSchedule:  classScheduleToRes(r),
-			CancelDeadline: r.StartAt.Add(-time.Duration(cancelMin) * time.Minute),
-			Bookable:       !blocked && r.StartAt.In(s.loc).Format(consts.DateLayout) <= lastDay && schGuardErr == nil,
+			ClassSchedule:     cs,
+			CancelDeadline:    r.StartAt.Add(-time.Duration(cancelMin) * time.Minute),
+			Bookable:          reason == "",
+			NotBookableReason: reason,
 		}
 		if b, ok := mine[r.ID]; ok {
 			item.MyBooking = ClassBookingToRes(b)
@@ -562,6 +580,52 @@ func (s *portalService) Classes(ctx context.Context, branchID uint, from, to str
 		res.Items = append(res.Items, item)
 	}
 	return res, nil
+}
+
+// Lý do không đặt được lớp trên cổng hội viên (not_bookable_reason).
+const (
+	portalNotBookableStarted  = "STARTED"
+	portalNotBookableBlocked  = "BLOCKED"
+	portalNotBookableOutRange = "OUT_OF_RANGE"
+	portalNotBookableHoliday  = "HOLIDAY"
+	portalNotBookableLeave    = "TRAINER_LEAVE"
+	portalNotBookableNoSub    = "NO_SUBSCRIPTION"
+	portalNotBookableFull     = "FULL" // dự phòng: lớp hết chỗ hiện vẫn đặt được (vào danh sách chờ)
+)
+
+// portalClassSubscriptions: dịch vụ đặt lớp cung cấp gói ACTIVE của hội viên (bookingService cài).
+type portalClassSubscriptions interface {
+	MemberClassSubscriptions(ctx context.Context, memberID uint) ([]repository.ClassBookingSubscription, error)
+}
+
+// portalNotBookableReason trả "" nếu hội viên đặt được buổi lớp, ngược lại mã lý do (theo thứ tự kiểm tra của Book).
+func portalNotBookableReason(ctx context.Context, r *entity.ClassScheduleDetail, now time.Time, blocked bool, lastDay string,
+	subs []repository.ClassBookingSubscription, subsKnown bool, loc *time.Location) (string, error) {
+	if !r.StartAt.After(now) {
+		return portalNotBookableStarted, nil
+	}
+	if blocked {
+		return portalNotBookableBlocked, nil
+	}
+	classDay := r.StartAt.In(loc).Format(consts.DateLayout)
+	if classDay > lastDay {
+		return portalNotBookableOutRange, nil
+	}
+	if err := bookingCheckScheduleGuard(ctx, &r.ClassSchedule); err != nil {
+		switch gerror.Code(err) {
+		case rescode.BranchHolidayClosed:
+			return portalNotBookableHoliday, nil
+		case rescode.TrainerOnLeave:
+			return portalNotBookableLeave, nil
+		}
+		return "", err
+	}
+	if subsKnown {
+		if _, err := bookingPickSubscription(subs, r.BranchID, classDay); err != nil {
+			return portalNotBookableNoSub, nil
+		}
+	}
+	return "", nil
 }
 
 func (s *portalService) booking(ctx context.Context, d *entity.ClassBookingDetail) *v1.Booking {
